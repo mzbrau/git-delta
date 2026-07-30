@@ -243,6 +243,15 @@ No advanced repository management.
 
 # Working Copy
 
+Two lists, following SourceTree:
+
+- Staged files
+- Unstaged files
+
+A partially staged file appears in both, once per list. The duplication is intentional. It is the honest representation of a file that has both staged content and further edits.
+
+Files can be dragged between the two lists to stage and unstage.
+
 Display:
 
 - Modified
@@ -262,6 +271,53 @@ Each file shows:
 - path
 - Git status
 - staged indicator
+
+---
+
+# Diff Target
+
+Git has three trees, and therefore three diffs:
+
+| Target | Command | Meaning |
+| --- | --- | --- |
+| `IndexToWorktree` | `git diff` | Unstaged changes |
+| `HeadToIndex` | `git diff --cached` | Staged changes |
+| `HeadToWorktree` | `git diff HEAD` | Everything, combined |
+
+## The target is derived, never toggled
+
+Selecting a file in Unstaged files shows `IndexToWorktree`.
+
+Selecting a file in Staged files shows `HeadToIndex`.
+
+There is no free-floating target control in the working copy. Every staging action is therefore unambiguous, because the diff on screen is by construction the one the patch applies to.
+
+## Why this is a correctness constraint, not a layout preference
+
+`git apply --cached` applies to the index, so patch context must match index content.
+
+For a partially staged file, a `HeadToWorktree` patch carries context from HEAD, which no longer matches the index. It fails to apply except by luck in untouched regions.
+
+## Inline hunk actions
+
+Following SourceTree, staging actions live in the diff itself, per hunk and per selected line range:
+
+- In `IndexToWorktree`: stage hunk, stage selected lines.
+- In `HeadToIndex`: unstage hunk, unstage selected lines.
+
+## Combined review mode
+
+`HeadToWorktree` exists as an explicit, read-only review mode, serving the Review First principle.
+
+Partial staging actions are disabled there, and the UI states why.
+
+This is the resolution of a real tension: Review First pulls toward one combined diff, partial staging correctness pulls toward split lists. Split is the working copy default; combined is an explicit review mode. One view is not asked to do both jobs.
+
+## Target and caching
+
+Because the cache is content addressed, when nothing is staged for a file the index content equals the HEAD content, so `IndexToWorktree` and `HeadToWorktree` resolve to the same cache entry.
+
+The three targets collapse to one for free in the common case, and diverge only for genuinely partially staged files.
 
 ---
 
