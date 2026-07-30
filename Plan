@@ -594,6 +594,40 @@ Examples:
 
 ---
 
+## Concurrency
+
+Git enforces its own locking. Index-mutating commands create `.git/index.lock` and fail outright when another process holds it, so concurrency has to be designed, not merely tested for.
+
+A tiered reader/writer gate per repository. Commands are classified by what they touch:
+
+| Class | Commands | Gate |
+| --- | --- | --- |
+| Read | `diff`, `status`, `log`, `cat-file`, `show` | Shared, unbounded |
+| Index write | `apply --cached`, `add`, `reset`, `commit` | Exclusive against other writes, does not block reads |
+| Worktree write | `checkout`, `pull`, `merge`, discard | Exclusive against everything |
+| Network | `fetch`, `push` | No gate, single flight per remote |
+
+Worktree writes block reads because `checkout` rewrites files underneath a reader, which would otherwise observe torn state.
+
+Network operations hold no gate. `push` touches neither index nor worktree, and a slow push must never block a diff read.
+
+### Cross-process contention
+
+The gate coordinates this application's processes only. A terminal, an IDE, or a background `git gc` can hold `index.lock`.
+
+- Retry write operations with bounded backoff.
+- On exhaustion, report an actionable error naming the lock file.
+- Never retry indefinitely. Someone else's stuck rebase must not hang the UI.
+
+### Epoch guarding
+
+A status read that started before a write completes must not publish afterwards, or a freshly staged file will visibly jump back to unstaged.
+
+- Published file list and status results carry an epoch. Stale results are discarded.
+- Diffs and syntax tokens need no epoch. A content addressed result can be not-current, but never wrong, because its key names the exact bytes it describes.
+
+---
+
 # File List
 
 Support:
