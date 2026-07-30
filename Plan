@@ -260,6 +260,41 @@ Each file shows:
 - Git status
 - staged indicator
 
+A file appears once, never twice. Files that are partially staged, meaning staged content plus further unstaged edits, are shown with a distinct indicator rather than a second row.
+
+---
+
+# Diff Target
+
+Git has three trees, and therefore three diffs:
+
+| Target | Command | Meaning |
+| --- | --- | --- |
+| `IndexToWorktree` | `git diff` | Unstaged changes |
+| `HeadToIndex` | `git diff --cached` | Staged changes |
+| `HeadToWorktree` | `git diff HEAD` | Everything, combined |
+
+The viewer exposes an explicit target toggle. The working copy keeps a single file list.
+
+## Staging must match the target
+
+`git apply --cached` applies to the index, so the patch context must match index content.
+
+For a partially staged file, a `HeadToWorktree` patch has context from HEAD, which no longer matches the index. Such a patch fails to apply except by luck in untouched regions.
+
+Rules:
+
+- Hunk and line staging is enabled only when the target is `IndexToWorktree`.
+- Hunk and line unstaging is enabled only when the target is `HeadToIndex`.
+- `HeadToWorktree` is a read-only review target. Partial staging actions are disabled, and the UI states why.
+- For a partially staged file, default the toggle to `IndexToWorktree` so the staging path is correct by default.
+
+## Target and caching
+
+Because the cache is content addressed, when nothing is staged for a file the index content equals the HEAD content, so `IndexToWorktree` and `HeadToWorktree` resolve to the same cache entry.
+
+The three targets collapse to one for free in the common case, and only diverge for genuinely partially staged files.
+
 ---
 
 # Git Operations
