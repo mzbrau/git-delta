@@ -120,21 +120,36 @@ Rules:
 
 ## Diff
 
-Start with DiffPlex behind an abstraction.
+`git diff` is the single source of truth for file-level structure and hunk boundaries.
 
-```csharp
-public interface IDiffEngine
-{
-    Task<FileDiff> GenerateDiffAsync(...);
-}
-```
+The viewer and the partial staging path must read from one model. If displayed hunks come from anywhere other than Git, the patches submitted to `git apply --cached` are synthesised from a different model than the one on screen, and they will eventually fail to apply.
 
-Future implementations may include:
+Invocation:
 
-- DiffPlex
-- Native Git diff
-- Semantic diff
-- AI annotated diff
+- `--diff-algorithm=histogram` by default, exposed as a setting.
+- `-M -C` for rename and copy detection.
+- Configurable `-U<n>`.
+- `--raw` and `--numstat` for file lists, so populating the file tree never parses full patches.
+- Whitespace settings map directly onto `-w`, `--ignore-space-change`, and `--ignore-blank-lines`. Never reimplement these semantics.
+
+The parsed result is a canonical immutable `FileDiff`.
+
+DiffPlex is not used. It cannot own hunks (no Git data model: no rename detection, no binary detection, no mode changes, no `.gitattributes` textconv or diff drivers), and it diffs whole in-memory strings, which conflicts with both large file optimisation and allocation goals.
+
+### Extension seam
+
+There is no swappable diff *generator*. A pluggable generator can silently break staging, which is the one thing that must agree with Git exactly.
+
+`FileDiff` is a fixed contract. Extensibility comes from annotation layered over it:
+
+- Intra-line refinement (Phase 1)
+- Review comments (Phase 2)
+- AI annotation (Phase 3)
+- Semantic classification (Phase 3)
+
+Annotations are an overlay, never embedded in `FileDiff`. This keeps the diff cache independent of comment and AI lifetimes.
+
+Intra-line refinement is a small owned implementation behind `IIntraLineDiffer`, operating on a single already-paired line. Owning it keeps highlight quality tunable, which matters more here than in most applications.
 
 ---
 
@@ -301,17 +316,25 @@ Everything else can remain in the terminal.
 
 The diff viewer is the most important feature in Phase 1.
 
-Support:
+Both view modes are required, and both are pure projections of the same canonical `FileDiff`.
 
 ## Side-by-side
 
 Traditional comparison.
 
+Within a change block, deletions pair with additions positionally, and the shorter side is padded.
+
 ## Unified
 
 GitHub style.
 
-Instant switching.
+Rows flattened in patch order.
+
+## Instant switching
+
+Switching modes must not re-invoke Git, re-parse a patch, or re-tokenise for syntax highlighting.
+
+Layout is the only thing recomputed. Syntax tokens are keyed by content identity, not by layout, so they survive a mode switch.
 
 ---
 
