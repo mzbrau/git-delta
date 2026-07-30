@@ -76,11 +76,47 @@ Requirements:
 
 Abstract Git behind interfaces.
 
-Initial implementation can use:
-
-- LibGit2Sharp
+The only Phase 1 implementation shells out to the `git` command line using CliWrap.
 
 The UI must never know which implementation is used.
+
+Rationale:
+
+- Partial staging goes through `git apply --cached`, inheriting Git's exact patch semantics instead of reimplementing them.
+- Clean/smudge filters, including Git LFS, are applied by Git itself. Writing blobs straight into the index would bypass them and stage the wrong bytes.
+- Push and pull use the credential helpers the user already has configured (Git Credential Manager, osxkeychain, SSH agent). No bespoke token storage.
+- `core.fsmonitor` and the untracked cache keep status fast on very large repositories.
+- Hooks, config precedence, `.gitattributes`, and pathspec handling behave exactly as the user expects.
+
+LibGit2Sharp is explicitly rejected for Phase 1: it exposes no hunk-level staging API, does not invoke credential helpers, and has no fsmonitor equivalent.
+
+## Process Invocation
+
+All Git invocation goes through CliWrap.
+
+Rules:
+
+- Stream stdout and stderr; never buffer an entire output into a string.
+- Pass a CancellationToken to every invocation.
+- Prefer NUL-delimited machine-readable output, for example `status --porcelain=v2 -z`.
+- Pass `--no-optional-locks` on read-only commands so background refreshes never fight the user's terminal for the index lock.
+- Never route arguments through a shell.
+- Keep a long-lived `git cat-file --batch` process for object reads.
+- Treat exit codes and stderr as structured results, not as text to show the user verbatim.
+
+## Git Prerequisite
+
+CodeSift requires Git to be installed and on the PATH. Git is not bundled.
+
+Minimum supported version: 2.30.
+
+Rules:
+
+- Document the prerequisite in the README, in release notes, and in the installer where one exists.
+- Detect Git during startup: resolve the executable, read `git --version`, cache the result.
+- If Git is missing, or older than the minimum supported version, show a blocking, actionable message naming the required version and how to install it. Never let this surface later as a failed operation.
+- Allow the Git executable path to be overridden in settings, for non-standard installations.
+- Show the resolved Git path and version in the diagnostics overlay.
 
 ## Diff
 
