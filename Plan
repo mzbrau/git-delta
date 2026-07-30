@@ -1,0 +1,814 @@
+# CodeSift - Phase 1 Implementation Plan
+
+> **Vision:** Build the fastest, most responsive cross-platform Git client focused on code review.
+>
+> Long term, CodeSift will evolve into an AI-first code review platform built on GitHub Copilot SDK, but Phase 1 is intentionally focused on being an exceptional local Git client with a world-class diff experience.
+
+---
+
+# Product Principles
+
+These principles should guide every implementation decision.
+
+## Performance First
+
+Performance is the primary feature.
+
+The application should always feel instant.
+
+Rules:
+
+- Never block the UI thread.
+- Every Git operation must be asynchronous.
+- Every expensive operation must support cancellation.
+- Background work should be prioritised based on user interaction.
+- Use progressive loading.
+- Cache aggressively.
+- Preload likely user actions.
+- Prefer optimistic UI updates where safe.
+- Avoid unnecessary allocations.
+- Large repositories must remain responsive.
+
+If a Git command takes 5 seconds, the application should still feel responsive.
+
+---
+
+## Review First
+
+Although Phase 1 only supports local repositories, the UI should already be designed around reviewing code rather than repository management.
+
+Large diff viewer.
+
+Simple file navigation.
+
+Minimal distractions.
+
+Git operations should stay out of the user's way.
+
+---
+
+## Native Desktop Experience
+
+Use Avalonia to create a desktop application that feels native.
+
+Requirements:
+
+- Keyboard shortcuts
+- Native scrolling
+- High DPI support
+- Drag and drop
+- Context menus
+- Light/Dark themes
+- Window state persistence
+- Responsive layouts
+
+---
+
+# Technology Stack
+
+## Framework
+
+- .NET 10
+- Avalonia UI
+- MVVM
+
+## Git
+
+Abstract Git behind interfaces.
+
+The only Phase 1 implementation shells out to the `git` command line using CliWrap.
+
+The UI must never know which implementation is used.
+
+Rationale:
+
+- Partial staging goes through `git apply --cached`, inheriting Git's exact patch semantics instead of reimplementing them.
+- Clean/smudge filters, including Git LFS, are applied by Git itself. Writing blobs straight into the index would bypass them and stage the wrong bytes.
+- Push and pull use the credential helpers the user already has configured (Git Credential Manager, osxkeychain, SSH agent). No bespoke token storage.
+- `core.fsmonitor` and the untracked cache keep status fast on very large repositories.
+- Hooks, config precedence, `.gitattributes`, and pathspec handling behave exactly as the user expects.
+
+LibGit2Sharp is explicitly rejected for Phase 1: it exposes no hunk-level staging API, does not invoke credential helpers, and has no fsmonitor equivalent.
+
+## Process Invocation
+
+All Git invocation goes through CliWrap.
+
+Rules:
+
+- Stream stdout and stderr; never buffer an entire output into a string.
+- Pass a CancellationToken to every invocation.
+- Prefer NUL-delimited machine-readable output, for example `status --porcelain=v2 -z`.
+- Pass `--no-optional-locks` on read-only commands so background refreshes never fight the user's terminal for the index lock.
+- Never route arguments through a shell.
+- Keep a long-lived `git cat-file --batch` process for object reads.
+- Treat exit codes and stderr as structured results, not as text to show the user verbatim.
+
+## Git Prerequisite
+
+CodeSift requires Git to be installed and on the PATH. Git is not bundled.
+
+Minimum supported version: 2.30.
+
+Rules:
+
+- Document the prerequisite in the README, in release notes, and in the installer where one exists.
+- Detect Git during startup: resolve the executable, read `git --version`, cache the result.
+- If Git is missing, or older than the minimum supported version, show a blocking, actionable message naming the required version and how to install it. Never let this surface later as a failed operation.
+- Allow the Git executable path to be overridden in settings, for non-standard installations.
+- Show the resolved Git path and version in the diagnostics overlay.
+
+## Diff
+
+Start with DiffPlex behind an abstraction.
+
+```csharp
+public interface IDiffEngine
+{
+    Task<FileDiff> GenerateDiffAsync(...);
+}
+```
+
+Future implementations may include:
+
+- DiffPlex
+- Native Git diff
+- Semantic diff
+- AI annotated diff
+
+---
+
+# Solution Structure
+
+```
+CodeSift.sln
+
+src/
+    CodeSift.App
+    CodeSift.UI
+    CodeSift.Core
+    CodeSift.Git
+    CodeSift.Diff
+    CodeSift.Infrastructure
+
+tests/
+    CodeSift.Core.Tests
+    CodeSift.Git.Tests
+    CodeSift.Diff.Tests
+    CodeSift.IntegrationTests
+    CodeSift.PerformanceTests
+    CodeSift.Testing
+```
+
+Core must contain no UI dependencies.
+
+---
+
+# Main Window
+
+Layout inspired by SourceTree for macOS.
+
+```
+-------------------------------------------------------
+ Toolbar
+-------------------------------------------------------
+
+ Navigator
+
+ Repository
+
+ Working Copy
+
+ Branches
+
+ History
+
+------------------------
+
+ File List
+
+------------------------
+
+ Diff Viewer
+
+ Side-by-side
+
+ Unified
+
+-------------------------------------------------------
+ Status Bar
+```
+
+Panels should be resizable.
+
+Panel sizes persisted.
+
+Window size persisted.
+
+Theme persisted.
+
+---
+
+# Repository Management
+
+Support:
+
+- Open repository
+- Clone repository
+- Recent repositories
+- Refresh repository
+- Repository status
+
+No advanced repository management.
+
+---
+
+# Working Copy
+
+Display:
+
+- Modified
+- Added
+- Deleted
+- Renamed
+- Untracked
+
+Optional:
+
+- Ignored
+
+Each file shows:
+
+- icon
+- name
+- path
+- Git status
+- staged indicator
+
+---
+
+# Git Operations
+
+Support:
+
+## Stage
+
+- Stage file
+- Unstage file
+
+## Partial staging
+
+Support staging individual hunks as well as specific lines.
+
+## Commit
+
+Support:
+
+- Commit message
+- Amend commit
+- Validation
+- Commit
+
+## Push
+
+- Push current branch
+- Progress
+- Cancellation
+
+## Pull
+
+Support:
+
+- Fast forward
+- Merge
+- Rebase optional
+
+## Branches
+
+Support:
+
+- Checkout
+- Create
+- Delete
+- Rename
+- Fetch
+
+Everything else can remain in the terminal.
+
+---
+
+# Diff Viewer
+
+The diff viewer is the most important feature in Phase 1.
+
+Support:
+
+## Side-by-side
+
+Traditional comparison.
+
+## Unified
+
+GitHub style.
+
+Instant switching.
+
+---
+
+## Features
+
+- Syntax highlighting
+- Word level diff
+- Line numbers
+- Collapsible unchanged sections
+- Whitespace indicators
+- Large file optimisation
+- Progressive rendering
+- Horizontal scrolling
+- Keyboard navigation
+
+---
+
+# Performance Architecture
+
+## Background Loading
+
+Selecting a file should never block.
+
+Workflow:
+
+1. Show cached diff if available.
+2. Show placeholder if not.
+3. Generate diff in background.
+4. Cancel previous request immediately if selection changes. (if expensive)
+
+---
+
+## Predictive Loading
+
+When viewing a file:
+
+Preload:
+
+- previous file
+- next file
+
+Later:
+
+Frequently opened files.
+
+---
+
+## Caching
+
+Cache:
+
+- Git status
+- Generated diffs
+- Syntax highlighting
+- Repository metadata
+
+Invalidate intelligently.
+
+---
+
+## Optimistic UI
+
+Examples:
+
+Stage file
+
+Immediately move it into staged section.
+
+Execute Git operation.
+
+Rollback if operation fails.
+
+Apply same pattern to:
+
+- Unstage
+- Delete
+- Rename
+- Commit
+
+---
+
+## Cancellation
+
+Every expensive operation must support cancellation.
+
+Examples:
+
+- Diff generation
+- Git refresh
+- Status calculation
+- Searching
+- Repository loading
+- Branch checkout
+- Push
+- Pull
+
+---
+
+# File List
+
+Support:
+
+- Folder grouping
+- Expand/collapse
+- Search
+- Sorting
+
+Filters:
+
+- Modified
+- Added
+- Deleted
+- Staged
+- Unstaged
+
+---
+
+# Settings
+
+- Theme
+- Font size
+- Default diff mode
+- Ignore whitespace
+- Show whitespace
+- Recent repositories
+
+---
+
+# Error Handling
+
+No modal dialogs for recoverable errors.
+
+Use notifications.
+
+Support retry.
+
+Keep repository state consistent.
+
+---
+
+# Logging & Diagnostics
+
+Use structured logging.
+
+Record timing for:
+
+- Repository open
+- Status refresh
+- Diff generation
+- Stage
+- Commit
+- Push
+- Pull
+
+Provide optional developer diagnostics overlay showing timings.
+
+Performance is a feature and should be measurable.
+
+---
+
+# Testing Strategy
+
+Testing should be a first-class concern.
+
+Aim for:
+
+- High coverage in Core projects (>90%)
+- Comprehensive integration tests
+- Performance regression tests
+- Minimal UI automation
+
+---
+
+## Test Frameworks
+
+- NUnit
+- Moq
+- AutoFixture
+- Coverlet
+- BenchmarkDotNet
+- verify.nunit
+
+---
+
+## Unit Tests
+
+Focus on:
+
+Core
+
+Git abstraction
+
+Diff generation
+
+Caching
+
+Cancellation
+
+ViewModels
+
+Optimistic updates
+
+Error handling
+
+No UI.
+
+Very fast.
+
+---
+
+## Component Tests
+
+Use real temporary repositories instead of mocks wherever possible.
+
+Example:
+
+```
+Temp Repository
+
+↓
+
+Modify files
+
+↓
+
+Stage
+
+↓
+
+Commit
+
+↓
+
+Verify behaviour
+```
+
+These provide much more confidence than mocks alone.
+
+---
+
+## Integration Tests
+
+Create repositories dynamically.
+
+Example scenarios:
+
+- Open repository
+- Stage file
+- Partial stage
+- Commit
+- Push
+- Pull
+- Branch checkout
+- Rename
+- Delete
+- Large repositories
+- Merge conflicts (future)
+
+---
+
+## Performance Tests
+
+Benchmark:
+
+- Repository open
+- Status refresh
+- Diff generation
+- File switching
+- Cache hits
+- Cache misses
+
+Performance regressions should fail CI.
+
+---
+
+## Cancellation Tests
+
+Verify:
+
+- Previous diff cancelled
+- Background work cancelled
+- No deadlocks
+- Correct diff displayed
+
+---
+
+## Concurrency Tests
+
+Exercise:
+
+- Refresh
+- Stage
+- Checkout
+- Diff generation
+
+Running simultaneously.
+
+---
+
+## Snapshot Tests
+
+Use Verify.NUnit for:
+
+- Unified diff rendering
+- Side-by-side rendering
+- Syntax highlighting
+- Diff formatting
+
+---
+
+## Test Utilities
+
+Create a reusable testing library.
+
+```
+ReviewFlow.Testing
+
+RepositoryBuilder
+
+BranchBuilder
+
+CommitBuilder
+
+FileBuilder
+
+LargeRepositoryBuilder
+
+ConflictRepositoryBuilder
+```
+
+Example:
+
+```csharp
+var repository = RepositoryBuilder
+    .With100ModifiedFiles()
+    .WithRemote()
+    .Build();
+```
+
+---
+
+# Code Quality
+
+Enable:
+
+- Nullable Reference Types
+- Roslyn Analyzers
+- Treat warnings as errors
+- Coverlet
+
+---
+
+# Out of Scope
+
+Not included in Phase 1:
+
+- GitHub
+- Pull Requests
+- AI
+- Merge conflict UI
+- Blame
+- History browser
+- Stash UI
+- Cherry-pick
+- Rebase UI
+- Interactive rebase
+
+---
+
+# Definition of Done
+
+A developer should comfortably replace SourceTree for daily local development.
+
+Supported workflow:
+
+- Open repository
+- Review local changes
+- Stage changes
+- Partial stage
+- Commit
+- Push
+- Pull
+- Basic branch management
+
+The application should feel significantly faster than existing Git clients.
+
+---
+
+# Future Roadmap
+
+## Phase 2 — GitHub Code Reviews
+
+Transform ReviewFlow into a complete GitHub review client.
+
+### Features
+
+- GitHub authentication
+- Assigned PR inbox
+- Open Pull Requests
+- Automatic worktree checkout
+- Local review using full repository context
+- Inline review comments
+- Pending review support
+- Approve
+- Comment
+- Request Changes
+- Review progress
+- Comment synchronisation
+- Thread synchronisation
+- Live updates
+- Draft review support
+- Review sessions
+- Resume where you left off
+
+---
+
+## Phase 3 — AI Assisted Reviews
+
+Integrate GitHub Copilot SDK.
+
+AI assists the reviewer instead of replacing them.
+
+### Features
+
+- PR summaries
+- File summaries
+- Suggested review order
+- Reviewer guidance
+- Files to skip
+- Risk analysis
+- Semantic change classification
+- AI generated review checklist
+- Incremental review
+- Architecture impact
+- Test coverage awareness
+- Reviewer personas
+
+Examples:
+
+- Security
+- Performance
+- API Design
+- Maintainability
+
+---
+
+## Phase 4 — Code Intelligence
+
+Move beyond reviewing changes into understanding systems.
+
+### Features
+
+- Cross-file navigation
+- Symbol search
+- Find references
+- Call hierarchy
+- Dependency graphs
+- Architecture visualisation
+- Service summaries
+- AI code explanations
+- File ownership
+- Historical churn
+- Historical bug hotspots
+- Related pull requests
+- Intelligent repository search
+
+---
+
+## Phase 5 — Team Platform
+
+Become a collaborative review platform.
+
+### Features
+
+- Team dashboards
+- Review analytics
+- Review templates
+- AI personalised to reviewer behaviour
+- Plugin system
+- MCP integrations
+- Local LLM support
+- Azure DevOps support
+- GitLab support
+- Bitbucket support
+- Enterprise deployment
+
+---
+
+# Long-Term Vision
+
+ReviewFlow is **not another Git client**.
+
+It is an **AI-first code review platform** where:
+
+- Git becomes the transport layer.
+- The UI is optimised for understanding code.
+- AI reduces cognitive load instead of replacing developers.
+- Performance is a competitive advantage.
+- Local changes and Pull Requests share the same review experience.
+- The application becomes the fastest, most capable place to understand and review code.
