@@ -183,6 +183,51 @@ Intra-line refinement is a small owned implementation behind `IIntraLineDiffer`,
 
 ---
 
+# Platforms
+
+| Platform | Status |
+| --- | --- |
+| Windows x64, arm64 | Supported. Primary use case. |
+| macOS arm64, x64 | Supported. Primary development platform. |
+| Linux | Not supported. |
+
+Development happens on macOS. The primary use case is Windows. That asymmetry drives the CI matrix.
+
+## CI matrix
+
+Windows receives no incidental local testing, so Windows CI is load bearing rather than optional.
+
+- Windows on every pull request.
+- macOS nightly. It is covered locally every day, and hosted macOS runners bill at ten times the Linux rate on a private repository.
+- No Linux leg.
+
+Windows-specific coverage that macOS development will never surface:
+
+- CRLF handling and `core.autocrlf`
+- Paths beyond 260 characters, requiring `core.longpaths`
+- Case-insensitive filesystem behaviour
+- Process spawn cost, materially higher than on Unix, which makes the invocation batching decisions matter more
+
+## Builds
+
+Self-contained per RID, so there is no .NET runtime prerequisite.
+
+- `win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`
+- Trimming deferred. The source-generated MVVM choice keeps it viable later.
+- CI publishes archives as artifacts.
+
+No installer and no official release at this stage. Code signing and notarisation come with that later work: unsigned macOS builds are blocked by Gatekeeper and unsigned Windows builds trigger SmartScreen, so distribution carries an Apple Developer Program membership and a Windows code-signing certificate when it happens.
+
+## Versioning
+
+MinVer, driven by git tags.
+
+- Tag prefix `v`.
+- CI must fetch full history. Without `fetch-depth: 0`, MinVer cannot compute height and every build reports a placeholder version.
+- 7.0.0 is current stable. 8.0.0-rc.1 exists.
+
+---
+
 # Solution Structure
 
 ```
@@ -1154,6 +1199,9 @@ Not included in Phase 1:
 - Cherry-pick
 - Rebase UI
 - Interactive rebase
+- Linux support
+- Installers, code signing, and notarisation
+- Auto-update
 
 ---
 
