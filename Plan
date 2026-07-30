@@ -558,22 +558,40 @@ Invalidate intelligently.
 
 ## Optimistic UI
 
-Examples:
+Scope: stage and unstage only, at file, hunk, and line granularity.
 
-Stage file
+Delete, rename, discard, and commit are not optimistic. They get honest progress instead. Each is a deliberate, confirmed action where a moment of work is expected, and none can be meaningfully undone in the UI.
 
-Immediately move it into staged section.
+### Reconciliation, not rollback
 
-Execute Git operation.
+Displayed state is authoritative status plus a set of pending mutations.
 
-Rollback if operation fails.
+On completion, success and failure identically, the pending mutation is dropped and state is re-derived.
 
-Apply same pattern to:
+Failure therefore needs no code path of its own. The overlay evaporates and the truth shows through.
 
-- Unstage
-- Delete
-- Rename
-- Commit
+Snapshot rollback is rejected. Between the optimistic apply and the failure, the watcher may have fired, another operation may have completed, or the user may have staged something else, and restoring a snapshot silently undoes those too. Reconciliation also composes with epoch guarding, which snapshot rollback fights.
+
+### Predicted content is never cached
+
+Applying a known patch to known content is deterministic, so post-stage index content can be predicted exactly. That is what lets a hunk vanish from the unstaged diff instantly rather than after a round trip.
+
+But clean filters, Git LFS in particular, can make the real blob differ from the prediction.
+
+Rule: predicted content is display only. It never enters the content addressed cache under a predicted `ContentId`. A wrong prediction must not poison a cache whose entries are otherwise incapable of being wrong.
+
+### Why commit is excluded
+
+Hooks run under the CLI backend. `pre-commit` can fail, can take tens of seconds, and can modify staged files, which is exactly what a format-on-commit setup does. `prepare-commit-msg` and `commit-msg` can rewrite the message.
+
+Post-commit state is therefore not predictable from pre-commit state.
+
+Requirements that follow:
+
+- Commit is a progress-bearing operation, not an instant one.
+- Stream hook output into the UI.
+- Support cancellation.
+- Offer `--no-verify` as an explicit escape.
 
 ---
 
