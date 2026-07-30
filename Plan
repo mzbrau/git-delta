@@ -70,7 +70,8 @@ Requirements:
 
 - .NET 10
 - Avalonia UI 12
-- MVVM
+- CommunityToolkit.Mvvm
+- `Microsoft.Extensions.DependencyInjection`
 - TextMateSharp for syntax tokenisation
 
 Avalonia 12 rather than 11.3.x: the only real reason to pin to 11 was AvaloniaEdit, whose stable line targets 11, and AvaloniaEdit is not used.
@@ -825,7 +826,13 @@ Keep repository state consistent.
 
 # Logging & Diagnostics
 
-Use structured logging.
+Structured logging through `Microsoft.Extensions.Logging` abstractions in `Core`, `Git`, and `Diff`. Serilog writes a rolling file, configured in `App` only.
+
+Logging must be near-zero cost when disabled, and must never block the UI thread on file I/O.
+
+## Instrumentation
+
+Timings and counters are emitted as `System.Diagnostics.Metrics` instruments, not log lines.
 
 Record timing for:
 
@@ -837,7 +844,20 @@ Record timing for:
 - Push
 - Pull
 
-Provide optional developer diagnostics overlay showing timings.
+Record counters for:
+
+- `git` process invocations
+- Bytes read from `git`
+- Cache hits and misses
+- Lines tokenised
+
+One instrumentation source, three consumers:
+
+- The developer diagnostics overlay reads it live.
+- Nightly benchmarks read it.
+- Gating work assertions read it through a `MeterListener`.
+
+Log lines would force tests to parse logs and force the overlay to build parallel plumbing.
 
 Performance is a feature and should be measurable.
 
@@ -859,11 +879,15 @@ Aim for:
 ## Test Frameworks
 
 - NUnit
-- Moq
-- AutoFixture
+- NSubstitute
 - Coverlet
 - BenchmarkDotNet
-- verify.nunit
+- Verify.NUnit
+
+Not used:
+
+- Moq. Version 4.20.0 shipped SponsorLink, which scanned the user's git config email and phoned home. It was removed two patches later, but Moq remains on corporate blocklists. Switching costs almost nothing here, because the testing strategy already prefers real temporary repositories over mocks.
+- AutoFixture. Redundant given the `TestSupport` builders, and it trades explicit failures for magic.
 
 ---
 
@@ -995,6 +1019,7 @@ Warm, P95.
 
 | Action | Target |
 | --- | --- |
+| Cold start to window visible | 500 ms |
 | Repository open to file list visible | 400 ms medium, 1.5 s large |
 | Status refresh | 150 ms medium, 800 ms large |
 | Select file, diff already cached, to first paint | 16 ms |
@@ -1052,12 +1077,17 @@ Running simultaneously.
 
 ## Snapshot Tests
 
-Use Verify.NUnit for:
+Use Verify.NUnit to snapshot data, never pixels. Cross-platform bitmap snapshots differ by font rasterisation and will flake.
 
-- Unified diff rendering
-- Side-by-side rendering
-- Syntax highlighting
-- Diff formatting
+Snapshot:
+
+- Unified row projection
+- Side-by-side row projection
+- Token spans from syntax highlighting
+- Intra-line span computation
+- Generated patches for hunk and line staging
+
+Row projection is pure, which is exactly what makes it worth pinning.
 
 ---
 
@@ -1098,8 +1128,15 @@ Enable:
 
 - Nullable Reference Types
 - Roslyn Analyzers
-- Treat warnings as errors
 - Coverlet
+- Treat warnings as errors in CI and Release only. Blocking a local Debug build on an unused variable mid-refactor slows iteration without improving the shipped result.
+
+## Composition
+
+- CommunityToolkit.Mvvm for MVVM. Source generated, so property and command boilerplate costs nothing at runtime.
+- `Microsoft.Extensions.DependencyInjection` alone. No Generic Host; it adds startup cost for configuration and lifetime machinery this application does not need.
+
+ReactiveUI is rejected despite being Avalonia's historical default. It is reflection and allocation heavy, adds startup cost, and carries an Rx learning curve.
 
 ---
 
