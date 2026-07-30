@@ -753,7 +753,7 @@ Aim for:
 
 - High coverage in Core projects (>90%)
 - Comprehensive integration tests
-- Performance regression tests
+- Work-based performance assertions gating CI, with wall-time benchmarks tracked nightly
 - Minimal UI automation
 
 ---
@@ -847,6 +847,37 @@ Example scenarios:
 
 ## Performance Tests
 
+Two tiers. CI runs on standard GitHub-hosted runners; there is no dedicated benchmark machine.
+
+### Tier 1: work assertions, gating
+
+These gate pull requests. They assert *work*, not time, so they are hardware independent, deterministic, and run in milliseconds.
+
+Measured quantities:
+
+- `git` process invocation count
+- Bytes read from `git`
+- Allocated bytes
+- Cache hit and miss counts
+- Lines tokenised
+- Whether anything touched the UI synchronisation context
+
+Every performance claim in this plan restates as a work contract:
+
+- Selecting an already cached file performs zero `git` invocations.
+- Switching view mode performs zero `git` invocations and tokenises zero lines.
+- Staging a hunk performs exactly one index-mutating invocation.
+- Opening a repository performs a number of invocations independent of file count.
+- No `git` invocation ever occurs on the UI synchronisation context.
+
+These catch the regressions that actually matter, such as re-invoking `git` on selection change or re-tokenising on a mode switch.
+
+### Tier 2: wall time, tracked not gating
+
+BenchmarkDotNet, on a nightly schedule, with trend tracking that alerts on drift against a rolling median.
+
+Wall-time thresholds do not gate pull requests. On shared runners, variance exceeds the regressions worth catching and hosted hardware generations drift, so thresholds either sit too loose to catch anything or flake until the job gets disabled.
+
 Benchmark:
 
 - Repository open
@@ -856,7 +887,44 @@ Benchmark:
 - Cache hits
 - Cache misses
 
-Performance regressions should fail CI.
+Known gap accepted by this choice: work assertions can all pass while constant factors degrade. Nightly trend alerting is the mitigation available without dedicated hardware.
+
+---
+
+## Performance Budgets
+
+Warm, P95.
+
+| Action | Target |
+| --- | --- |
+| Repository open to file list visible | 400 ms medium, 1.5 s large |
+| Status refresh | 150 ms medium, 800 ms large |
+| Select file, diff already cached, to first paint | 16 ms |
+| Select file, uncached, under 2k lines, to first paint | 100 ms |
+| Switch unified to side-by-side | 16 ms |
+| Stage hunk to optimistic UI update | 16 ms |
+| Stage hunk to authoritative state | 300 ms |
+| Any frame while scrolling a 100k-line diff | 16 ms |
+
+### Corpora
+
+Synthesised, not cloned, so they are deterministic and need no network.
+
+| Tier | Files | Commits |
+| --- | --- | --- |
+| Small | 500 | 1,000 |
+| Medium | 10,000 | 50,000 |
+| Large | 100,000 | 250,000 |
+
+Repository scale and file scale are different failure modes, and the diff viewer only cares about the second. A pathological single-file corpus is therefore required:
+
+- A 100k-line source file
+- A 20 MB single-line minified bundle
+- A binary file
+- A CRLF file
+- A non-UTF8 file
+
+"Large repository" means the Large tier. Every unqualified performance claim in this plan refers to the Medium tier.
 
 ---
 
