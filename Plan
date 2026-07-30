@@ -107,6 +107,32 @@ Rules:
 - Keep a long-lived `git cat-file --batch` process for object reads.
 - Treat exit codes and stderr as structured results, not as text to show the user verbatim.
 
+### Environment
+
+A `git` subprocess that waits on input looks exactly like a frozen application. Every invocation is therefore hardened:
+
+| Setting | Reason |
+| --- | --- |
+| `GIT_TERMINAL_PROMPT=0` | Fail fast instead of blocking on a terminal prompt that a GUI process has no way to answer |
+| `LC_ALL=C` | stderr is parsed as a structured result, and error text is not stable across locales |
+| `-c core.quotePath=false` | Non-ASCII paths otherwise return octal-escaped |
+| `GIT_OPTIONAL_LOCKS=0` | Background reads never take the index lock |
+| Hard timeout on network operations | An unreachable host otherwise hangs indefinitely |
+
+Per-invocation configuration uses `-c`. The user's config is never mutated, with the single exception of the opt-in fsmonitor prompt.
+
+## Credentials
+
+No bespoke credential UI in Phase 1.
+
+Authentication is delegated entirely to the user's configured credential helper. Git Credential Manager and `osxkeychain` present their own UI, which is correct behaviour on Windows and macOS and is one of the reasons the CLI backend was chosen.
+
+- On authentication failure, detect the specific cause and surface an actionable message naming the fix.
+- For SSH, that includes telling the user to load an agent when a key has a passphrase and no agent is running.
+- Storing secrets is a security surface Phase 1 deliberately does not take on.
+
+Known gap: a Linux user with neither a credential helper nor an SSH agent gets a clear error rather than a prompt.
+
 ## Git Prerequisite
 
 CodeSift requires Git to be installed and on the PATH. Git is not bundled.
@@ -634,18 +660,24 @@ Requirements that follow:
 
 ## Cancellation
 
-Every expensive operation must support cancellation.
+Every expensive operation must be interruptible, but "cancel" cannot mean the same thing for all of them. Git has no transactional checkout, so killing writes mid-flight corrupts state.
 
-Examples:
+Three classes:
 
-- Diff generation
-- Git refresh
-- Status calculation
-- Searching
-- Repository loading
-- Branch checkout
-- Push
-- Pull
+| Class | Operations | Cancellation means |
+| --- | --- | --- |
+| Freely killable | `diff`, `status`, `log`, `cat-file`, searching, repository loading, `push` | Kill the process. Only work is lost. |
+| Cancellable at dispatch only | Index writes: `apply --cached`, `add`, `reset`, `commit` | Remove from the queue if not yet started. Once spawned, let it finish. |
+| Abortable, not cancellable | `checkout`, `pull`, `merge` | Request abort, then run a defined recovery. |
+
+Notes:
+
+- `push` is freely killable. Nothing local changes, and the server only updates refs after receiving the full pack. A kill is followed by a mandatory refresh of remote-tracking refs to confirm actual state.
+- Index writes are short enough that dispatch-only cancellation costs the user nothing, and it removes the stale `index.lock` problem entirely.
+- Aborting a pull runs `merge --abort` or `rebase --abort` if one is in progress.
+- Aborting a checkout re-runs status and reports the intermediate state honestly. It never claims success.
+
+Accepted cost: a checkout on the Large tier can take seconds and cannot be made free to stop. Abort exists, but the user is told the worktree may be in an intermediate state rather than silently left in one.
 
 ---
 
