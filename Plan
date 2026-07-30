@@ -552,7 +552,44 @@ Cache:
 - Syntax highlighting
 - Repository metadata
 
-Invalidate intelligently.
+Diffs and syntax tokens are content addressed by `ContentId`, so they are never invalidated. They simply stop being requested.
+
+Status and repository metadata are the only entries with a genuine invalidation problem, and change detection drives it.
+
+---
+
+## Change Detection
+
+Watch `.git` only. Do not watch the worktree recursively.
+
+Sources of refresh:
+
+- `.git` watcher. Bounded to a few dozen directories, and catches index writes, HEAD moves, and ref updates, which covers every change made from a terminal or another client.
+- Window activation. The user is returning from their editor.
+- Completion of the application's own writes.
+- Manual refresh.
+- Bounded watchers on the file or files currently displayed, so an external edit updates the open diff live. One or two paths, trivial cost.
+
+Bursts are debounced and coalesced, with a max-batch fallback straight to a full status.
+
+### Why not a recursive worktree watcher
+
+It degrades badly on every platform, and always degrades into this design anyway:
+
+- Linux inotify takes one watch per directory, recursively, and the limit is shared with every other application the user runs. A dependency tree can exhaust it, and the failure mode is dropped events rather than graceful degradation.
+- Windows `ReadDirectoryChangesW` overflows its buffer during bursts such as a build or a branch switch, surfacing as `InternalBufferOverflowException`. The only correct response is a full rescan.
+- macOS FSEvents coalesces and reports at directory granularity, so directories get rescanned regardless.
+- Skipping ignored directories requires evaluating `.gitignore`, whose semantics are fiddly, and `git check-ignore` is per-path.
+
+On all three platforms the correct handling of a burst is a full status. Effort therefore belongs in making status fast, not in watching precisely.
+
+### fsmonitor
+
+Git's built-in fsmonitor daemon transforms status time on large repositories. Built in since 2.37 on Windows and macOS; on Linux it requires an external fsmonitor hook.
+
+- When a repository's status time exceeds a threshold, offer an explicit opt-in prompt to enable `core.fsmonitor`.
+- Never enable it silently. It writes to the user's repository config.
+- This is the concrete mechanism behind "large repositories must remain responsive".
 
 ---
 
