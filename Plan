@@ -312,6 +312,71 @@ Everything else can remain in the terminal.
 
 ---
 
+# Diff Model
+
+Immutable, content addressed, and shared by every view mode.
+
+```csharp
+public sealed record FileDiff(
+    DiffTarget Target,
+    FilePath OldPath, FilePath NewPath,
+    ChangeKind Change,                       // Added, Modified, Deleted, Renamed, Copied, TypeChanged
+    ContentId OldContent, ContentId NewContent,
+    bool IsBinary,
+    IReadOnlyList<DiffHunk> Hunks,
+    string RawPatch);
+
+public sealed record DiffHunk(
+    int OldStart, int OldCount,
+    int NewStart, int NewCount,
+    string Header,                           // preserved verbatim
+    IReadOnlyList<DiffLine> Lines);
+
+public sealed record DiffLine(
+    DiffLineKind Kind,                       // Context, Added, Removed, NoNewlineAtEof
+    int? OldLine, int? NewLine,
+    ReadOnlyMemory<char> Text,               // slice into RawPatch
+    IReadOnlyList<CharSpan>? IntraLine);
+```
+
+`RawPatch` is retained verbatim and serves three purposes: it is what `git apply --cached` consumes, it is the backing buffer every `DiffLine` slices into so a large diff costs one allocation rather than one per line, and it is what gets cached.
+
+## Content Identity
+
+`ContentId` is the blob SHA for committed and index content, and a content hash for worktree content.
+
+`git diff --raw` already reports both blob SHAs on the `:100644 100644 <old> <new> M` line, so the committed and index sides are free.
+
+One `ContentId` is the cache key for the parsed diff, for syntax tokens, and for annotations. Content addressed entries never need invalidating; they simply stop being requested.
+
+## Anchoring
+
+Annotations anchor to content, never to a position in a rendering.
+
+```csharp
+public readonly record struct DiffAnchor(DiffSide Side, ContentId Content, int Line);
+public readonly record struct AnnotationRange(DiffAnchor Start, DiffAnchor End);
+```
+
+Diff relative positions are rejected. Changing `-U<n>`, changing diff algorithm, toggling ignore whitespace, and switching between unified and side-by-side all renumber rows, and all four are user facing toggles in Phase 1. Anchoring to a rendering would detach annotations during ordinary interaction.
+
+When content changes, annotations are migrated or marked outdated by diffing old content against new content. This is the mechanism reviewers already expect from GitHub.
+
+## Annotation Overlay
+
+Annotations are layered over `FileDiff`, never embedded in it, so an AI pass or comment fetch completing never invalidates a diff.
+
+```csharp
+public interface IDiffAnnotationSource
+{
+    ValueTask<IReadOnlyList<DiffAnnotation>> GetAsync(FileDiffKey key, CancellationToken ct);
+}
+```
+
+Phase 1 ships one source: intra-line refinement. Phase 2 adds review comments. Phase 3 adds AI annotation and semantic classification. None of them change `FileDiff`.
+
+---
+
 # Diff Viewer
 
 The diff viewer is the most important feature in Phase 1.
