@@ -362,6 +362,27 @@ Support:
 
 Support staging individual hunks as well as specific lines.
 
+## Discard
+
+Supported at file, hunk, and line granularity.
+
+- Discard file: `git restore <path>`.
+- Discard hunk or line selection: `git apply --reverse` of the selected subset against the worktree, reusing the staging patch machinery against the `IndexToWorktree` target.
+
+Discard is categorically different from every other operation here. Staged content can be unstaged, commits can be reset, a bad checkout can be checked out again. Discarded worktree edits are gone, because Git never had them.
+
+### Recoverable by construction
+
+No confirmation modal. Discard immediately, then show a notification offering Undo.
+
+Before the destructive step, write the pre-image into the object database with `git hash-object -w`. Keep path and object id in a short recently-discarded list with Restore. Untracked files work identically: hash the content before deleting.
+
+This is the only option consistent with the Error Handling principles in this plan. Those principles say to use notifications rather than modal dialogs and to support retry, so the way to honour them for discard is to make discard recoverable, at which point the modal is unnecessary.
+
+The result is safer *and* faster than a confirmation dialog, which is the product pitch. Modals train users to dismiss them, so they buy less safety than they appear to.
+
+Accepted cost: pre-image objects are unreferenced and inflate the loose object count until `git gc` prunes them. They survive far longer than any plausible undo window.
+
 ## Commit
 
 Support:
