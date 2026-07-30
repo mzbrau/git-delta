@@ -188,23 +188,29 @@ Intra-line refinement is a small owned implementation behind `IIntraLineDiffer`,
 CodeSift.sln
 
 src/
-    CodeSift.App
-    CodeSift.UI
-    CodeSift.Core
-    CodeSift.Git
-    CodeSift.Diff
-    CodeSift.Infrastructure
+    CodeSift.Core          domain model, settings, abstractions
+    CodeSift.Git           CliWrap invocation, porcelain parsing, the gate, cancellation classes
+    CodeSift.Diff          patch parsing, FileDiff, row projection, intra-line differ, token mapping
+    CodeSift.App           Avalonia views, viewmodels, the diff control, DI wiring, entry point
 
 tests/
+    CodeSift.TestSupport   builders; not a test project
     CodeSift.Core.Tests
     CodeSift.Git.Tests
     CodeSift.Diff.Tests
     CodeSift.IntegrationTests
-    CodeSift.PerformanceTests
-    CodeSift.Testing
+    CodeSift.Benchmarks    BenchmarkDotNet, nightly
 ```
 
-Core must contain no UI dependencies.
+Core must contain no UI dependencies. This is enforced by an architecture test asserting that `Core`, `Git`, and `Diff` reference no Avalonia assembly, rather than by convention.
+
+Notes on the shape:
+
+- `App` and `UI` are one project. Splitting them buys a project boundary with no architectural rule attached, and cross-assembly styles and resources need `avares://` URIs pointing at the right assembly.
+- There is no `Infrastructure` project. Process invocation belongs to `Git`, and what remains is settings and window-state persistence, which lives in `Core` until it earns a project.
+- `Benchmarks` rather than `PerformanceTests`. Gating performance tests are work assertions on invocation counts and allocations, and they live in the ordinary test projects next to the code they constrain. Only wall-time benchmarks need their own host.
+- `TestSupport` rather than `Testing`. It is a library consumed by tests, not a test project, and a `.Testing` suffix invites someone to wire it into the runner.
+- The `Git` and `Diff` seam: `Git` owns invocation and porcelain parsing, `Diff` owns patch parsing, the model, row projection, and intra-line refinement. Row projection is pure and snapshot-testable, so the crown-jewel logic stays out of the UI and the control only paints rows it is handed.
 
 ---
 
@@ -1060,7 +1066,7 @@ Use Verify.NUnit for:
 Create a reusable testing library.
 
 ```
-ReviewFlow.Testing
+CodeSift.TestSupport
 
 RepositoryBuilder
 
@@ -1137,7 +1143,7 @@ The application should feel significantly faster than existing Git clients.
 
 ## Phase 2 — GitHub Code Reviews
 
-Transform ReviewFlow into a complete GitHub review client.
+Transform CodeSift into a complete GitHub review client.
 
 ### Features
 
@@ -1235,7 +1241,7 @@ Become a collaborative review platform.
 
 # Long-Term Vision
 
-ReviewFlow is **not another Git client**.
+CodeSift is **not another Git client**.
 
 It is an **AI-first code review platform** where:
 
