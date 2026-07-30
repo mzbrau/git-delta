@@ -278,6 +278,8 @@ A partially staged file appears in both, once per list. The duplication is inten
 
 Files can be dragged between the two lists to stage and unstage.
 
+Conflicted files appear in a third section, read-only. See Conflicts and In-Progress State.
+
 Display:
 
 - Modified
@@ -377,11 +379,9 @@ Support:
 
 ## Pull
 
-Support:
+`--ff-only` is the default mode.
 
-- Fast forward
-- Merge
-- Rebase optional
+Merge and rebase are explicit opt-in choices, never defaults.
 
 ## Branches
 
@@ -394,6 +394,45 @@ Support:
 - Fetch
 
 Everything else can remain in the terminal.
+
+## Stash
+
+A two-operation escape hatch, not a stash feature.
+
+`git checkout` refuses to switch branches when local changes would be overwritten, and without any stash the user has no way forward inside the application.
+
+- `stash push` offered when a checkout is blocked.
+- `stash pop` offered afterwards.
+- No stash browser, no stash list, no partial stashing.
+
+---
+
+# Conflicts and In-Progress State
+
+Conflict *resolution* is out of scope. Conflict *display* is not, and cannot be, because the user can enter a conflicted state without this application's involvement: they rebase in a terminal, hit a conflict, and switch to this window.
+
+A client that renders a conflicted repository as though nothing were wrong will eventually get someone to commit conflict markers.
+
+## Detection
+
+Detect in-progress state from the filesystem, not merely from conflicted files. A rebase can be paused with a clean index.
+
+- `MERGE_HEAD`
+- `rebase-merge` and `rebase-apply` directories
+- `CHERRY_PICK_HEAD`
+- `REVERT_HEAD`
+
+Unmerged files come from porcelain v2 `u` records, which carry all three stages.
+
+## Display and exits
+
+- A persistent banner naming the current state and the way out.
+- Abort is always available. Continue is offered when the index is clean.
+- Conflicted files appear in their own section, read-only, with staging actions disabled.
+- Resolution is delegated: "Open in mergetool" runs `git mergetool`, and "Open terminal here" is offered alongside it.
+- Marking a file resolved once fixed externally is just `git add`, so it is supported.
+
+No three-pane merge editor is built. This is the minimum required to be honest about state.
 
 ---
 
@@ -1044,10 +1083,10 @@ Not included in Phase 1:
 - GitHub
 - Pull Requests
 - AI
-- Merge conflict UI
+- Merge conflict *resolution*. Detection and display are in scope; a three-pane merge editor is not.
 - Blame
 - History browser
-- Stash UI
+- Stash UI. The two-operation stash escape hatch is in scope; browsing, listing, and partial stashing are not.
 - Cherry-pick
 - Rebase UI
 - Interactive rebase
