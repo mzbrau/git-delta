@@ -20,7 +20,7 @@ Rules:
 
 - Never block the UI thread.
 - Every Git operation must be asynchronous.
-- Every expensive operation must support cancellation.
+- Every expensive operation must be interruptible, within the cancellation classes defined under Performance Architecture. "Cancel" cannot mean the same thing for a read and for a checkout.
 - Background work should be prioritised based on user interaction.
 - Use progressive loading.
 - Cache aggressively.
@@ -132,7 +132,7 @@ Authentication is delegated entirely to the user's configured credential helper.
 - For SSH, that includes telling the user to load an agent when a key has a passphrase and no agent is running.
 - Storing secrets is a security surface Phase 1 deliberately does not take on.
 
-Known gap: a Linux user with neither a credential helper nor an SSH agent gets a clear error rather than a prompt.
+Known gap: a user with neither a credential helper nor an SSH agent gets a clear error rather than a prompt. On the supported platforms a helper is near-universal, which is what makes this an acceptable Phase 1 gap.
 
 ## Git Prerequisite
 
@@ -277,11 +277,15 @@ Layout inspired by SourceTree for macOS.
 
  Branches
 
- History
+ History          (placeholder, Phase 2)
 
 ------------------------
 
  File List
+
+  Staged files
+  Unstaged files
+  Conflicted files
 
 ------------------------
 
@@ -294,6 +298,8 @@ Layout inspired by SourceTree for macOS.
 -------------------------------------------------------
  Status Bar
 ```
+
+History is a placeholder in Phase 1. The slot exists in the layout so Phase 2 does not require a relayout, but nothing is implemented behind it.
 
 Panels should be resizable.
 
@@ -316,6 +322,8 @@ Support:
 - Repository status
 
 No advanced repository management.
+
+Clone is freely killable, since nothing in an existing repository changes. A cancelled clone removes the partial target directory.
 
 ---
 
@@ -350,7 +358,7 @@ Each file shows:
 - name
 - path
 - Git status
-- staged indicator
+- partially staged indicator, when the file appears in both lists
 
 ---
 
@@ -544,7 +552,15 @@ public sealed record DiffLine(
 
 `git diff --raw` already reports both blob SHAs on the `:100644 100644 <old> <new> M` line, so the committed and index sides are free.
 
-One `ContentId` is the cache key for the parsed diff, for syntax tokens, and for annotations. Content addressed entries never need invalidating; they simply stop being requested.
+`ContentId` is the basis of every cache key:
+
+| Cache | Key |
+| --- | --- |
+| Parsed diff | Old `ContentId`, new `ContentId`, diff options |
+| Syntax tokens | `ContentId`, grammar |
+| Annotations | `DiffAnchor`, which contains a `ContentId` |
+
+Content addressed entries never need invalidating. They simply stop being requested.
 
 ## Anchoring
 
@@ -841,8 +857,9 @@ Filters:
 - Modified
 - Added
 - Deleted
-- Staged
-- Unstaged
+- Conflicted
+
+Staged and unstaged are not filters. They are the two lists.
 
 ---
 
@@ -854,6 +871,12 @@ Filters:
 - Ignore whitespace
 - Show whitespace
 - Recent repositories
+- Diff algorithm, defaulting to histogram
+- Context lines, the `-U<n>` value
+- Syntax highlighting size cap
+- Git executable path override
+
+Settings that change how a diff is computed, meaning algorithm, context lines, and whitespace handling, are part of the diff cache key. Changing one produces new entries rather than invalidating existing ones.
 
 ---
 
@@ -1001,14 +1024,19 @@ Example scenarios:
 - Open repository
 - Stage file
 - Partial stage
-- Commit
+- Partial stage in a repository with a clean filter configured, covering the Git LFS class of bug
+- Discard, and undo from the pre-image
+- Commit, including a repository with a `pre-commit` hook that modifies staged files
 - Push
 - Pull
 - Branch checkout
 - Rename
 - Delete
 - Large repositories
-- Merge conflicts (future)
+- Conflicted repository is displayed as conflicted, never as clean
+- Aborted checkout and aborted pull are reported accurately
+- `index.lock` held by another process
+- Git missing, and Git older than the minimum supported version
 
 ---
 
@@ -1194,7 +1222,7 @@ Not included in Phase 1:
 - AI
 - Merge conflict *resolution*. Detection and display are in scope; a three-pane merge editor is not.
 - Blame
-- History browser
+- History browser. A placeholder slot exists in the window layout; nothing is implemented behind it.
 - Stash UI. The two-operation stash escape hatch is in scope; browsing, listing, and partial stashing are not.
 - Cherry-pick
 - Rebase UI
@@ -1205,9 +1233,100 @@ Not included in Phase 1:
 
 ---
 
+# Milestones
+
+Risk first, not workflow first.
+
+The purpose-built diff control is the only decision in this plan that could be wrong in a way that costs a rewrite. Everything else is well-understood plumbing. So it gets proven while changing course is still cheap, rather than arriving last after the comfortable work is done.
+
+Each milestone has exit criteria. Performance budgets attach to the milestone where the relevant path first exists, so performance is enforced continuously rather than audited at the end.
+
+## M1 — Walking skeleton
+
+Open a repository, list changed files, select one, see its unified diff.
+
+Exercises every genuinely new component end to end: CliWrap invocation, porcelain v2 parsing, patch parsing, `FileDiff`, row projection, and the custom control.
+
+Deliberately absent: staging, syntax highlighting, side-by-side, change detection.
+
+Exit criteria:
+
+- Cold start to window visible within budget.
+- Repository open to file list within budget, Medium tier.
+- Selecting a cached file performs zero `git` invocations.
+- No `git` invocation on the UI synchronisation context.
+- Architecture test passing: `Core`, `Git`, `Diff` reference no Avalonia assembly.
+
+## M2 — The diff experience
+
+The differentiator, finished before anything else starts.
+
+- Side-by-side, and instant switching.
+- Intra-line refinement.
+- Syntax highlighting with whole-file tokenisation and the size cap.
+- Collapsible unchanged sections.
+- Whitespace indicators, horizontal scrolling, keyboard navigation.
+- Row-range selection with copy as patch, copy left, copy right.
+
+Exit criteria:
+
+- Mode switch within budget, performing zero `git` invocations and tokenising zero lines.
+- Uncached diff to first paint within budget.
+- Every frame within budget while scrolling the pathological corpus.
+- Row projection and token span snapshots pinned.
+
+At this point the application is dogfoodable as a read-only review tool, before it can stage anything.
+
+## M3 — Write path
+
+- Stage and unstage at file, hunk, and line granularity.
+- Discard with undo.
+- The concurrency gate, epoch guarding, and the optimistic overlay.
+- Commit, with streamed hook output, cancellation, and `--no-verify`.
+
+Exit criteria:
+
+- Staging a hunk performs exactly one index-mutating invocation.
+- Optimistic update within budget; authoritative state within budget.
+- Generated patch snapshots pinned for hunk and line staging.
+- Partial staging verified against a repository with a clean filter configured, so the LFS class of bug is covered.
+- Cancellation tests passing for all three classes.
+
+## M4 — Repository lifecycle
+
+- Branches: checkout, create, delete, rename, fetch.
+- Pull `--ff-only`, with merge and rebase opt-in.
+- Push.
+- Conflict and in-progress state detection and display.
+- The stash escape hatch.
+- Change detection, and the fsmonitor opt-in prompt.
+
+Exit criteria:
+
+- Status refresh within budget on Medium and Large tiers.
+- Concurrency tests passing with refresh, stage, checkout, and diff in flight together.
+- A conflicted repository is never displayed as clean.
+- Aborted checkout and aborted pull leave a state the application reports accurately.
+
+## M5 — Polish and measurement
+
+- Settings, window state, panel sizes, theme persistence.
+- Diagnostics overlay.
+- Corpora and work assertions wired into Windows CI.
+- Nightly macOS leg and nightly benchmark trend tracking.
+
+Exit criteria:
+
+- Every budget enforced in CI.
+- Coverage floor met on `Core`, `Git`, and `Diff`.
+
+---
+
 # Definition of Done
 
 A developer should comfortably replace SourceTree for daily local development.
+
+Reached at the end of M4; M5 makes it measurable and maintainable.
 
 Supported workflow:
 
@@ -1215,12 +1334,14 @@ Supported workflow:
 - Review local changes
 - Stage changes
 - Partial stage
+- Discard changes
 - Commit
 - Push
 - Pull
 - Basic branch management
+- Survive a conflicted repository honestly
 
-The application should feel significantly faster than existing Git clients.
+"Significantly faster than existing Git clients" is not a feeling to be assessed at the end. It is the budget table, enforced per milestone.
 
 ---
 

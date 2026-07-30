@@ -2,7 +2,7 @@
 
 A fast, cross-platform Git client focused on code review.
 
-CodeSift is in early development. See [Plan](Plan) for the Phase 1 implementation plan.
+CodeSift is in early development. See [Plan.md](Plan.md) for the Phase 1 implementation plan.
 
 ## Requirements
 
