@@ -69,8 +69,11 @@ Requirements:
 ## Framework
 
 - .NET 10
-- Avalonia UI
+- Avalonia UI 12
 - MVVM
+- TextMateSharp for syntax tokenisation
+
+Avalonia 12 rather than 11.3.x: the only real reason to pin to 11 was AvaloniaEdit, whose stable line targets 11, and AvaloniaEdit is not used.
 
 ## Git
 
@@ -403,6 +406,44 @@ Layout is the only thing recomputed. Syntax tokens are keyed by content identity
 
 ---
 
+## Rendering
+
+A purpose-built virtualized diff control, not AvaloniaEdit.
+
+- Fixed row height, with virtualization keyed directly to the `DiffRow` projection, so painting is O(viewport) regardless of diff size.
+- Avalonia `TextLayout` for shaping.
+- TextMateSharp for tokenisation. It is a standalone tokeniser and theme engine, independent of AvaloniaEdit.
+- Own gutters, per-row backgrounds, and intra-line span painting.
+- Annotations hit test against rows, which are owned objects rather than editor document lines.
+
+AvaloniaEdit is rejected:
+
+- Side-by-side alignment needs blank padding rows on the shorter side of a change block. In a `TextDocument` that means inserting placeholder lines, which shifts line numbers and breaks `(ContentId, line)` anchoring. The row projection would have to be built anyway, while still paying for an editable document.
+- Its Avalonia 12 build is `12.0.0-rc1`. The stable line targets Avalonia 11.
+- Syntax highlighting does not require it.
+
+Accepted cost: text selection is hand built. Phase 1 ships row-range selection with copy as patch, copy left, and copy right, which suits review better than character selection. Character-level selection within a row comes later.
+
+## Syntax Highlighting
+
+Tokenise whole file versions, never visible hunks.
+
+TextMate grammars are stateful line to line, so a hunk beginning inside a block comment or multi-line string highlights incorrectly if tokenised alone.
+
+- Fetch both full blobs via `cat-file --batch`.
+- Tokenise each version once and cache tokens by `ContentId`.
+- Map tokens onto diff lines.
+- Above a configured size or line-length threshold, skip highlighting and render plain text. Whole-file tokenisation is otherwise unbounded work. This threshold is what "large file optimisation" concretely means.
+
+## Progressive Behaviour
+
+Fixed-height virtualization already makes painting cheap, so progressive *painting* is not the mechanism.
+
+What is progressive:
+
+- Patch parsing. Stream the patch and publish hunks as they arrive.
+- Tokenisation. Allowed to arrive after first paint and repaint in place.
+
 ## Features
 
 - Syntax highlighting
@@ -411,7 +452,6 @@ Layout is the only thing recomputed. Syntax tokens are keyed by content identity
 - Collapsible unchanged sections
 - Whitespace indicators
 - Large file optimisation
-- Progressive rendering
 - Horizontal scrolling
 - Keyboard navigation
 
