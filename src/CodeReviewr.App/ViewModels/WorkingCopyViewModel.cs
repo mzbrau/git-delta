@@ -27,6 +27,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly IGitRemoteService _remotes;
     private readonly IGitConflictService _conflicts;
     private readonly IGitStashService _stash;
+    private readonly IGitHistoryService _history;
     private readonly ISettingsStore _settings;
     private readonly NotificationService _notifications;
     private readonly IConfirmDialog _confirm;
@@ -36,7 +37,11 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     private CancellationTokenSource? _diffCts;
+    private CancellationTokenSource? _historyCts;
     private string? _repoPath;
+    private readonly List<CommitInfo> _allHistoryCommits = [];
+    private readonly List<FileItemViewModel> _allHistoryFiles = [];
+    private const int HistoryPageSize = 300;
     private FileDiff? _currentDiff;
     private readonly List<PendingMutation> _pending = [];
     private long _statusEpoch;
@@ -65,6 +70,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         IGitRemoteService remotes,
         IGitConflictService conflicts,
         IGitStashService stash,
+        IGitHistoryService history,
         ISettingsStore settings,
         NotificationService notifications,
         IConfirmDialog confirm,
@@ -82,6 +88,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         _remotes = remotes;
         _conflicts = conflicts;
         _stash = stash;
+        _history = history;
         _settings = settings;
         _notifications = notifications;
         _confirm = confirm;
@@ -104,6 +111,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     public ObservableCollection<FileItemViewModel> UnstagedFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> ConflictedFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> StashFiles { get; } = [];
+    public ObservableCollection<FileItemViewModel> HistoryFiles { get; } = [];
+    public ObservableCollection<CommitInfo> HistoryCommits { get; } = [];
     public ObservableCollection<DiffRow> DiffRows { get; } = [];
     public ObservableCollection<BranchInfo> Branches { get; } = [];
     public ObservableCollection<StashInfo> Stashes { get; } = [];
@@ -139,9 +148,16 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private bool _prRaisedExpanded = true;
     [ObservableProperty] private WorkspaceMode _workspaceMode = WorkspaceMode.FileStatus;
     [ObservableProperty] private StashInfo? _selectedStash;
+    [ObservableProperty] private CommitInfo? _selectedCommit;
     [ObservableProperty] private bool _isStashing;
     [ObservableProperty] private string _fileFilter = "";
     [ObservableProperty] private bool _hasFileFilter;
+    [ObservableProperty] private string _historyFileFilter = "";
+    [ObservableProperty] private bool _hasHistoryFileFilter;
+    [ObservableProperty] private string _historySearchText = "";
+    [ObservableProperty] private bool _hasHistorySearch;
+    [ObservableProperty] private bool _isHistoryLoading;
+    [ObservableProperty] private bool _hasMoreHistory;
     [ObservableProperty] private bool _isPushing;
     [ObservableProperty] private bool _isPulling;
     [ObservableProperty] private bool _isFetching;
@@ -224,6 +240,18 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     public bool HasStagedFiles => StagedFiles.Count > 0;
     public bool ShowCommitDock => IsFileStatusMode && HasStagedFiles;
+    public bool ShowCommitDetailsDock => IsHistoryMode && SelectedCommit is not null;
+
+    public string? SelectedCommitSubject => SelectedCommit?.Subject;
+    public string? SelectedCommitBody =>
+        SelectedCommit is { Body.Length: > 0 } c ? c.Body : null;
+    public bool HasSelectedCommitBody => !string.IsNullOrWhiteSpace(SelectedCommitBody);
+    public string? SelectedCommitOid => SelectedCommit?.Oid;
+    public string? SelectedCommitAuthor => SelectedCommit?.AuthorDisplay;
+    public string? SelectedCommitDate =>
+        SelectedCommit is null ? null : FormatCommitDate(SelectedCommit.AuthorDate);
+    public string? SelectedCommitDecorations =>
+        SelectedCommit is { Decorations.Count: > 0 } c ? c.DecorationsDisplay : null;
 
     partial void OnCurrentBranchChanged(string? value) => OnPropertyChanged(nameof(CommitButtonLabel));
     partial void OnStagingDisabledReasonChanged(string? value) => OnPropertyChanged(nameof(DiffFooterText));
@@ -243,8 +271,26 @@ public partial class WorkingCopyViewModel : ObservableObject
             ApplyFileFilter();
     }
 
+    partial void OnHistoryFileFilterChanged(string value)
+    {
+        HasHistoryFileFilter = !string.IsNullOrWhiteSpace(value);
+        ApplyHistoryFileFilter();
+    }
+
+    partial void OnHistorySearchTextChanged(string value)
+    {
+        HasHistorySearch = !string.IsNullOrWhiteSpace(value);
+        ApplyHistoryFilter();
+    }
+
     [RelayCommand]
     private void ClearFileFilter() => FileFilter = "";
+
+    [RelayCommand]
+    private void ClearHistoryFileFilter() => HistoryFileFilter = "";
+
+    [RelayCommand]
+    private void ClearHistorySearch() => HistorySearchText = "";
     partial void OnIsPushingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsPullingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsFetchingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
@@ -285,6 +331,8 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedFileAbsolutePath));
         WorkspaceMode = WorkspaceMode.FileStatus;
         SelectedStash = null;
+        SelectedCommit = null;
+        ClearHistoryState();
         _watcher.WatchRepository(path);
         await RefreshAsync();
         await LoadBranchesAsync();
@@ -300,11 +348,23 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(IsFileStatusNavSelected));
         OnPropertyChanged(nameof(IsHistoryNavSelected));
         OnPropertyChanged(nameof(ShowCommitDock));
+        OnPropertyChanged(nameof(ShowCommitDetailsDock));
     }
 
     partial void OnSelectedStashChanged(StashInfo? value) =>
         OnPropertyChanged(nameof(FileListHeader));
 
+    partial void OnSelectedCommitChanged(CommitInfo? value)
+    {
+        OnPropertyChanged(nameof(ShowCommitDetailsDock));
+        OnPropertyChanged(nameof(SelectedCommitSubject));
+        OnPropertyChanged(nameof(SelectedCommitBody));
+        OnPropertyChanged(nameof(HasSelectedCommitBody));
+        OnPropertyChanged(nameof(SelectedCommitOid));
+        OnPropertyChanged(nameof(SelectedCommitAuthor));
+        OnPropertyChanged(nameof(SelectedCommitDate));
+        OnPropertyChanged(nameof(SelectedCommitDecorations));
+    }
     private async Task EnableFsmonitorAsync()
     {
         if (_repoPath is null) return;
@@ -444,13 +504,18 @@ public partial class WorkingCopyViewModel : ObservableObject
         ApplySelectionState(restored, requestViewSync: true);
     }
 
-    private bool MatchesFilter(FileItemViewModel file)
+    private bool MatchesFilter(FileItemViewModel file) => MatchesPathFilter(file, FileFilter);
+
+    private bool MatchesHistoryFileFilter(FileItemViewModel file) =>
+        MatchesPathFilter(file, HistoryFileFilter);
+
+    private static bool MatchesPathFilter(FileItemViewModel file, string filter)
     {
-        if (string.IsNullOrWhiteSpace(FileFilter)) return true;
+        if (string.IsNullOrWhiteSpace(filter)) return true;
         var path = file.Path.Value ?? "";
         var name = file.Name ?? "";
-        return path.Contains(FileFilter, StringComparison.OrdinalIgnoreCase)
-               || name.Contains(FileFilter, StringComparison.OrdinalIgnoreCase);
+        return path.Contains(filter, StringComparison.OrdinalIgnoreCase)
+               || name.Contains(filter, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Called from the view when ListBox multi-selection changes.</summary>
@@ -604,8 +669,11 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         WorkspaceMode = WorkspaceMode.FileStatus;
         SelectedStash = null;
-        StashFiles.Clear();
+        SelectedCommit = null;
+        _allHistoryFiles.Clear();
+        HistoryFiles.Clear();
         DiffEmptyMessage = "Select a file to view its diff";
+        DiffOverlayMessage = null;
         if (_selectedFiles.Count == 1)
             _ = LoadDiffForSelectionAsync(_selectedFiles[0]);
         else
@@ -614,6 +682,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             SelectedFile = null;
         }
         OnPropertyChanged(nameof(FileListHeader));
+        OnPropertyChanged(nameof(ShowCommitDetailsDock));
     }
 
     [RelayCommand]
@@ -628,10 +697,248 @@ public partial class WorkingCopyViewModel : ObservableObject
         DiffRows.Clear();
         _currentDiff = null;
         ClearImagePreview();
-        DiffEmptyMessage = "History is not available yet";
-        DiffOverlayMessage = "History coming soon";
+        SelectedCommit = null;
+        _allHistoryFiles.Clear();
+        HistoryFiles.Clear();
+        DiffEmptyMessage = "Select a commit";
+        DiffOverlayMessage = null;
+        CanStageFromDiff = false;
+        StagingDisabledReason = "History diffs are read-only.";
+        OnPropertyChanged(nameof(CanStageLines));
+        OnPropertyChanged(nameof(CanUnstageLines));
+        OnPropertyChanged(nameof(CanDiscardLines));
         OnPropertyChanged(nameof(FileListHeader));
         OnPropertyChanged(nameof(DiffFooterText));
+        OnPropertyChanged(nameof(ShowCommitDetailsDock));
+        _ = LoadHistoryAsync(reset: true);
+    }
+
+    [RelayCommand]
+    private async Task LoadMoreHistoryAsync()
+    {
+        if (!HasMoreHistory || IsHistoryLoading) return;
+        await LoadHistoryAsync(reset: false);
+    }
+
+    public void SelectCommit(CommitInfo? commit) => _ = SelectCommitAsync(commit);
+
+    private async Task SelectCommitAsync(CommitInfo? commit)
+    {
+        if (!IsHistoryMode) return;
+
+        SelectedCommit = commit;
+        SelectedFile = null;
+        _selectedFiles.Clear();
+        SelectedFileCount = 0;
+        _allHistoryFiles.Clear();
+        HistoryFiles.Clear();
+        DiffRows.Clear();
+        _currentDiff = null;
+        ClearImagePreview();
+        CanStageFromDiff = false;
+        StagingDisabledReason = "History diffs are read-only.";
+        OnPropertyChanged(nameof(CanStageLines));
+        OnPropertyChanged(nameof(CanUnstageLines));
+        OnPropertyChanged(nameof(CanDiscardLines));
+
+        if (commit is null || _repoPath is null)
+        {
+            DiffEmptyMessage = "Select a commit";
+            DiffOverlayMessage = null;
+            OnPropertyChanged(nameof(DiffFooterText));
+            return;
+        }
+
+        DiffEmptyMessage = "Select a file to view its diff";
+        DiffOverlayMessage = null;
+        OnPropertyChanged(nameof(DiffFooterText));
+
+        try
+        {
+            var files = await _history.GetCommitFilesAsync(_repoPath, commit.Oid);
+            _allHistoryFiles.Clear();
+            foreach (var (path, kind) in files)
+                _allHistoryFiles.Add(new FileItemViewModel(path, kind, isStagedList: false));
+
+            ApplyHistoryFileFilter(autoSelectFirst: true);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to load commit files: {ex.Message}");
+        }
+    }
+
+    private void ApplyHistoryFileFilter(bool autoSelectFirst = false)
+    {
+        var previousPath = _selectedFiles.FirstOrDefault()?.Path.Value
+                           ?? SelectedFile?.Path.Value;
+
+        _suppressSelectionSync = true;
+        try
+        {
+            HistoryFiles.Clear();
+            foreach (var f in _allHistoryFiles.Where(MatchesHistoryFileFilter))
+                HistoryFiles.Add(f);
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
+
+        if (HistoryFiles.Count == 0)
+        {
+            if (_selectedFiles.Count > 0 || SelectedFile is not null)
+            {
+                _selectedFiles.Clear();
+                SelectedFileCount = 0;
+                SelectedFile = null;
+                DiffRows.Clear();
+                _currentDiff = null;
+                ClearImagePreview();
+                DiffEmptyMessage = SelectedCommit is null
+                    ? "Select a commit"
+                    : "Select a file to view its diff";
+                DiffOverlayMessage = null;
+                OnPropertyChanged(nameof(DiffFooterText));
+                SelectionSyncRequested?.Invoke();
+            }
+            return;
+        }
+
+        FileItemViewModel? match = null;
+        if (!autoSelectFirst && previousPath is not null)
+        {
+            match = HistoryFiles.FirstOrDefault(f =>
+                string.Equals(f.Path.Value, previousPath, StringComparison.Ordinal));
+        }
+
+        match ??= HistoryFiles[0];
+
+        if (_selectedFiles.Count == 1
+            && ReferenceEquals(_selectedFiles[0], match)
+            && ReferenceEquals(SelectedFile, match))
+        {
+            SelectionSyncRequested?.Invoke();
+            return;
+        }
+
+        SetFileSelection([match]);
+        SelectionSyncRequested?.Invoke();
+    }
+
+    private async Task LoadHistoryAsync(bool reset)
+    {
+        if (_repoPath is null) return;
+
+        _historyCts?.Cancel();
+        _historyCts = new CancellationTokenSource();
+        var ct = _historyCts.Token;
+
+        IsHistoryLoading = true;
+        try
+        {
+            if (reset)
+            {
+                _allHistoryCommits.Clear();
+                HistoryCommits.Clear();
+                HasMoreHistory = false;
+            }
+
+            var skip = _allHistoryCommits.Count;
+            var page = await _history.ListCommitsAsync(_repoPath, skip, HistoryPageSize, ct);
+            ct.ThrowIfCancellationRequested();
+
+            foreach (var c in page)
+                _allHistoryCommits.Add(c);
+
+            HasMoreHistory = page.Count >= HistoryPageSize;
+            ApplyHistoryFilter(preserveSelection: !reset);
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to load history: {ex.Message}");
+        }
+        finally
+        {
+            IsHistoryLoading = false;
+        }
+    }
+
+    private void ApplyHistoryFilter(bool preserveSelection = true)
+    {
+        var selectedOid = SelectedCommit?.Oid;
+        var query = HistorySearchText.Trim();
+
+        HistoryCommits.Clear();
+        foreach (var commit in _allHistoryCommits)
+        {
+            if (MatchesHistorySearch(commit, query))
+                HistoryCommits.Add(commit);
+        }
+
+        if (!preserveSelection || selectedOid is null)
+            return;
+
+        var stillVisible = HistoryCommits.FirstOrDefault(c =>
+            string.Equals(c.Oid, selectedOid, StringComparison.Ordinal));
+        if (stillVisible is null && SelectedCommit is not null)
+        {
+            // Keep details if filtered out? Plan: keep SelectedCommit if still visible.
+            // If not visible, clear selection.
+            SelectedCommit = null;
+            _allHistoryFiles.Clear();
+            HistoryFiles.Clear();
+            DiffRows.Clear();
+            DiffEmptyMessage = "Select a commit";
+        }
+        else if (stillVisible is not null && !ReferenceEquals(SelectedCommit, stillVisible))
+        {
+            SelectedCommit = stillVisible;
+        }
+    }
+
+    private static bool MatchesHistorySearch(CommitInfo commit, string query)
+    {
+        if (string.IsNullOrEmpty(query))
+            return true;
+
+        return commit.Subject.Contains(query, StringComparison.OrdinalIgnoreCase)
+               || commit.AuthorName.Contains(query, StringComparison.OrdinalIgnoreCase)
+               || commit.AuthorEmail.Contains(query, StringComparison.OrdinalIgnoreCase)
+               || commit.ShortOid.Contains(query, StringComparison.OrdinalIgnoreCase)
+               || commit.Oid.Contains(query, StringComparison.OrdinalIgnoreCase)
+               || commit.Body.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ClearHistoryState()
+    {
+        _historyCts?.Cancel();
+        _allHistoryCommits.Clear();
+        HistoryCommits.Clear();
+        _allHistoryFiles.Clear();
+        HistoryFiles.Clear();
+        SelectedCommit = null;
+        HistorySearchText = "";
+        HistoryFileFilter = "";
+        HasMoreHistory = false;
+        IsHistoryLoading = false;
+    }
+
+    public static string FormatCommitDate(DateTimeOffset date)
+    {
+        var local = date.ToLocalTime();
+        var now = DateTimeOffset.Now;
+        if (local.Date == now.Date)
+            return $"Today at {local:HH:mm}";
+        if (local.Date == now.Date.AddDays(-1))
+            return $"Yesterday at {local:HH:mm}";
+        if (local.Year == now.Year)
+            return local.ToString("d MMM yyyy");
+        return local.ToString("d MMM yyyy");
     }
 
     [RelayCommand]
@@ -640,6 +947,9 @@ public partial class WorkingCopyViewModel : ObservableObject
         if (stash is null || _repoPath is null) return;
         WorkspaceMode = WorkspaceMode.Stash;
         SelectedStash = stash;
+        SelectedCommit = null;
+        _allHistoryFiles.Clear();
+        HistoryFiles.Clear();
         SelectedFile = null;
         _selectedFiles.Clear();
         SelectedFileCount = 0;
@@ -654,6 +964,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(CanUnstageLines));
         OnPropertyChanged(nameof(CanDiscardLines));
         OnPropertyChanged(nameof(FileListHeader));
+        OnPropertyChanged(nameof(ShowCommitDetailsDock));
 
         try
         {
@@ -761,7 +1072,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         if (file is null || _repoPath is null)
         {
             DiffEmptyMessage = IsHistoryMode
-                ? "History is not available yet"
+                ? SelectedCommit is null ? "Select a commit" : "Select a file to view its diff"
                 : "Select a file to view its diff";
             OnPropertyChanged(nameof(DiffFooterText));
             return;
@@ -770,6 +1081,12 @@ public partial class WorkingCopyViewModel : ObservableObject
         if (IsStashMode)
         {
             await LoadStashDiffAsync(file, ct);
+            return;
+        }
+
+        if (IsHistoryMode)
+        {
+            await LoadCommitDiffAsync(file, ct);
             return;
         }
 
@@ -1662,6 +1979,64 @@ public partial class WorkingCopyViewModel : ObservableObject
         catch (Exception ex)
         {
             DiffEmptyMessage = $"Failed to load stash diff: {ex.Message}";
+            OnPropertyChanged(nameof(DiffFooterText));
+        }
+        finally
+        {
+            IsLoadingDiff = false;
+            UpdateDiffOverlay();
+        }
+    }
+
+    private async Task LoadCommitDiffAsync(FileItemViewModel file, CancellationToken ct)
+    {
+        if (_repoPath is null || SelectedCommit is null) return;
+
+        CanStageFromDiff = false;
+        StagingDisabledReason = "History diffs are read-only.";
+        OnPropertyChanged(nameof(CanStageLines));
+        OnPropertyChanged(nameof(CanUnstageLines));
+        OnPropertyChanged(nameof(CanDiscardLines));
+
+        IsLoadingDiff = true;
+        try
+        {
+            var options = BuildDiffOptions();
+            var rawPatch = await _history.GetCommitPatchAsync(_repoPath, SelectedCommit.Oid, file.Path, options, ct);
+            ct.ThrowIfCancellationRequested();
+
+            var diff = string.IsNullOrWhiteSpace(rawPatch) && file.Kind is ChangeKind.Added
+                ? UntrackedFileDiff.Create(file.Path, string.Empty, DiffTarget.HeadToWorktree)
+                : PatchParser.Parse(rawPatch, DiffTarget.HeadToWorktree);
+
+            _currentDiff = ApplyIntraLine(diff);
+            UpdateDiffStats(_currentDiff);
+
+            if (IsImagePath(file.Path.Value))
+            {
+                ClearImagePreview();
+                IsImagePreview = false;
+                DiffEmptyMessage = "Image preview is not available for history entries yet";
+            }
+            else if (_currentDiff.IsBinary)
+            {
+                DiffEmptyMessage = "Binary file";
+            }
+            else
+            {
+                ProjectRows(_currentDiff);
+                DiffEmptyMessage = DiffRows.Count == 0 ? "No differences" : "Select a file to view its diff";
+            }
+
+            OnPropertyChanged(nameof(DiffFooterText));
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored
+        }
+        catch (Exception ex)
+        {
+            DiffEmptyMessage = $"Failed to load commit diff: {ex.Message}";
             OnPropertyChanged(nameof(DiffFooterText));
         }
         finally

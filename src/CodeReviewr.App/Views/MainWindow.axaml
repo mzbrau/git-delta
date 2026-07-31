@@ -268,10 +268,13 @@
                       </Style>
                     </Button.Styles>
                     <DockPanel>
-                      <TextBlock DockPanel.Dock="Right" Text="{Binding WorkingCopy.WorkingCopyChangeCount}"
-                                 FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.7"
-                                 VerticalAlignment="Center"
-                                 IsVisible="{Binding WorkingCopy.WorkingCopyChangeCount, Converter={x:Static conv:ForgeConverters.IsPositive}}" />
+                      <Border DockPanel.Dock="Right" Classes="Chip" VerticalAlignment="Center"
+                              IsVisible="{Binding WorkingCopy.WorkingCopyChangeCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
+                        <TextBlock Text="{Binding WorkingCopy.WorkingCopyChangeCount}"
+                                   FontFamily="{DynamicResource ForgeCodeFont}"
+                                   FontSize="{DynamicResource ForgeBadgeFontSize}"
+                                   VerticalAlignment="Center" />
+                      </Border>
                       <StackPanel Orientation="Horizontal" Spacing="8">
                         <icons:MaterialIcon Kind="FileDocumentOutline" Width="16" Height="16" />
                         <TextBlock Text="File Status" VerticalAlignment="Center"
@@ -409,10 +412,11 @@
                       Background="{DynamicResource ForgeOutlineVariantBrush}"
                       DragCompleted="OnColumnSplitterDragCompleted" />
 
-        <!-- File Status -->
+        <!-- File Status / Stash -->
         <Border Grid.Column="2" Background="{DynamicResource ForgeBackgroundBrush}"
                 BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0"
-                ClipToBounds="True">
+                ClipToBounds="True"
+                IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}">
           <DockPanel>
             <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
                     Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
@@ -457,17 +461,7 @@
               </StackPanel>
             </Border>
 
-            <!-- History placeholder -->
-            <Border IsVisible="{Binding WorkingCopy.IsHistoryMode}"
-                    VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24">
-              <StackPanel Spacing="8" HorizontalAlignment="Center">
-                <icons:MaterialIcon Kind="History" Width="32" Height="32" Opacity="0.4"
-                                    HorizontalAlignment="Center" />
-                <TextBlock Text="History coming soon" Opacity="0.55" HorizontalAlignment="Center" />
-              </StackPanel>
-            </Border>
-
-            <ScrollViewer IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+            <ScrollViewer>
               <StackPanel Spacing="16" Margin="8,8,8,12">
                 <!-- Stash files -->
                 <StackPanel IsVisible="{Binding WorkingCopy.IsStashMode}">
@@ -706,10 +700,12 @@
 
         <GridSplitter Grid.Column="3" Width="4" ResizeDirection="Columns"
                       Background="{DynamicResource ForgeOutlineVariantBrush}"
-                      DragCompleted="OnColumnSplitterDragCompleted" />
+                      DragCompleted="OnColumnSplitterDragCompleted"
+                      IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
 
-        <!-- Diff pane -->
-        <DockPanel Grid.Column="4" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}">
+        <!-- Diff pane (File Status / Stash) -->
+        <DockPanel Grid.Column="4" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                   IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}">
           <Border DockPanel.Dock="Top" Height="40" Padding="12,0"
                   Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
@@ -853,6 +849,313 @@
                        FontSize="14" Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
           </Panel>
         </DockPanel>
+
+        <!-- History mode: commit list on top; files + details + diff below -->
+        <Grid Grid.Column="2" Grid.ColumnSpan="3"
+              IsVisible="{Binding WorkingCopy.IsHistoryMode}"
+              RowDefinitions="*,4,*"
+              Background="{DynamicResource ForgeBackgroundBrush}">
+
+          <!-- Commit list -->
+          <DockPanel Grid.Row="0" MinHeight="160">
+            <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
+                    Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <TextBlock Text="History" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </Border>
+
+            <Border DockPanel.Dock="Top" Padding="8,6"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <Grid>
+                <TextBox Classes="Forge" Text="{Binding WorkingCopy.HistorySearchText}"
+                         PlaceholderText="Search commits…" Padding="8,6,28,6" />
+                <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
+                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
+                        Command="{Binding WorkingCopy.ClearHistorySearchCommand}"
+                        IsVisible="{Binding WorkingCopy.HasHistorySearch}"
+                        ToolTip.Tip="Clear search">
+                  <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                </Button>
+              </Grid>
+            </Border>
+
+            <Border DockPanel.Dock="Bottom" Padding="8,6"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
+                    IsVisible="{Binding WorkingCopy.HasMoreHistory}">
+              <Button Classes="Ghost" Content="Load more"
+                      Command="{Binding WorkingCopy.LoadMoreHistoryCommand}"
+                      HorizontalAlignment="Center"
+                      IsEnabled="{Binding WorkingCopy.IsHistoryLoading, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+            </Border>
+
+            <Border DockPanel.Dock="Bottom" Padding="8"
+                    IsVisible="{Binding WorkingCopy.IsHistoryLoading}">
+              <ProgressBar Height="3" IsIndeterminate="True" />
+            </Border>
+
+            <!-- Column headers -->
+            <Border DockPanel.Dock="Top" Padding="12,6"
+                    Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <Grid ColumnDefinitions="*,90,140,120">
+                <TextBlock Grid.Column="0" Text="Description" FontSize="10" FontWeight="Bold"
+                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                <TextBlock Grid.Column="1" Text="Commit" FontSize="10" FontWeight="Bold"
+                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                <TextBlock Grid.Column="2" Text="Author" FontSize="10" FontWeight="Bold"
+                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                <TextBlock Grid.Column="3" Text="Date" FontSize="10" FontWeight="Bold"
+                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+              </Grid>
+            </Border>
+
+            <ListBox x:Name="HistoryCommitList"
+                     ItemsSource="{Binding WorkingCopy.HistoryCommits}"
+                     SelectionMode="Single"
+                     SelectionChanged="OnHistoryCommitSelectionChanged">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="core:CommitInfo">
+                  <Border Padding="12,6">
+                    <Grid ColumnDefinitions="*,90,140,120">
+                      <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                        <ItemsControl ItemsSource="{Binding Decorations}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                              <StackPanel Orientation="Horizontal" Spacing="4" />
+                            </ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <Border Background="{DynamicResource ForgePrimaryContainerBrush}"
+                                      CornerRadius="3" Padding="5,1">
+                                <TextBlock Text="{Binding}" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource ForgeOnSurfaceBrush}" />
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding Subject}" TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Text="{Binding ShortOid}"
+                                 FontFamily="{DynamicResource ForgeCodeFont}" FontSize="12"
+                                 VerticalAlignment="Center"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                      <TextBlock Grid.Column="2" Text="{Binding AuthorName}" TextTrimming="CharacterEllipsis"
+                                 VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="3"
+                                 Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.CommitDateDisplay}}"
+                                 VerticalAlignment="Center"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" FontSize="12" />
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+              <ListBox.Styles>
+                <Style Selector="ListBoxItem">
+                  <Setter Property="Padding" Value="0" />
+                  <Setter Property="MinHeight" Value="32" />
+                </Style>
+              </ListBox.Styles>
+            </ListBox>
+          </DockPanel>
+
+          <GridSplitter Grid.Row="1" Height="4" ResizeDirection="Rows"
+                        Background="{DynamicResource ForgeOutlineVariantBrush}" />
+
+          <!-- Files + details | Diff -->
+          <Grid Grid.Row="2" ColumnDefinitions="300,4,*" MinHeight="180">
+            <Border Grid.Column="0" Background="{DynamicResource ForgeBackgroundBrush}"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0"
+                    ClipToBounds="True">
+              <DockPanel>
+                <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
+                        Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                        BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+                  <TextBlock Text="Files" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </Border>
+
+                <Border DockPanel.Dock="Top" Padding="8,6"
+                        BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+                  <Grid>
+                    <TextBox Classes="Forge" Text="{Binding WorkingCopy.HistoryFileFilter}"
+                             PlaceholderText="Filter files…" Padding="8,6,28,6" />
+                    <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
+                            HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
+                            Command="{Binding WorkingCopy.ClearHistoryFileFilterCommand}"
+                            IsVisible="{Binding WorkingCopy.HasHistoryFileFilter}"
+                            ToolTip.Tip="Clear filter">
+                      <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                    </Button>
+                  </Grid>
+                </Border>
+
+                <!-- Commit details dock (same slot as commit message on File Status) -->
+                <Border DockPanel.Dock="Bottom" Padding="12"
+                        Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                        BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
+                        IsVisible="{Binding WorkingCopy.ShowCommitDetailsDock}">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="{Binding WorkingCopy.SelectedCommitSubject}"
+                               FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding WorkingCopy.SelectedCommitBody}"
+                               FontSize="12" Opacity="0.8" TextWrapping="Wrap"
+                               IsVisible="{Binding WorkingCopy.HasSelectedCommitBody}" />
+                    <StackPanel Spacing="2" Margin="0,4,0,0">
+                      <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="Commit" Width="56" FontSize="11"
+                                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                        <TextBlock Text="{Binding WorkingCopy.SelectedCommitOid}" FontSize="11"
+                                   FontFamily="{DynamicResource ForgeCodeFont}" TextWrapping="Wrap" />
+                      </DockPanel>
+                      <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="Author" Width="56" FontSize="11"
+                                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                        <TextBlock Text="{Binding WorkingCopy.SelectedCommitAuthor}" FontSize="11"
+                                   TextWrapping="Wrap" />
+                      </DockPanel>
+                      <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="Date" Width="56" FontSize="11"
+                                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                        <TextBlock Text="{Binding WorkingCopy.SelectedCommitDate}" FontSize="11"
+                                   TextWrapping="Wrap" />
+                      </DockPanel>
+                      <DockPanel IsVisible="{Binding WorkingCopy.SelectedCommitDecorations, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}">
+                        <TextBlock DockPanel.Dock="Left" Text="Labels" Width="56" FontSize="11"
+                                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                        <TextBlock Text="{Binding WorkingCopy.SelectedCommitDecorations}" FontSize="11"
+                                   TextWrapping="Wrap" />
+                      </DockPanel>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
+                <ListBox x:Name="HistoryFileList"
+                         ItemsSource="{Binding WorkingCopy.HistoryFiles}"
+                         SelectionMode="Single"
+                         SelectionChanged="OnHistoryFileSelectionChanged"
+                         Margin="8,8,8,12">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FileItemViewModel">
+                      <Border Padding="8,4" CornerRadius="4">
+                        <DockPanel>
+                          <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                  Background="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                            <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold"
+                                       Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                          </Border>
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
+                                                Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                            <TextBlock Text="{Binding Name}" Classes="MonoPath" VerticalAlignment="Center"
+                                       ToolTip.Tip="{Binding Path.Value}" />
+                          </StackPanel>
+                        </DockPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                  <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                      <Setter Property="Padding" Value="0" />
+                      <Setter Property="MinHeight" Value="32" />
+                    </Style>
+                  </ListBox.Styles>
+                </ListBox>
+              </DockPanel>
+            </Border>
+
+            <GridSplitter Grid.Column="1" Width="4" ResizeDirection="Columns"
+                          Background="{DynamicResource ForgeOutlineVariantBrush}" />
+
+            <!-- Diff (same bindings as File Status pane) -->
+            <DockPanel Grid.Column="2" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}">
+              <Border DockPanel.Dock="Top" Height="40" Padding="12,0"
+                      Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <CheckBox Content="Ignore whitespace"
+                              IsChecked="{Binding WorkingCopy.IgnoreWhitespace}"
+                              FontSize="11" VerticalAlignment="Center" />
+                    <ToggleButton Content="{Binding WorkingCopy.FullFileToggleLabel}"
+                                  IsChecked="{Binding WorkingCopy.ShowFullFile}"
+                                  FontSize="11" Padding="8,4" />
+                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                                IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                      <TextBlock Text="Context" FontSize="11" VerticalAlignment="Center"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                      <ComboBox ItemsSource="{Binding WorkingCopy.ContextLineOptions}"
+                                SelectedIndex="{Binding WorkingCopy.ContextLinesIndex}"
+                                MinWidth="56" FontSize="11" />
+                    </StackPanel>
+                    <ComboBox SelectedItem="{Binding WorkingCopy.ViewMode}" MinWidth="120">
+                      <core:DiffViewMode>SideBySide</core:DiffViewMode>
+                      <core:DiffViewMode>Unified</core:DiffViewMode>
+                    </ComboBox>
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center"
+                              IsVisible="{Binding WorkingCopy.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                    <icons:MaterialIcon Kind="FileDocument" Width="18" Height="18"
+                                        Foreground="{DynamicResource ForgeStatusAddedBrush}" />
+                    <TextBlock Text="{Binding WorkingCopy.SelectedFile.Name}" FontWeight="SemiBold"
+                               ToolTip.Tip="{Binding WorkingCopy.SelectedFileAbsolutePath}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" Margin="8,0,0,0">
+                      <TextBlock Text="{Binding WorkingCopy.SelectedAddedLines, Converter={x:Static conv:ForgeConverters.PlusPrefix}}"
+                                 FontSize="10" Foreground="{DynamicResource ForgeStatusAddedBrush}" />
+                      <TextBlock Text="{Binding WorkingCopy.SelectedRemovedLines, Converter={x:Static conv:ForgeConverters.MinusPrefix}}"
+                                 FontSize="10" Foreground="{DynamicResource ForgeStatusDeletedBrush}" />
+                    </StackPanel>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <Border DockPanel.Dock="Top"
+                      IsVisible="{Binding WorkingCopy.ViewMode, Converter={x:Static conv:ForgeConverters.IsSideBySide}}"
+                      Height="24" Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+                <Grid ColumnDefinitions="*,*">
+                  <TextBlock Grid.Column="0" Text="PREVIOUS VERSION" FontSize="10" FontWeight="Bold"
+                             Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                             VerticalAlignment="Center" Margin="12,0" />
+                  <Border Grid.Column="1" BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0">
+                    <TextBlock Text="NEW VERSION" FontSize="10" FontWeight="Bold"
+                               Foreground="{DynamicResource ForgePrimaryBrush}"
+                               VerticalAlignment="Center" Margin="12,0" />
+                  </Border>
+                </Grid>
+              </Border>
+
+              <Border DockPanel.Dock="Bottom" Height="24" Padding="16,0"
+                      Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <Ellipse Width="8" Height="8" Fill="{DynamicResource ForgeStatusAddedBrush}" />
+                  <TextBlock Text="{Binding WorkingCopy.DiffFooterText}" FontSize="10"
+                             Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                </StackPanel>
+              </Border>
+
+              <Panel ClipToBounds="True">
+                <controls:DiffViewer Rows="{Binding WorkingCopy.DiffRows}"
+                                     ViewMode="{Binding WorkingCopy.ViewMode}"
+                                     EmptyMessage="{Binding WorkingCopy.DiffEmptyMessage}"
+                                     CanStageLines="False"
+                                     CanUnstageLines="False"
+                                     CanDiscardLines="False"
+                                     RowHeight="20" />
+                <Border Background="#80060e20"
+                        IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
+                  <ProgressBar Width="36" Height="36" IsIndeterminate="True"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock Text="{Binding WorkingCopy.DiffOverlayMessage}"
+                           IsVisible="{Binding WorkingCopy.DiffOverlayMessage, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           FontSize="14" Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+              </Panel>
+            </DockPanel>
+          </Grid>
+        </Grid>
       </Grid>
     </DockPanel>
 

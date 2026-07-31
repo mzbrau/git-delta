@@ -60,6 +60,9 @@ public static class ForgeConverters
     public static readonly IValueConverter IsSideBySide =
         new FuncValueConverter<DiffViewMode, bool>(mode => mode == DiffViewMode.SideBySide);
 
+    public static readonly IValueConverter CommitDateDisplay =
+        new FuncValueConverter<DateTimeOffset, string>(WorkingCopyViewModel.FormatCommitDate);
+
     public static readonly IValueConverter GitConsoleLineBrush =
         new FuncValueConverter<GitConsoleLineKind, IBrush>(kind => kind switch
         {

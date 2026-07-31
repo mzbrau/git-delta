@@ -7,6 +7,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
+using CodeReviewr.Core;
 
 namespace CodeReviewr.App.Views;
 
@@ -141,6 +142,23 @@ public partial class MainWindow : Window
             Vm.WorkingCopy.SetFileSelection([]);
     }
 
+    private void OnHistoryCommitSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionSync) return;
+        if (sender is not ListBox list) return;
+        Vm.WorkingCopy.SelectCommit(list.SelectedItem as CommitInfo);
+    }
+
+    private void OnHistoryFileSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionSync) return;
+        if (sender is not ListBox list) return;
+        if (list.SelectedItem is FileItemViewModel file)
+            Vm.WorkingCopy.SetFileSelection([file]);
+        else
+            Vm.WorkingCopy.SetFileSelection([]);
+    }
+
     private void OnToggleNavigatorCollapsed(object? sender, RoutedEventArgs e)
     {
         Vm.IsNavigatorCollapsed = !Vm.IsNavigatorCollapsed;
@@ -242,9 +260,18 @@ public partial class MainWindow : Window
             StagedFileList.SelectedItems?.Clear();
             UnstagedFileList.SelectedItems?.Clear();
             ConflictedFileList.SelectedItems?.Clear();
+            if (this.FindControl<ListBox>("HistoryFileList") is { } historyFiles)
+                historyFiles.SelectedItem = null;
 
             foreach (var file in Vm.WorkingCopy.SelectedFilesSnapshot)
             {
+                if (Vm.WorkingCopy.IsHistoryMode)
+                {
+                    if (this.FindControl<ListBox>("HistoryFileList") is { } hf)
+                        hf.SelectedItem = file;
+                    continue;
+                }
+
                 var list = file.IsConflicted ? ConflictedFileList
                     : file.IsStagedList ? StagedFileList
                     : UnstagedFileList;

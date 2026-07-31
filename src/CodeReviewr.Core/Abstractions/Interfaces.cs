@@ -150,6 +150,27 @@ public interface IGitStashService
         CancellationToken ct = default);
 }
 
+public interface IGitHistoryService
+{
+    Task<IReadOnlyList<CommitInfo>> ListCommitsAsync(
+        string repositoryPath,
+        int skip,
+        int take,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetCommitFilesAsync(
+        string repositoryPath,
+        string oid,
+        CancellationToken ct = default);
+
+    Task<string> GetCommitPatchAsync(
+        string repositoryPath,
+        string oid,
+        FilePath path,
+        DiffOptions options,
+        CancellationToken ct = default);
+}
+
 public interface IDiffCache
 {
     bool TryGet(FileDiffKey key, out FileDiff? diff);

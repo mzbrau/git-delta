@@ -35,6 +35,26 @@ public sealed record StashInfo(
     public string DisplayTitle => string.IsNullOrWhiteSpace(Message) ? Ref : Message;
 }
 
+public sealed record CommitInfo(
+    string Oid,
+    string ShortOid,
+    string Subject,
+    string Body,
+    string AuthorName,
+    string AuthorEmail,
+    DateTimeOffset AuthorDate,
+    IReadOnlyList<string> ParentOids,
+    IReadOnlyList<string> Decorations)
+{
+    public bool IsRoot => ParentOids.Count == 0;
+
+    public string AuthorDisplay =>
+        string.IsNullOrWhiteSpace(AuthorEmail) ? AuthorName : $"{AuthorName} <{AuthorEmail}>";
+
+    public string DecorationsDisplay =>
+        Decorations.Count == 0 ? "" : string.Join(", ", Decorations);
+}
+
 public sealed record DiscardedEntry(
     FilePath Path,
     ContentId ObjectId,

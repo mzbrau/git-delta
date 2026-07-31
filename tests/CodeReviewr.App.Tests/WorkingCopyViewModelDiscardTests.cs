@@ -31,6 +31,7 @@ public sealed class WorkingCopyViewModelDiscardTests
     private IGitRemoteService _remotes = null!;
     private IGitConflictService _conflicts = null!;
     private IGitStashService _stash = null!;
+    private IGitHistoryService _history = null!;
     private ISettingsStore _settings = null!;
     private IGitProcessRunner _runner = null!;
     private NotificationService _notifications = null!;
@@ -49,6 +50,7 @@ public sealed class WorkingCopyViewModelDiscardTests
         _remotes = Substitute.For<IGitRemoteService>();
         _conflicts = Substitute.For<IGitConflictService>();
         _stash = Substitute.For<IGitStashService>();
+        _history = Substitute.For<IGitHistoryService>();
         _settings = Substitute.For<ISettingsStore>();
         _runner = Substitute.For<IGitProcessRunner>();
         _notifications = new NotificationService();
@@ -58,6 +60,10 @@ public sealed class WorkingCopyViewModelDiscardTests
         _settings.Current.Returns(new AppSettings());
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns([]);
+        _stash.ListStashesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        _history.ListCommitsAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([]);
         _discard.RecentlyDiscarded.Returns([]);
     }
 
@@ -65,7 +71,7 @@ public sealed class WorkingCopyViewModelDiscardTests
     public void TearDown() => _watcher.Dispose();
 
     private WorkingCopyViewModel CreateVm() =>
-        new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash,
+        new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
             _settings, _notifications, _confirm, new IntraLineDiffer(), _runner, _watcher);
 
     private static StatusEntry Unstaged(string path, ChangeKind kind = ChangeKind.Modified) =>
@@ -152,7 +158,7 @@ public sealed class WorkingCopyViewModelDiscardTests
                 .Returns(Status(unstaged: [Unstaged("work.txt")]));
 
             var vm = new WorkingCopyViewModel(
-                _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash,
+                _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
                 _settings, _notifications, confirm, new IntraLineDiffer(), _runner, _watcher);
             await vm.OpenAsync(repo);
             vm.SetFileSelection([vm.UnstagedFiles[0]]);

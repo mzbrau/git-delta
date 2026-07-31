@@ -29,6 +29,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IGitCloneService, GitCloneService>();
         services.AddSingleton<IGitConflictService, GitConflictService>();
         services.AddSingleton<IGitStashService, GitStashService>();
+        services.AddSingleton<IGitHistoryService, GitHistoryService>();
         services.AddSingleton<GitRepositoryWatcher>();
 
         return services;
