@@ -36,6 +36,8 @@ public static class ServiceConfiguration
         services.AddSingleton<MainWindowViewModel>();
         services.AddTransient<WorkingCopyViewModel>();
         services.AddSingleton<NotificationService>();
+        services.AddSingleton<AvaloniaConfirmDialog>();
+        services.AddSingleton<IConfirmDialog>(sp => sp.GetRequiredService<AvaloniaConfirmDialog>());
         services.AddSingleton<DiagnosticsOverlayViewModel>();
         services.AddSingleton<GitConsoleViewModel>();
 

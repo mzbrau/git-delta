@@ -371,6 +371,12 @@
                            ScrollViewer.VerticalScrollBarVisibility="Disabled"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                            IsVisible="{Binding WorkingCopy.StagedExpanded}">
+                    <ListBox.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Header="Unstage"
+                                  Command="{Binding WorkingCopy.UnstageSelectedCommand}" />
+                      </ContextMenu>
+                    </ListBox.ContextMenu>
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
                         <StackPanel />
@@ -409,6 +415,9 @@
                 <StackPanel>
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                      <Button Classes="Link" Content="Discard"
+                              Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}"
+                              IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
                       <Button Classes="Link" Content="Stage Selected"
                               Command="{Binding WorkingCopy.StageSelectedCommand}"
                               IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
@@ -431,6 +440,14 @@
                            ScrollViewer.VerticalScrollBarVisibility="Disabled"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                            IsVisible="{Binding WorkingCopy.UnstagedExpanded}">
+                    <ListBox.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Header="Stage"
+                                  Command="{Binding WorkingCopy.StageSelectedCommand}" />
+                        <MenuItem Header="Discard"
+                                  Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
+                      </ContextMenu>
+                    </ListBox.ContextMenu>
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
                         <StackPanel />
@@ -517,20 +534,25 @@
                 <CheckBox Content="Ignore whitespace"
                           IsChecked="{Binding WorkingCopy.IgnoreWhitespace}"
                           FontSize="11" VerticalAlignment="Center" />
-                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                <ToggleButton Content="{Binding WorkingCopy.FullFileToggleLabel}"
+                              IsChecked="{Binding WorkingCopy.ShowFullFile}"
+                              FontSize="11" Padding="8,4" />
+                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                            IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
                   <TextBlock Text="Context" FontSize="11" VerticalAlignment="Center"
                              Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
                   <ComboBox ItemsSource="{Binding WorkingCopy.ContextLineOptions}"
-                            SelectedItem="{Binding WorkingCopy.ContextLines}"
+                            SelectedIndex="{Binding WorkingCopy.ContextLinesIndex}"
                             MinWidth="56" FontSize="11" />
                 </StackPanel>
-                <ToggleButton Content="Full file"
-                              IsChecked="{Binding WorkingCopy.ShowFullFile}"
-                              FontSize="11" Padding="8,4" />
                 <ComboBox SelectedItem="{Binding WorkingCopy.ViewMode}" MinWidth="120">
                   <core:DiffViewMode>SideBySide</core:DiffViewMode>
                   <core:DiffViewMode>Unified</core:DiffViewMode>
                 </ComboBox>
+                <Button Classes="Link" Content="Discard"
+                        Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}"
+                        IsVisible="{Binding WorkingCopy.CanDiscardSelection}"
+                        FontSize="11" VerticalAlignment="Center" />
                 <Button Classes="IconOnly">
                   <Button.Flyout>
                     <MenuFlyout Placement="BottomEdgeAlignedRight">
@@ -538,10 +560,10 @@
                                 Command="{Binding WorkingCopy.ToggleCombinedReviewCommand}" />
                       <MenuItem Header="Stage hunk" Command="{Binding WorkingCopy.StageHunkCommand}" />
                       <MenuItem Header="Unstage hunk" Command="{Binding WorkingCopy.UnstageHunkCommand}" />
+                      <MenuItem Header="Discard hunk" Command="{Binding WorkingCopy.DiscardHunkCommand}" />
                       <Separator />
-                      <MenuItem Header="Discard file"
-                                Command="{Binding WorkingCopy.DiscardFileCommand}"
-                                CommandParameter="{Binding WorkingCopy.SelectedFile}" />
+                      <MenuItem Header="Discard file(s)"
+                                Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
                     </MenuFlyout>
                   </Button.Flyout>
                   <icons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
@@ -594,6 +616,7 @@
                                  EmptyMessage="{Binding WorkingCopy.DiffEmptyMessage}"
                                  CanStageLines="{Binding WorkingCopy.CanStageLines}"
                                  CanUnstageLines="{Binding WorkingCopy.CanUnstageLines}"
+                                 CanDiscardLines="{Binding WorkingCopy.CanDiscardLines}"
                                  RowHeight="20" />
             <Border Background="#80060e20"
                     IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
@@ -662,10 +685,11 @@
               <TextBlock Text="DIFF OPTIONS" Classes="PanelHeader" Opacity="0.7" />
               <CheckBox Content="Ignore whitespace changes"
                         IsChecked="{Binding WorkingCopy.IgnoreWhitespace}" />
-              <StackPanel Orientation="Horizontal" Spacing="8">
+              <StackPanel Orientation="Horizontal" Spacing="8"
+                          IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
                 <TextBlock Text="Context lines" VerticalAlignment="Center" FontSize="12" />
                 <ComboBox ItemsSource="{Binding WorkingCopy.ContextLineOptions}"
-                          SelectedItem="{Binding WorkingCopy.ContextLines}"
+                          SelectedIndex="{Binding WorkingCopy.ContextLinesIndex}"
                           MinWidth="72" />
               </StackPanel>
             </StackPanel>

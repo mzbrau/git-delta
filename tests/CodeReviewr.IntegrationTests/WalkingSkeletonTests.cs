@@ -1,7 +1,6 @@
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
 using CodeReviewr.Core.Caching;
-using CodeReviewr.Core.Diagnostics;
 using CodeReviewr.Diff;
 using CodeReviewr.Git;
 using CodeReviewr.TestSupport;
@@ -64,12 +63,14 @@ public sealed class WalkingSkeletonTests
 
         _ = await diffs.GetDiffAsync(path, file, DiffTarget.IndexToWorktree, DiffOptions.Default);
 
-        using var listener = new WorkAssertionListener();
-        listener.Reset();
-        _ = await diffs.GetDiffAsync(path, file, DiffTarget.IndexToWorktree, DiffOptions.Default);
-        // Content-addressed cache may still call raw diff for oid lookup; assert cache was used via hit count
         var cache = sp.GetRequiredService<IDiffCache>();
-        Assert.That(cache.HitCount + cache.MissCount, Is.GreaterThan(0));
+        var hitsBefore = cache.HitCount;
+        var missesBefore = cache.MissCount;
+
+        _ = await diffs.GetDiffAsync(path, file, DiffTarget.IndexToWorktree, DiffOptions.Default);
+
+        Assert.That(cache.HitCount, Is.GreaterThan(hitsBefore), "Second identical diff should hit the content-addressed cache");
+        Assert.That(cache.MissCount, Is.EqualTo(missesBefore));
     }
 
     [Test]

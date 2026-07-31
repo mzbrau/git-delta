@@ -55,3 +55,42 @@ public sealed class GitEnvironmentTests
         Assert.That(File.Exists(info.Path) || info.Path is "git" or "git.exe", Is.True);
     }
 }
+
+public sealed class PorcelainRenameCopyIgnoredTests
+{
+    [Test]
+    public void Parses_Rename_Record()
+    {
+        var input = "2 R. N... 100644 100644 100644 " +
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa " +
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb " +
+                    "R100 new.txt\0old.txt\0";
+        var result = PorcelainStatusParser.Parse(input);
+        Assert.That(result.Staged, Has.Count.EqualTo(1));
+        Assert.That(result.Staged[0].Kind, Is.EqualTo(ChangeKind.Renamed));
+        Assert.That(result.Staged[0].Path.Value, Is.EqualTo("new.txt"));
+        Assert.That(result.Staged[0].OriginalPath?.Value, Is.EqualTo("old.txt"));
+    }
+
+    [Test]
+    public void Parses_Copy_Record()
+    {
+        var input = "2 C. N... 100644 100644 100644 " +
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa " +
+                    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb " +
+                    "C100 copy.txt\0src.txt\0";
+        var result = PorcelainStatusParser.Parse(input);
+        Assert.That(result.Staged, Has.Count.EqualTo(1));
+        Assert.That(result.Staged[0].Kind, Is.EqualTo(ChangeKind.Copied));
+        Assert.That(result.Staged[0].Path.Value, Is.EqualTo("copy.txt"));
+    }
+
+    [Test]
+    public void Ignored_Entries_Are_Not_Surfaced()
+    {
+        var result = PorcelainStatusParser.Parse("! ignored.bin\0? visible.txt\0");
+        Assert.That(result.Unstaged.Any(e => e.Path.Value == "ignored.bin"), Is.False);
+        Assert.That(result.Unstaged.Any(e => e.Path.Value == "visible.txt"), Is.True);
+    }
+}
+

@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
 
@@ -38,6 +39,9 @@ public partial class MainWindow : Window
         if (Vm.WindowWidth >= 640) Width = Vm.WindowWidth;
         if (Vm.WindowHeight >= 480) Height = Vm.WindowHeight;
         ApplyColumnWidths();
+
+        if (global::CodeReviewr.App.App.Services.GetService(typeof(AvaloniaConfirmDialog)) is AvaloniaConfirmDialog confirm)
+            confirm.Owner = this;
 
         // Defer repo open so the window can paint first.
         Dispatcher.UIThread.Post(() => _ = Vm.TryOpenLastRepositoryAsync(), DispatcherPriority.Background);
@@ -115,6 +119,38 @@ public partial class MainWindow : Window
         _multiSelectModifiers = e.KeyModifiers.HasFlag(KeyModifiers.Control)
                                 || e.KeyModifiers.HasFlag(KeyModifiers.Meta)
                                 || e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+
+        if (!e.GetCurrentPoint(sender as Control).Properties.IsRightButtonPressed
+            || sender is not ListBox list)
+            return;
+
+        var source = e.Source as Control;
+        while (source is not null && source is not ListBoxItem)
+            source = source.GetVisualParent() as Control;
+
+        if (source is not ListBoxItem { DataContext: FileItemViewModel file })
+            return;
+
+        if (list.SelectedItems?.Contains(file) == true)
+            return;
+
+        _suppressSelectionSync = true;
+        try
+        {
+            if (!_multiSelectModifiers)
+            {
+                ClearPeerSelections(list);
+                list.SelectedItems?.Clear();
+            }
+
+            list.SelectedItems?.Add(file);
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
+
+        SyncFileSelection();
     }
 
     private void OnFileSelectionChanged(object? sender, SelectionChangedEventArgs e)

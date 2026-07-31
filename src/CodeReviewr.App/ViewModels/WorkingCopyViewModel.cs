@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using Avalonia;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -26,6 +27,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly IGitStashService _stash;
     private readonly ISettingsStore _settings;
     private readonly NotificationService _notifications;
+    private readonly IConfirmDialog _confirm;
     private readonly IIntraLineDiffer _intraLine;
     private readonly IGitProcessRunner _runner;
     private readonly GitRepositoryWatcher _watcher;
@@ -58,6 +60,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         IGitStashService stash,
         ISettingsStore settings,
         NotificationService notifications,
+        IConfirmDialog confirm,
         IIntraLineDiffer intraLine,
         IGitProcessRunner runner,
         GitRepositoryWatcher watcher)
@@ -73,6 +76,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         _stash = stash;
         _settings = settings;
         _notifications = notifications;
+        _confirm = confirm;
         _intraLine = intraLine;
         _runner = runner;
         _watcher = watcher;
@@ -137,6 +141,23 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     public int[] ContextLineOptions { get; } = [1, 3, 5, 10, 25];
 
+    /// <summary>ComboBox index for <see cref="ContextLineOptions"/> (avoids object↔int SelectedItem binding).</summary>
+    public int ContextLinesIndex
+    {
+        get
+        {
+            var idx = Array.IndexOf(ContextLineOptions, ContextLines);
+            return idx >= 0 ? idx : 1; // default to 3
+        }
+        set
+        {
+            if (value < 0 || value >= ContextLineOptions.Length) return;
+            ContextLines = ContextLineOptions[value];
+        }
+    }
+
+    public string FullFileToggleLabel => ShowFullFile ? "Diff only" : "Full file";
+
     public IReadOnlyList<FileItemViewModel> SelectedFilesSnapshot => _selectedFiles;
 
     public bool HasRepository => _repoPath is not null;
@@ -172,6 +193,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnIsPullingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsFetchingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnSelectedFileCountChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
+    partial void OnHasUnstagedSelectionChanged(bool value) => OnPropertyChanged(nameof(CanDiscardSelection));
 
     partial void OnIgnoreWhitespaceChanged(bool value)
     {
@@ -182,6 +204,7 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     partial void OnContextLinesChanged(int value)
     {
+        OnPropertyChanged(nameof(ContextLinesIndex));
         if (value <= 0) return;
         _settings.Update(s => s.ContextLines = value);
         _ = _settings.SaveAsync();
@@ -191,6 +214,7 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     partial void OnShowFullFileChanged(bool value)
     {
+        OnPropertyChanged(nameof(FullFileToggleLabel));
         _expandedCollapses.Clear();
         _ = LoadDiffForSelectionAsync(SelectedFile);
     }
@@ -242,10 +266,7 @@ public partial class WorkingCopyViewModel : ObservableObject
                 StatusUpdated = true;
             }
 
-            if (Dispatcher.UIThread.CheckAccess())
-                ApplyStatus();
-            else
-                await Dispatcher.UIThread.InvokeAsync(ApplyStatus);
+            await InvokeOnUiAsync(ApplyStatus);
 
             CodeReviewrMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
             CodeReviewrMeters.RepositoryOpenMs.Record(sw.Elapsed.TotalMilliseconds);
@@ -502,19 +523,42 @@ public partial class WorkingCopyViewModel : ObservableObject
             : null;
         OnPropertyChanged(nameof(CanStageLines));
         OnPropertyChanged(nameof(CanUnstageLines));
+        OnPropertyChanged(nameof(CanDiscardLines));
 
         IsLoadingDiff = true;
         try
         {
             var sw = Stopwatch.StartNew();
-            var options = BuildDiffOptions();
-            var diff = await _diffService.GetDiffAsync(_repoPath, file.Path, target, options, ct);
-            ct.ThrowIfCancellationRequested();
+            FileDiff diff;
+            if (file.Kind == ChangeKind.Untracked)
+            {
+                var fullPath = System.IO.Path.Combine(
+                    _repoPath,
+                    file.Path.Value.Replace('/', System.IO.Path.DirectorySeparatorChar));
+                if (!System.IO.File.Exists(fullPath))
+                {
+                    diff = UntrackedFileDiff.Create(file.Path, string.Empty, target);
+                }
+                else
+                {
+                    var bytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct);
+                    ct.ThrowIfCancellationRequested();
+                    diff = UntrackedFileDiff.Create(file.Path, bytes, target);
+                }
+            }
+            else
+            {
+                var options = BuildDiffOptions();
+                diff = await _diffService.GetDiffAsync(_repoPath, file.Path, target, options, ct);
+                ct.ThrowIfCancellationRequested();
+            }
+
             _currentDiff = ApplyIntraLine(diff);
             UpdateDiffStats(_currentDiff);
             ProjectRows(_currentDiff);
             OnPropertyChanged(nameof(CanStageLines));
             OnPropertyChanged(nameof(CanUnstageLines));
+            OnPropertyChanged(nameof(CanDiscardLines));
             CodeReviewrMeters.DiffGenerationMs.Record(sw.Elapsed.TotalMilliseconds);
         }
         catch (OperationCanceledException) { }
@@ -860,6 +904,12 @@ public partial class WorkingCopyViewModel : ObservableObject
     public bool CanUnstageLines =>
         _currentDiff?.Target == DiffTarget.HeadToIndex;
 
+    /// <summary>True when the open diff is a worktree diff (stage and discard line/hunk ops apply).</summary>
+    public bool CanDiscardLines => CanStageLines;
+
+    /// <summary>True when at least one selected file can be discarded (unstaged / untracked).</summary>
+    public bool CanDiscardSelection => HasUnstagedSelection;
+
     private void ProjectRowsOptimisticRemoveHunk(int hunkIndex)
     {
         if (_currentDiff is null) return;
@@ -869,21 +919,116 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task DiscardSelectedFilesAsync()
+    {
+        var files = _selectedFiles.Where(f => !f.IsStagedList && !f.IsConflicted).ToList();
+        await DiscardFilesWithConfirmAsync(files);
+    }
+
+    [RelayCommand]
     private async Task DiscardFileAsync(FileItemViewModel? file)
     {
-        if (file is null || _repoPath is null) return;
+        if (file is null || file.IsStagedList || file.IsConflicted) return;
+        await DiscardFilesWithConfirmAsync([file]);
+    }
+
+    private async Task DiscardFilesWithConfirmAsync(IReadOnlyList<FileItemViewModel> files)
+    {
+        if (_repoPath is null || files.Count == 0) return;
+
+        var message = files.Count == 1
+            ? $"Discard all changes in {files[0].Path.Name}? This cannot be undone except via Undo."
+            : $"Discard changes in {files.Count} files? This cannot be undone except via Undo.";
+        if (!await _confirm.ConfirmAsync("Discard changes", message))
+            return;
+
+        var discarded = new List<DiscardedEntry>();
         try
         {
-            await _discard.DiscardFileAsync(_repoPath, file.Path);
-            var entry = _discard.RecentlyDiscarded.FirstOrDefault(e => e.Path.Equals(file.Path));
-            _notifications.Info($"Discarded {file.Path.Name}",
-                entry is null ? null : () => _ = RestoreDiscardedAsync(entry),
+            foreach (var file in files)
+            {
+                await _discard.DiscardFileAsync(_repoPath, file.Path);
+                var entry = _discard.RecentlyDiscarded.FirstOrDefault(e => e.Path.Equals(file.Path));
+                if (entry is not null)
+                    discarded.Add(entry);
+            }
+
+            var label = files.Count == 1
+                ? $"Discarded {files[0].Path.Name}"
+                : $"Discarded {files.Count} files";
+            _notifications.Info(
+                label,
+                discarded.Count == 0 ? null : () => _ = RestoreDiscardedManyAsync(discarded),
                 "Undo");
-            await RefreshAsync();
+
+            var paths = files.Select(f => f.Path).ToList();
+            await RefreshAndMaybeReloadDiffAsync(paths);
         }
         catch (Exception ex)
         {
             _notifications.Error($"Discard failed: {ex.Message}");
+            await RefreshAsync();
+        }
+    }
+
+    public Task DiscardHunkAtAsync(int hunkIndex)
+    {
+        SelectedHunkIndex = hunkIndex;
+        return DiscardHunkAsync();
+    }
+
+    [RelayCommand]
+    private async Task DiscardHunkAsync()
+    {
+        if (_currentDiff is null || _repoPath is null || SelectedHunkIndex < 0) return;
+        if (_currentDiff.Target != DiffTarget.IndexToWorktree) return;
+
+        var hunkIndex = SelectedHunkIndex;
+        var path = _currentDiff.NewPath;
+        try
+        {
+            var patch = PatchSynthesizer.SynthesizeHunks(_currentDiff, [hunkIndex]);
+            await _discard.DiscardPatchAsync(_repoPath, patch);
+            var entry = _discard.RecentlyDiscarded.FirstOrDefault(e => e.Path.Equals(path));
+            _notifications.Info(
+                $"Discarded hunk in {path.Name}",
+                entry is null ? null : () => _ = RestoreDiscardedAsync(entry),
+                "Undo");
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Discard hunk failed: {ex.Message}");
+        }
+        finally
+        {
+            await RefreshAndMaybeReloadDiffAsync([path]);
+        }
+    }
+
+    [RelayCommand]
+    private async Task DiscardSelectedLinesAsync(IReadOnlyList<LineSelection>? lines)
+    {
+        if (lines is null || lines.Count == 0 || _currentDiff is null || _repoPath is null) return;
+        if (_currentDiff.Target != DiffTarget.IndexToWorktree) return;
+
+        var path = _currentDiff.NewPath;
+        try
+        {
+            var patch = PatchSynthesizer.SynthesizeLines(_currentDiff, lines);
+            await _discard.DiscardPatchAsync(_repoPath, patch);
+            var entry = _discard.RecentlyDiscarded.FirstOrDefault(e => e.Path.Equals(path));
+            _notifications.Info(
+                $"Discarded {lines.Count} line(s) in {path.Name}",
+                entry is null ? null : () => _ = RestoreDiscardedAsync(entry),
+                "Undo");
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Discard lines failed: {ex.Message}");
+        }
+        finally
+        {
+            await RefreshAndMaybeReloadDiffAsync([path]);
         }
     }
 
@@ -891,6 +1036,14 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         if (_repoPath is null) return;
         await _discard.RestoreDiscardedAsync(_repoPath, entry);
+        await RefreshAsync();
+    }
+
+    private async Task RestoreDiscardedManyAsync(IReadOnlyList<DiscardedEntry> entries)
+    {
+        if (_repoPath is null) return;
+        foreach (var entry in entries.Reverse())
+            await _discard.RestoreDiscardedAsync(_repoPath, entry);
         await RefreshAsync();
     }
 
@@ -1050,6 +1203,32 @@ public partial class WorkingCopyViewModel : ObservableObject
         Branches.Clear();
         foreach (var b in await _branches.ListBranchesAsync(_repoPath))
             Branches.Add(b);
+    }
+
+    private static async Task InvokeOnUiAsync(Action action)
+    {
+        try
+        {
+            var dispatcher = Dispatcher.UIThread;
+            if (dispatcher.CheckAccess())
+            {
+                action();
+                return;
+            }
+
+            // Unit tests reference Avalonia but have no running lifetime — InvokeAsync would hang.
+            if (Application.Current is null)
+            {
+                action();
+                return;
+            }
+
+            await dispatcher.InvokeAsync(action);
+        }
+        catch (InvalidOperationException)
+        {
+            action();
+        }
     }
 
     private sealed record PendingMutation(FilePath Path, bool WasUnstage);

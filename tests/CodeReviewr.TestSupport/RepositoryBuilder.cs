@@ -54,6 +54,21 @@ public sealed class RepositoryBuilder : IAsyncDisposable, IDisposable
         return this;
     }
 
+    public RepositoryBuilder WithUntracked(string relativePath, string content) =>
+        WithFile(relativePath, content);
+
+    public RepositoryBuilder WithStagedChange(string relativePath, string content)
+    {
+        _actions.Add(() =>
+        {
+            var full = System.IO.Path.Combine(_root, relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(full)!);
+            File.WriteAllText(full, content);
+            RunGit("add", "--", relativePath);
+        });
+        return this;
+    }
+
     public string Build()
     {
         if (_built) return _root;

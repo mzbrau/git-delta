@@ -39,6 +39,9 @@ public sealed class DiffViewer : Control
     public static readonly StyledProperty<bool> CanUnstageLinesProperty =
         AvaloniaProperty.Register<DiffViewer, bool>(nameof(CanUnstageLines));
 
+    public static readonly StyledProperty<bool> CanDiscardLinesProperty =
+        AvaloniaProperty.Register<DiffViewer, bool>(nameof(CanDiscardLines));
+
     private const double GutterWidth = 40;
     private const double HunkButtonWidth = 64;
     private const double HunkButtonGap = 6;
@@ -54,7 +57,9 @@ public sealed class DiffViewer : Control
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
 
-    private readonly record struct HunkButtonHit(Rect Bounds, int HunkIndex, bool Stage);
+    private enum HunkButtonAction { Stage, Unstage, Discard }
+
+    private readonly record struct HunkButtonHit(Rect Bounds, int HunkIndex, HunkButtonAction Action);
 
     public IReadOnlyList<DiffRow>? Rows
     {
@@ -98,6 +103,12 @@ public sealed class DiffViewer : Control
         set => SetValue(CanUnstageLinesProperty, value);
     }
 
+    public bool CanDiscardLines
+    {
+        get => GetValue(CanDiscardLinesProperty);
+        set => SetValue(CanDiscardLinesProperty, value);
+    }
+
     public int? SelectedHunkIndex
     {
         get
@@ -112,7 +123,7 @@ public sealed class DiffViewer : Control
     {
         AffectsRender<DiffViewer>(
             RowsProperty, ViewModeProperty, ShowWhitespaceProperty, RowHeightProperty,
-            EmptyMessageProperty, CanStageLinesProperty, CanUnstageLinesProperty);
+            EmptyMessageProperty, CanStageLinesProperty, CanUnstageLinesProperty, CanDiscardLinesProperty);
         FocusableProperty.OverrideDefaultValue<DiffViewer>(true);
     }
 
@@ -145,7 +156,8 @@ public sealed class DiffViewer : Control
         else if (change.Property == ViewModeProperty || change.Property == RowHeightProperty
                  || change.Property == EmptyMessageProperty
                  || change.Property == CanStageLinesProperty
-                 || change.Property == CanUnstageLinesProperty)
+                 || change.Property == CanUnstageLinesProperty
+                 || change.Property == CanDiscardLinesProperty)
         {
             InvalidateVisual();
         }
@@ -361,7 +373,7 @@ public sealed class DiffViewer : Control
             x -= HunkButtonWidth;
             var rect = new Rect(x, y + 2, HunkButtonWidth, rowH - 4);
             DrawHunkButton(context, rect, "Unstage");
-            _hunkButtons.Add(new HunkButtonHit(rect, hunkIndex, Stage: false));
+            _hunkButtons.Add(new HunkButtonHit(rect, hunkIndex, HunkButtonAction.Unstage));
             x -= HunkButtonGap;
         }
 
@@ -370,7 +382,16 @@ public sealed class DiffViewer : Control
             x -= HunkButtonWidth;
             var rect = new Rect(x, y + 2, HunkButtonWidth, rowH - 4);
             DrawHunkButton(context, rect, "Stage");
-            _hunkButtons.Add(new HunkButtonHit(rect, hunkIndex, Stage: true));
+            _hunkButtons.Add(new HunkButtonHit(rect, hunkIndex, HunkButtonAction.Stage));
+            x -= HunkButtonGap;
+        }
+
+        if (CanDiscardLines)
+        {
+            x -= HunkButtonWidth;
+            var rect = new Rect(x, y + 2, HunkButtonWidth, rowH - 4);
+            DrawHunkButton(context, rect, "Discard");
+            _hunkButtons.Add(new HunkButtonHit(rect, hunkIndex, HunkButtonAction.Discard));
         }
     }
 
@@ -510,10 +531,18 @@ public sealed class DiffViewer : Control
             if (!hit.Bounds.Contains(pos)) continue;
             if (GetWorkingCopy() is { } wc)
             {
-                if (hit.Stage)
-                    _ = wc.StageHunkAtAsync(hit.HunkIndex);
-                else
-                    _ = wc.UnstageHunkAtAsync(hit.HunkIndex);
+                switch (hit.Action)
+                {
+                    case HunkButtonAction.Stage:
+                        _ = wc.StageHunkAtAsync(hit.HunkIndex);
+                        break;
+                    case HunkButtonAction.Unstage:
+                        _ = wc.UnstageHunkAtAsync(hit.HunkIndex);
+                        break;
+                    case HunkButtonAction.Discard:
+                        _ = wc.DiscardHunkAtAsync(hit.HunkIndex);
+                        break;
+                }
             }
             e.Handled = true;
             return;
@@ -597,8 +626,20 @@ public sealed class DiffViewer : Control
                 _ = wc.UnstageSelectedLinesCommand.ExecuteAsync(lines);
         };
 
+        var discardItem = new MenuItem
+        {
+            Header = lines.Count > 0 ? $"Discard {lines.Count} selected line(s)" : "Discard selected lines",
+            IsEnabled = CanDiscardLines && lines.Count > 0,
+        };
+        discardItem.Click += (_, _) =>
+        {
+            if (GetWorkingCopy() is { } wc)
+                _ = wc.DiscardSelectedLinesCommand.ExecuteAsync(lines);
+        };
+
         menu.Items.Add(stageItem);
         menu.Items.Add(unstageItem);
+        menu.Items.Add(discardItem);
         menu.Open(this);
     }
 

@@ -6,6 +6,7 @@
     <Project Path="src/CodeReviewr.Git/CodeReviewr.Git.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/CodeReviewr.App.Tests/CodeReviewr.App.Tests.csproj" />
     <Project Path="tests/CodeReviewr.Benchmarks/CodeReviewr.Benchmarks.csproj" />
     <Project Path="tests/CodeReviewr.Core.Tests/CodeReviewr.Core.Tests.csproj" />
     <Project Path="tests/CodeReviewr.Diff.Tests/CodeReviewr.Diff.Tests.csproj" />

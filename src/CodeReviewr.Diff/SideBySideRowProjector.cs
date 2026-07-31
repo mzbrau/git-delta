@@ -16,9 +16,9 @@ public static class SideBySideRowProjector
     /// </summary>
     /// <param name="diff">The canonical, parsed diff to project.</param>
     /// <param name="collapseThreshold">
-    /// When greater than zero, a run of consecutive unchanged context lines longer than this
-    /// threshold is replaced by a single <see cref="DiffRowKind.Collapsed"/> row. Zero (the default)
-    /// disables collapsing.
+    /// When greater than zero, a run of consecutive unchanged context lines longer than
+    /// <c>2 * collapseThreshold</c> keeps that many lines at each edge and replaces the middle
+    /// with a single <see cref="DiffRowKind.Collapsed"/> row. Zero disables collapsing.
     /// </param>
     /// <param name="intraLineDiffer">
     /// Optional fallback used to compute word-level highlighting for a change pair whose
@@ -70,19 +70,7 @@ public static class SideBySideRowProjector
                     var j = i;
                     while (j < lines.Count && lines[j].Kind == DiffLineKind.Context)
                         j++;
-                    var runLength = j - start;
-
-                    var expanded = expandedCollapses?.Contains((hunkIndex, start)) == true;
-                    if (collapseThreshold > 0 && runLength > collapseThreshold && !expanded)
-                    {
-                        rows.Add(RowFactory.CollapsedRow(lines[start], hunkIndex, start, runLength));
-                    }
-                    else
-                    {
-                        for (var p = start; p < j; p++)
-                            rows.Add(RowFactory.ContextRow(lines[p], hunkIndex, p));
-                    }
-
+                    ContextRunAppender.Append(lines, start, j, hunkIndex, rows, collapseThreshold, expandedCollapses);
                     i = j;
                     continue;
                 }
