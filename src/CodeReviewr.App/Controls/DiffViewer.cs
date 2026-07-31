@@ -1,13 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
+using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Diff;
+using CodeReviewr.Diff;
 
 namespace CodeReviewr.App.Controls;
 
@@ -26,12 +29,25 @@ public sealed class DiffViewer : Control
     public static readonly StyledProperty<double> RowHeightProperty =
         AvaloniaProperty.Register<DiffViewer, double>(nameof(RowHeight), 20);
 
+    public static readonly StyledProperty<string> EmptyMessageProperty =
+        AvaloniaProperty.Register<DiffViewer, string>(nameof(EmptyMessage), "Select a file to view its diff");
+
+    public static readonly StyledProperty<bool> CanStageLinesProperty =
+        AvaloniaProperty.Register<DiffViewer, bool>(nameof(CanStageLines));
+
+    public static readonly StyledProperty<bool> CanUnstageLinesProperty =
+        AvaloniaProperty.Register<DiffViewer, bool>(nameof(CanUnstageLines));
+
     private const double GutterWidth = 40;
+    private const double HunkButtonWidth = 64;
+    private const double HunkButtonGap = 6;
 
     private int _selectionStart = -1;
     private int _selectionEnd = -1;
     private double _scrollY;
     private double _scrollX;
+    private INotifyCollectionChanged? _rowsNotify;
+    private readonly List<HunkButtonHit> _hunkButtons = [];
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
 
@@ -48,6 +64,10 @@ public sealed class DiffViewer : Control
     private static readonly IBrush GutterText = new SolidColorBrush(Color.FromArgb(0x4D, 0xc2, 0xc6, 0xd6));
     private static readonly IBrush MutedText = new SolidColorBrush(Color.FromRgb(0x8c, 0x90, 0x9f));
     private static readonly IBrush ColumnDivider = new SolidColorBrush(Color.FromRgb(0x42, 0x47, 0x54));
+    private static readonly IBrush ButtonFill = new SolidColorBrush(Color.FromRgb(0x2d, 0x34, 0x49));
+    private static readonly IBrush ButtonText = new SolidColorBrush(Color.FromRgb(0xc2, 0xc6, 0xd6));
+
+    private readonly record struct HunkButtonHit(Rect Bounds, int HunkIndex, bool Stage);
 
     public IReadOnlyList<DiffRow>? Rows
     {
@@ -73,6 +93,24 @@ public sealed class DiffViewer : Control
         set => SetValue(RowHeightProperty, value);
     }
 
+    public string EmptyMessage
+    {
+        get => GetValue(EmptyMessageProperty);
+        set => SetValue(EmptyMessageProperty, value);
+    }
+
+    public bool CanStageLines
+    {
+        get => GetValue(CanStageLinesProperty);
+        set => SetValue(CanStageLinesProperty, value);
+    }
+
+    public bool CanUnstageLines
+    {
+        get => GetValue(CanUnstageLinesProperty);
+        set => SetValue(CanUnstageLinesProperty, value);
+    }
+
     public int? SelectedHunkIndex
     {
         get
@@ -85,7 +123,9 @@ public sealed class DiffViewer : Control
 
     static DiffViewer()
     {
-        AffectsRender<DiffViewer>(RowsProperty, ViewModeProperty, ShowWhitespaceProperty, RowHeightProperty);
+        AffectsRender<DiffViewer>(
+            RowsProperty, ViewModeProperty, ShowWhitespaceProperty, RowHeightProperty,
+            EmptyMessageProperty, CanStageLinesProperty, CanUnstageLinesProperty);
         FocusableProperty.OverrideDefaultValue<DiffViewer>(true);
     }
 
@@ -94,15 +134,40 @@ public sealed class DiffViewer : Control
         base.OnPropertyChanged(change);
         if (change.Property == RowsProperty)
         {
+            DetachRowsNotify();
+            AttachRowsNotify(change.NewValue as INotifyCollectionChanged);
             _selectionStart = _selectionEnd = -1;
             _scrollY = 0;
             InvalidateVisual();
             InvalidateMeasure();
         }
-        else if (change.Property == ViewModeProperty || change.Property == RowHeightProperty)
+        else if (change.Property == ViewModeProperty || change.Property == RowHeightProperty
+                 || change.Property == EmptyMessageProperty
+                 || change.Property == CanStageLinesProperty
+                 || change.Property == CanUnstageLinesProperty)
         {
             InvalidateVisual();
         }
+    }
+
+    private void AttachRowsNotify(INotifyCollectionChanged? notify)
+    {
+        _rowsNotify = notify;
+        if (_rowsNotify is not null)
+            _rowsNotify.CollectionChanged += OnRowsCollectionChanged;
+    }
+
+    private void DetachRowsNotify()
+    {
+        if (_rowsNotify is not null)
+            _rowsNotify.CollectionChanged -= OnRowsCollectionChanged;
+        _rowsNotify = null;
+    }
+
+    private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        InvalidateVisual();
+        InvalidateMeasure();
     }
 
     protected override Size MeasureOverride(Size availableSize)
@@ -111,15 +176,32 @@ public sealed class DiffViewer : Control
         return new Size(availableSize.Width, Math.Max(rows * RowHeight, availableSize.Height));
     }
 
+    public IReadOnlyList<LineSelection> GetSelectedLineSelections()
+    {
+        var result = new List<LineSelection>();
+        if (Rows is null || _selectionStart < 0) return result;
+        var a = Math.Min(_selectionStart, _selectionEnd);
+        var b = Math.Max(_selectionStart, _selectionEnd);
+        for (var i = a; i <= b && i < Rows.Count; i++)
+        {
+            var row = Rows[i];
+            if (row.Kind is DiffRowKind.Added or DiffRowKind.Removed)
+                result.Add(new LineSelection(row.HunkIndex, row.LineIndexInHunk));
+        }
+
+        return result;
+    }
+
     public override void Render(DrawingContext context)
     {
+        _hunkButtons.Clear();
         var rows = Rows;
         var bounds = Bounds;
         context.FillRectangle(new SolidColorBrush(Color.FromRgb(0x06, 0x0e, 0x20)), new Rect(bounds.Size));
 
         if (rows is null || rows.Count == 0)
         {
-            DrawText(context, "Select a file to view its diff", 16, 16, MutedText);
+            DrawText(context, EmptyMessage, 16, 16, MutedText);
             return;
         }
 
@@ -139,7 +221,17 @@ public sealed class DiffViewer : Control
                            && i >= Math.Min(_selectionStart, _selectionEnd)
                            && i <= Math.Max(_selectionStart, _selectionEnd);
 
-            context.FillRectangle(RowBrush(row.Kind, selected), new Rect(0, y, bounds.Width, rowH));
+            if (ViewMode == DiffViewMode.SideBySide)
+            {
+                using (context.PushClip(new Rect(0, y, midX, rowH)))
+                    context.FillRectangle(RowBrush(row.Kind, selected), new Rect(0, y, midX, rowH));
+                using (context.PushClip(new Rect(midX, y, bounds.Width - midX, rowH)))
+                    context.FillRectangle(RowBrush(row.Kind, selected), new Rect(midX, y, bounds.Width - midX, rowH));
+            }
+            else
+            {
+                context.FillRectangle(RowBrush(row.Kind, selected), new Rect(0, y, bounds.Width, rowH));
+            }
 
             if (row.Kind is DiffRowKind.Added or DiffRowKind.Removed)
             {
@@ -157,33 +249,44 @@ public sealed class DiffViewer : Control
                 }
             }
 
-            DrawGutter(context, row.OldLineNumber, 0, y);
             if (ViewMode == DiffViewMode.SideBySide)
-                DrawGutter(context, row.NewLineNumber, midX, y);
+            {
+                using (context.PushClip(new Rect(0, 0, midX, bounds.Height)))
+                {
+                    DrawGutter(context, row.OldLineNumber, 0, y);
+                    if (row.Kind == DiffRowKind.HunkHeader)
+                        DrawText(context, row.LeftText.ToString(), GutterWidth + 8 - _scrollX, y, MutedText);
+                    else if (row.Kind == DiffRowKind.Collapsed)
+                        DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines ⋯", GutterWidth + 8, y, MutedText);
+                    else if (!row.LeftText.IsEmpty)
+                        DrawText(context, FormatText(row.LeftText), GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind));
+                }
+
+                using (context.PushClip(new Rect(midX, 0, bounds.Width - midX, bounds.Height)))
+                {
+                    DrawGutter(context, row.NewLineNumber, midX, y);
+                    if (row.Kind is not DiffRowKind.HunkHeader and not DiffRowKind.Collapsed && !row.RightText.IsEmpty)
+                        DrawText(context, FormatText(row.RightText), midX + GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind));
+                }
+            }
             else
+            {
+                DrawGutter(context, row.OldLineNumber, 0, y);
                 DrawGutter(context, row.NewLineNumber, GutterWidth, y);
 
-            if (row.Kind == DiffRowKind.HunkHeader)
-            {
-                DrawText(context, row.LeftText.ToString(), GutterWidth * 2 + 8 - _scrollX, y, MutedText);
-                continue;
-            }
+                if (row.Kind == DiffRowKind.HunkHeader)
+                {
+                    DrawText(context, row.LeftText.ToString(), GutterWidth * 2 + 8 - _scrollX, y, MutedText);
+                    DrawUnifiedHunkButtons(context, row.HunkIndex, y, rowH, bounds.Width);
+                    continue;
+                }
 
-            if (row.Kind == DiffRowKind.Collapsed)
-            {
-                DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines ⋯", GutterWidth * 2 + 8, y, MutedText);
-                continue;
-            }
+                if (row.Kind == DiffRowKind.Collapsed)
+                {
+                    DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines ⋯", GutterWidth * 2 + 8, y, MutedText);
+                    continue;
+                }
 
-            if (ViewMode == DiffViewMode.SideBySide)
-            {
-                if (!row.LeftText.IsEmpty)
-                    DrawText(context, FormatText(row.LeftText), GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind));
-                if (!row.RightText.IsEmpty)
-                    DrawText(context, FormatText(row.RightText), midX + GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind));
-            }
-            else
-            {
                 var text = row.Kind == DiffRowKind.Removed ? row.LeftText : row.RightText;
                 if (text.IsEmpty) text = row.LeftText.IsEmpty ? row.RightText : row.LeftText;
                 var prefix = row.Kind switch
@@ -195,6 +298,42 @@ public sealed class DiffViewer : Control
                 DrawText(context, prefix + FormatText(text), GutterWidth * 2 + 8 - _scrollX, y, TextBrush(row.Kind));
             }
         }
+    }
+
+    private void DrawUnifiedHunkButtons(DrawingContext context, int hunkIndex, double y, double rowH, double width)
+    {
+        var x = width - 8;
+        if (CanUnstageLines)
+        {
+            x -= HunkButtonWidth;
+            var rect = new Rect(x, y + 2, HunkButtonWidth, rowH - 4);
+            DrawHunkButton(context, rect, "Unstage");
+            _hunkButtons.Add(new HunkButtonHit(rect, hunkIndex, Stage: false));
+            x -= HunkButtonGap;
+        }
+
+        if (CanStageLines)
+        {
+            x -= HunkButtonWidth;
+            var rect = new Rect(x, y + 2, HunkButtonWidth, rowH - 4);
+            DrawHunkButton(context, rect, "Stage");
+            _hunkButtons.Add(new HunkButtonHit(rect, hunkIndex, Stage: true));
+        }
+    }
+
+    private void DrawHunkButton(DrawingContext context, Rect rect, string label)
+    {
+        context.FillRectangle(ButtonFill, rect, 3);
+        var ft = new FormattedText(
+            label,
+            System.Globalization.CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight,
+            _typeface,
+            11,
+            ButtonText);
+        context.DrawText(ft, new Point(
+            rect.X + (rect.Width - ft.Width) / 2,
+            rect.Y + (rect.Height - ft.Height) / 2));
     }
 
     private string FormatText(ReadOnlyMemory<char> text)
@@ -267,7 +406,32 @@ public sealed class DiffViewer : Control
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         Focus();
-        var y = e.GetPosition(this).Y + _scrollY;
+        var point = e.GetCurrentPoint(this);
+        var pos = point.Position;
+
+        if (point.Properties.IsRightButtonPressed)
+        {
+            EnsureSelectionAt(pos);
+            ShowLineContextMenu();
+            e.Handled = true;
+            return;
+        }
+
+        foreach (var hit in _hunkButtons)
+        {
+            if (!hit.Bounds.Contains(pos)) continue;
+            if (GetWorkingCopy() is { } wc)
+            {
+                if (hit.Stage)
+                    _ = wc.StageHunkAtAsync(hit.HunkIndex);
+                else
+                    _ = wc.UnstageHunkAtAsync(hit.HunkIndex);
+            }
+            e.Handled = true;
+            return;
+        }
+
+        var y = pos.Y + _scrollY;
         var index = (int)(y / RowHeight);
         if (Rows is null || index < 0 || index >= Rows.Count) return;
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift) && _selectionStart >= 0)
@@ -275,13 +439,62 @@ public sealed class DiffViewer : Control
         else
             _selectionStart = _selectionEnd = index;
 
-        if (SelectedHunkIndex is { } hunk
-            && TopLevel.GetTopLevel(this) is Window { DataContext: ViewModels.MainWindowViewModel main })
-            main.WorkingCopy.SelectedHunkIndex = hunk;
+        if (SelectedHunkIndex is { } hunk && GetWorkingCopy() is { } workingCopy)
+            workingCopy.SelectedHunkIndex = hunk;
 
         InvalidateVisual();
         e.Handled = true;
     }
+
+    private void EnsureSelectionAt(Point pos)
+    {
+        var index = (int)((pos.Y + _scrollY) / RowHeight);
+        if (Rows is null || index < 0 || index >= Rows.Count) return;
+        if (_selectionStart < 0
+            || index < Math.Min(_selectionStart, _selectionEnd)
+            || index > Math.Max(_selectionStart, _selectionEnd))
+        {
+            _selectionStart = _selectionEnd = index;
+            InvalidateVisual();
+        }
+    }
+
+    private void ShowLineContextMenu()
+    {
+        var lines = GetSelectedLineSelections();
+        var menu = new ContextMenu();
+
+        var stageItem = new MenuItem
+        {
+            Header = lines.Count > 0 ? $"Stage {lines.Count} selected line(s)" : "Stage selected lines",
+            IsEnabled = CanStageLines && lines.Count > 0,
+        };
+        stageItem.Click += (_, _) =>
+        {
+            if (GetWorkingCopy() is { } wc)
+                _ = wc.StageSelectedLinesCommand.ExecuteAsync(lines);
+        };
+
+        var unstageItem = new MenuItem
+        {
+            Header = lines.Count > 0 ? $"Unstage {lines.Count} selected line(s)" : "Unstage selected lines",
+            IsEnabled = CanUnstageLines && lines.Count > 0,
+        };
+        unstageItem.Click += (_, _) =>
+        {
+            if (GetWorkingCopy() is { } wc)
+                _ = wc.UnstageSelectedLinesCommand.ExecuteAsync(lines);
+        };
+
+        menu.Items.Add(stageItem);
+        menu.Items.Add(unstageItem);
+        menu.Open(this);
+    }
+
+    private WorkingCopyViewModel? GetWorkingCopy() =>
+        TopLevel.GetTopLevel(this) is Window { DataContext: MainWindowViewModel main }
+            ? main.WorkingCopy
+            : null;
 
     protected override void OnKeyDown(KeyEventArgs e)
     {

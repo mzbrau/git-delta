@@ -27,8 +27,9 @@ public sealed record AppSettings
     public List<string> RecentRepositories { get; set; } = [];
     public double WindowWidth { get; set; } = 1280;
     public double WindowHeight { get; set; } = 800;
-    public double NavigatorWidth { get; set; } = 200;
-    public double FileListWidth { get; set; } = 280;
+    public double NavigatorWidth { get; set; } = 260;
+    public double FileListWidth { get; set; } = 300;
+    public bool NavigatorCollapsed { get; set; }
 
     public DiffOptions ToDiffOptions() => new(
         Algorithm: DiffAlgorithm,

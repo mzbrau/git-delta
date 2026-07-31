@@ -37,6 +37,7 @@ public static class ServiceConfiguration
         services.AddTransient<WorkingCopyViewModel>();
         services.AddSingleton<NotificationService>();
         services.AddSingleton<DiagnosticsOverlayViewModel>();
+        services.AddSingleton<GitConsoleViewModel>();
 
         return services.BuildServiceProvider();
     }

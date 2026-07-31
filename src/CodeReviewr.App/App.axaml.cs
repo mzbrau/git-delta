@@ -26,7 +26,10 @@ public partial class App : Application
         Services = ServiceConfiguration.Build();
 
         var settings = Services.GetRequiredService<ISettingsStore>();
-        _ = settings.LoadAsync();
+        if (settings is CodeReviewr.Core.Settings.JsonSettingsStore jsonStore)
+            jsonStore.Load();
+        else
+            settings.LoadAsync().ConfigureAwait(false).GetAwaiter().GetResult();
 
         // Forge Control UI is dark-only; keep settings Theme for future light variant.
         ApplyTheme("Dark");

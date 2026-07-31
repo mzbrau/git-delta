@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CodeReviewr.App.Services;
@@ -28,12 +29,18 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly IIntraLineDiffer _intraLine;
     private readonly IGitProcessRunner _runner;
     private readonly GitRepositoryWatcher _watcher;
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     private CancellationTokenSource? _diffCts;
     private string? _repoPath;
     private FileDiff? _currentDiff;
     private readonly List<PendingMutation> _pending = [];
     private long _statusEpoch;
+    private readonly List<FileItemViewModel> _allStaged = [];
+    private readonly List<FileItemViewModel> _allUnstaged = [];
+    private readonly List<FileItemViewModel> _allConflicted = [];
+    private readonly List<FileItemViewModel> _selectedFiles = [];
+    private bool _suppressSelectionSync;
 
     public WorkingCopyViewModel(
         IGitStatusService statusService,
@@ -66,10 +73,13 @@ public partial class WorkingCopyViewModel : ObservableObject
         _runner = runner;
         _watcher = watcher;
         ViewMode = settings.Current.DefaultDiffMode;
-        _watcher.RefreshRequested += () => _ = RefreshAsync();
+        // Watcher callbacks arrive on thread-pool / FileSystemWatcher threads.
+        _watcher.RefreshRequested += () =>
+            Dispatcher.UIThread.Post(() => _ = RefreshAsync());
         _watcher.OfferFsmonitor += () =>
-            _notifications.Info("Status is slow. Enable Git fsmonitor for this repository?",
-                () => _ = EnableFsmonitorAsync(), "Enable");
+            Dispatcher.UIThread.Post(() =>
+                _notifications.Info("Status is slow. Enable Git fsmonitor for this repository?",
+                    () => _ = EnableFsmonitorAsync(), "Enable"));
     }
 
     public ObservableCollection<FileItemViewModel> StagedFiles { get; } = [];
@@ -89,6 +99,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private string _commitMessage = "";
     [ObservableProperty] private bool _amendCommit;
     [ObservableProperty] private bool _noVerify;
+    [ObservableProperty] private bool _pushAfterCommit;
     [ObservableProperty] private bool _isCommitting;
     [ObservableProperty] private string _hookOutput = "";
     [ObservableProperty] private bool _canStageFromDiff;
@@ -102,26 +113,49 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private bool _unstagedExpanded = true;
     [ObservableProperty] private bool _branchesExpanded = true;
     [ObservableProperty] private bool _explorerExpanded = true;
+    [ObservableProperty] private string _fileFilter = "";
+    [ObservableProperty] private bool _isPushing;
+    [ObservableProperty] private bool _isPulling;
+    [ObservableProperty] private bool _isFetching;
+    [ObservableProperty] private int _selectedFileCount;
+    [ObservableProperty] private bool _hasStagedSelection;
+    [ObservableProperty] private bool _hasUnstagedSelection;
+    [ObservableProperty] private string _diffEmptyMessage = "Select a file to view its diff";
+    [ObservableProperty] private string? _diffOverlayMessage;
 
     public bool HasRepository => _repoPath is not null;
+
+    public bool IsRemoteBusy => IsPushing || IsPulling || IsFetching;
 
     public string CommitButtonLabel =>
         string.IsNullOrEmpty(CurrentBranch) ? "Commit" : $"Commit to {CurrentBranch}";
 
     public string DiffFooterText =>
         StagingDisabledReason
-        ?? (SelectedFile is null ? "Select a file to view its diff"
+        ?? (SelectedFileCount > 1 ? $"{SelectedFileCount} files selected"
+            : SelectedFile is null ? "Select a file to view its diff"
             : IsLoadingDiff ? "Loading diff…"
             : SelectedAddedLines + SelectedRemovedLines == 0 ? "No line changes"
             : $"{SelectedAddedLines} additions, {SelectedRemovedLines} deletions");
 
     public bool HasConflictedFiles => ConflictedFiles.Count > 0;
 
+    public bool HasStagedFiles => StagedFiles.Count > 0;
+
     partial void OnCurrentBranchChanged(string? value) => OnPropertyChanged(nameof(CommitButtonLabel));
     partial void OnStagingDisabledReasonChanged(string? value) => OnPropertyChanged(nameof(DiffFooterText));
-    partial void OnIsLoadingDiffChanged(bool value) => OnPropertyChanged(nameof(DiffFooterText));
+    partial void OnIsLoadingDiffChanged(bool value)
+    {
+        OnPropertyChanged(nameof(DiffFooterText));
+        UpdateDiffOverlay();
+    }
     partial void OnSelectedAddedLinesChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
     partial void OnSelectedRemovedLinesChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
+    partial void OnFileFilterChanged(string value) => ApplyFileFilter();
+    partial void OnIsPushingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
+    partial void OnIsPullingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
+    partial void OnIsFetchingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
+    partial void OnSelectedFileCountChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
 
     public async Task OpenAsync(string path)
     {
@@ -144,33 +178,51 @@ public partial class WorkingCopyViewModel : ObservableObject
     public async Task RefreshAsync()
     {
         if (_repoPath is null) return;
-        var sw = Stopwatch.StartNew();
-        var status = await _statusService.GetStatusAsync(_repoPath);
-        if (status.Epoch < _statusEpoch) return;
-        _statusEpoch = status.Epoch;
-
-        CurrentBranch = status.CurrentBranch;
-        InProgress = status.InProgress;
-        InProgressBanner = status.InProgress switch
+        await _refreshGate.WaitAsync().ConfigureAwait(true);
+        try
         {
-            InProgressOperation.Merge => "Merge in progress. Abort is always available. Continue when the index is clean.",
-            InProgressOperation.Rebase => "Rebase in progress. Abort is always available. Continue when the index is clean.",
-            InProgressOperation.CherryPick => "Cherry-pick in progress. Abort is always available.",
-            InProgressOperation.Revert => "Revert in progress. Abort is always available.",
-            _ => null,
-        };
+            if (_repoPath is null) return;
+            var sw = Stopwatch.StartNew();
+            var status = await _statusService.GetStatusAsync(_repoPath).ConfigureAwait(true);
+            if (status.Epoch < _statusEpoch) return;
+            _statusEpoch = status.Epoch;
 
-        RebuildFileLists(status);
-        StatusUpdated = true;
-        CodeReviewrMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
-        CodeReviewrMeters.RepositoryOpenMs.Record(sw.Elapsed.TotalMilliseconds);
+            void ApplyStatus()
+            {
+                CurrentBranch = status.CurrentBranch;
+                InProgress = status.InProgress;
+                InProgressBanner = status.InProgress switch
+                {
+                    InProgressOperation.Merge => "Merge in progress. Abort is always available. Continue when the index is clean.",
+                    InProgressOperation.Rebase => "Rebase in progress. Abort is always available. Continue when the index is clean.",
+                    InProgressOperation.CherryPick => "Cherry-pick in progress. Abort is always available.",
+                    InProgressOperation.Revert => "Revert in progress. Abort is always available.",
+                    _ => null,
+                };
+
+                RebuildFileLists(status);
+                StatusUpdated = true;
+            }
+
+            if (Dispatcher.UIThread.CheckAccess())
+                ApplyStatus();
+            else
+                await Dispatcher.UIThread.InvokeAsync(ApplyStatus);
+
+            CodeReviewrMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
+            CodeReviewrMeters.RepositoryOpenMs.Record(sw.Elapsed.TotalMilliseconds);
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
     }
 
     private void RebuildFileLists(RepositoryStatus status)
     {
-        StagedFiles.Clear();
-        UnstagedFiles.Clear();
-        ConflictedFiles.Clear();
+        _allStaged.Clear();
+        _allUnstaged.Clear();
+        _allConflicted.Clear();
 
         var pendingPaths = _pending.Select(p => p.Path.Value).ToHashSet(StringComparer.Ordinal);
 
@@ -178,31 +230,149 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             if (pendingPaths.Contains(e.Path.Value) && _pending.Any(p => p.Path.Equals(e.Path) && p.WasUnstage))
                 continue;
-            StagedFiles.Add(FileItemViewModel.From(e, isStagedList: true));
+            _allStaged.Add(FileItemViewModel.From(e, isStagedList: true));
         }
 
         foreach (var e in status.Unstaged)
         {
             if (pendingPaths.Contains(e.Path.Value) && _pending.Any(p => p.Path.Equals(e.Path) && !p.WasUnstage))
                 continue;
-            UnstagedFiles.Add(FileItemViewModel.From(e, isStagedList: false));
+            _allUnstaged.Add(FileItemViewModel.From(e, isStagedList: false));
         }
 
         // Optimistic overlays: move predicted staged/unstaged
         foreach (var p in _pending.Where(p => !p.WasUnstage))
         {
-            if (UnstagedFiles.All(f => f.Path.Value != p.Path.Value))
-                StagedFiles.Add(new FileItemViewModel(p.Path, ChangeKind.Modified, isStagedList: true, isPartial: true, isOptimistic: true));
+            var path = p.Path.Value;
+            if (_allUnstaged.All(f => f.Path.Value != path)
+                && _allStaged.All(f => f.Path.Value != path))
+                _allStaged.Add(new FileItemViewModel(p.Path, ChangeKind.Modified, isStagedList: true, isPartial: true, isOptimistic: true));
         }
 
         foreach (var e in status.Conflicted)
-            ConflictedFiles.Add(FileItemViewModel.From(e, isStagedList: false));
+            _allConflicted.Add(FileItemViewModel.From(e, isStagedList: false));
 
-        WorkingCopyChangeCount = StagedFiles.Count + UnstagedFiles.Count + ConflictedFiles.Count;
-        OnPropertyChanged(nameof(HasConflictedFiles));
+        WorkingCopyChangeCount = _allStaged.Count + _allUnstaged.Count + _allConflicted.Count;
+        ApplyFileFilter();
     }
 
-    partial void OnSelectedFileChanged(FileItemViewModel? value) => _ = LoadDiffForSelectionAsync(value);
+    private void ApplyFileFilter()
+    {
+        var previousPaths = _selectedFiles
+            .Select(f => f.Path.Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        _suppressSelectionSync = true;
+        try
+        {
+            StagedFiles.Clear();
+            UnstagedFiles.Clear();
+            ConflictedFiles.Clear();
+
+            foreach (var f in _allStaged.Where(MatchesFilter))
+                StagedFiles.Add(f);
+            foreach (var f in _allUnstaged.Where(MatchesFilter))
+                UnstagedFiles.Add(f);
+            foreach (var f in _allConflicted.Where(MatchesFilter))
+                ConflictedFiles.Add(f);
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
+
+        OnPropertyChanged(nameof(HasConflictedFiles));
+        OnPropertyChanged(nameof(HasStagedFiles));
+
+        if (previousPaths.Count == 0) return;
+
+        var restored = StagedFiles
+            .Concat(UnstagedFiles)
+            .Concat(ConflictedFiles)
+            .Where(f => previousPaths.Contains(f.Path.Value))
+            .ToList();
+        ApplySelectionState(restored);
+    }
+
+    private bool MatchesFilter(FileItemViewModel file)
+    {
+        if (string.IsNullOrWhiteSpace(FileFilter)) return true;
+        var path = file.Path.Value ?? "";
+        var name = file.Name ?? "";
+        return path.Contains(FileFilter, StringComparison.OrdinalIgnoreCase)
+               || name.Contains(FileFilter, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Called from the view when ListBox multi-selection changes.</summary>
+    public void SetFileSelection(IReadOnlyList<FileItemViewModel> selected)
+    {
+        if (_suppressSelectionSync) return;
+        ApplySelectionState(selected);
+    }
+
+    private void ApplySelectionState(IReadOnlyList<FileItemViewModel> selected)
+    {
+        _selectedFiles.Clear();
+        _selectedFiles.AddRange(selected);
+        SelectedFileCount = _selectedFiles.Count;
+        HasStagedSelection = _selectedFiles.Any(f => f.IsStagedList);
+        HasUnstagedSelection = _selectedFiles.Any(f => !f.IsStagedList && !f.IsConflicted);
+
+        if (_selectedFiles.Count == 1)
+        {
+            var file = _selectedFiles[0];
+            DiffEmptyMessage = "Select a file to view its diff";
+            DiffOverlayMessage = null;
+            if (!ReferenceEquals(SelectedFile, file))
+                SelectedFile = file;
+            else
+                _ = LoadDiffForSelectionAsync(file);
+        }
+        else if (_selectedFiles.Count > 1)
+        {
+            if (SelectedFile is not null)
+                SelectedFile = null;
+            DiffRows.Clear();
+            _currentDiff = null;
+            SelectedAddedLines = 0;
+            SelectedRemovedLines = 0;
+            DiffEmptyMessage = $"{_selectedFiles.Count} files selected";
+            DiffOverlayMessage = $"{_selectedFiles.Count} files selected";
+            OnPropertyChanged(nameof(DiffFooterText));
+        }
+        else
+        {
+            if (SelectedFile is not null)
+                SelectedFile = null;
+            DiffRows.Clear();
+            _currentDiff = null;
+            DiffEmptyMessage = "Select a file to view its diff";
+            DiffOverlayMessage = null;
+            OnPropertyChanged(nameof(DiffFooterText));
+        }
+
+        UpdateDiffOverlay();
+    }
+
+    private void UpdateDiffOverlay()
+    {
+        if (IsLoadingDiff)
+        {
+            DiffOverlayMessage = null;
+            return;
+        }
+
+        if (SelectedFileCount > 1)
+            DiffOverlayMessage = $"{SelectedFileCount} files selected";
+        else if (SelectedFileCount == 0)
+            DiffOverlayMessage = null;
+    }
+
+    partial void OnSelectedFileChanged(FileItemViewModel? value)
+    {
+        if (SelectedFileCount <= 1)
+            _ = LoadDiffForSelectionAsync(value);
+    }
 
     partial void OnViewModeChanged(DiffViewMode value)
     {
@@ -241,6 +411,8 @@ public partial class WorkingCopyViewModel : ObservableObject
             ? "Combined review mode is read-only. Partial staging requires the staged/unstaged lists."
             : file.IsConflicted ? "Conflicted files cannot be staged here. Resolve externally or open mergetool."
             : null;
+        OnPropertyChanged(nameof(CanStageLines));
+        OnPropertyChanged(nameof(CanUnstageLines));
 
         IsLoadingDiff = true;
         try
@@ -252,6 +424,8 @@ public partial class WorkingCopyViewModel : ObservableObject
             _currentDiff = ApplyIntraLine(diff);
             UpdateDiffStats(_currentDiff);
             ProjectRows(_currentDiff);
+            OnPropertyChanged(nameof(CanStageLines));
+            OnPropertyChanged(nameof(CanUnstageLines));
             CodeReviewrMeters.DiffGenerationMs.Record(sw.Elapsed.TotalMilliseconds);
         }
         catch (OperationCanceledException) { }
@@ -368,21 +542,65 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task StageAllAsync()
-    {
-        if (_repoPath is null) return;
-        var files = UnstagedFiles.ToList();
-        foreach (var file in files)
-            await StageFileAsync(file);
-    }
+    private Task StageAllAsync() =>
+        StageManyAsync(UnstagedFiles.ToList());
 
     [RelayCommand]
-    private async Task UnstageAllAsync()
+    private Task UnstageAllAsync() =>
+        UnstageManyAsync(StagedFiles.ToList());
+
+    [RelayCommand]
+    private Task StageSelectedAsync() =>
+        StageManyAsync(_selectedFiles.Where(f => !f.IsStagedList && !f.IsConflicted).ToList());
+
+    [RelayCommand]
+    private Task UnstageSelectedAsync() =>
+        UnstageManyAsync(_selectedFiles.Where(f => f.IsStagedList).ToList());
+
+    private async Task StageManyAsync(IReadOnlyList<FileItemViewModel> files)
     {
-        if (_repoPath is null) return;
-        var files = StagedFiles.ToList();
-        foreach (var file in files)
-            await UnstageFileAsync(file);
+        if (_repoPath is null || files.Count == 0) return;
+        var pendings = files.Select(f => new PendingMutation(f.Path, WasUnstage: false)).ToList();
+        _pending.AddRange(pendings);
+        await RefreshAsync();
+        try
+        {
+            await _staging.StageFilesAsync(_repoPath, files.Select(f => f.Path).ToList());
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Stage failed: {ex.Message}", () => _ = StageManyAsync(files));
+        }
+        finally
+        {
+            foreach (var pending in pendings)
+                _pending.Remove(pending);
+            await RefreshAsync();
+            await LoadDiffForSelectionAsync(SelectedFile);
+        }
+    }
+
+    private async Task UnstageManyAsync(IReadOnlyList<FileItemViewModel> files)
+    {
+        if (_repoPath is null || files.Count == 0) return;
+        var pendings = files.Select(f => new PendingMutation(f.Path, WasUnstage: true)).ToList();
+        _pending.AddRange(pendings);
+        await RefreshAsync();
+        try
+        {
+            await _staging.UnstageFilesAsync(_repoPath, files.Select(f => f.Path).ToList());
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Unstage failed: {ex.Message}", () => _ = UnstageManyAsync(files));
+        }
+        finally
+        {
+            foreach (var pending in pendings)
+                _pending.Remove(pending);
+            await RefreshAsync();
+            await LoadDiffForSelectionAsync(SelectedFile);
+        }
     }
 
     [RelayCommand]
@@ -395,7 +613,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     [RelayCommand]
     private async Task FetchAsync()
     {
-        if (_repoPath is null) return;
+        if (_repoPath is null || IsRemoteBusy) return;
+        IsFetching = true;
         try
         {
             await _branches.FetchAsync(_repoPath);
@@ -406,6 +625,10 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             _notifications.Error($"Fetch failed: {ex.Message}", () => _ = FetchAsync());
         }
+        finally
+        {
+            IsFetching = false;
+        }
     }
 
     [RelayCommand]
@@ -413,26 +636,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         if (_currentDiff is null || _repoPath is null || SelectedHunkIndex < 0) return;
         if (_currentDiff.Target != DiffTarget.IndexToWorktree) return;
-        var patch = PatchSynthesizer.SynthesizeHunks(_currentDiff, [SelectedHunkIndex]);
-        var pending = new PendingMutation(_currentDiff.NewPath, WasUnstage: false);
-        _pending.Add(pending);
-        ProjectRowsOptimisticRemoveHunk(SelectedHunkIndex);
-        try
-        {
-            var sw = Stopwatch.StartNew();
-            await _staging.StagePatchAsync(_repoPath, patch);
-            CodeReviewrMeters.StageMs.Record(sw.Elapsed.TotalMilliseconds);
-        }
-        catch (Exception ex)
-        {
-            _notifications.Error($"Stage hunk failed: {ex.Message}");
-        }
-        finally
-        {
-            _pending.Remove(pending);
-            await RefreshAsync();
-            await LoadDiffForSelectionAsync(SelectedFile);
-        }
+        await ApplyHunkPatchAsync(SelectedHunkIndex, stage: true);
     }
 
     [RelayCommand]
@@ -440,14 +644,76 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         if (_currentDiff is null || _repoPath is null || SelectedHunkIndex < 0) return;
         if (_currentDiff.Target != DiffTarget.HeadToIndex) return;
-        var patch = PatchSynthesizer.SynthesizeHunks(_currentDiff, [SelectedHunkIndex]);
+        await ApplyHunkPatchAsync(SelectedHunkIndex, stage: false);
+    }
+
+    public Task StageHunkAtAsync(int hunkIndex)
+    {
+        SelectedHunkIndex = hunkIndex;
+        return StageHunkAsync();
+    }
+
+    public Task UnstageHunkAtAsync(int hunkIndex)
+    {
+        SelectedHunkIndex = hunkIndex;
+        return UnstageHunkAsync();
+    }
+
+    private async Task ApplyHunkPatchAsync(int hunkIndex, bool stage)
+    {
+        if (_currentDiff is null || _repoPath is null || hunkIndex < 0) return;
+        var patch = PatchSynthesizer.SynthesizeHunks(_currentDiff, [hunkIndex]);
+        var pending = stage
+            ? new PendingMutation(_currentDiff.NewPath, WasUnstage: false)
+            : null;
+        if (pending is not null)
+        {
+            _pending.Add(pending);
+            ProjectRowsOptimisticRemoveHunk(hunkIndex);
+        }
+
         try
         {
-            await _staging.UnstagePatchAsync(_repoPath, patch);
+            if (stage)
+                await _staging.StagePatchAsync(_repoPath, patch);
+            else
+                await _staging.UnstagePatchAsync(_repoPath, patch);
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Unstage hunk failed: {ex.Message}");
+            _notifications.Error($"{(stage ? "Stage" : "Unstage")} hunk failed: {ex.Message}");
+        }
+        finally
+        {
+            if (pending is not null)
+                _pending.Remove(pending);
+            await RefreshAsync();
+            await LoadDiffForSelectionAsync(SelectedFile);
+        }
+    }
+
+    [RelayCommand]
+    private async Task StageSelectedLinesAsync(IReadOnlyList<LineSelection>? lines)
+    {
+        if (lines is null || lines.Count == 0 || _currentDiff is null || _repoPath is null) return;
+        if (_currentDiff.Target != DiffTarget.IndexToWorktree) return;
+        try
+        {
+            var patch = PatchSynthesizer.SynthesizeLines(_currentDiff, lines);
+            var pending = new PendingMutation(_currentDiff.NewPath, WasUnstage: false);
+            _pending.Add(pending);
+            try
+            {
+                await _staging.StagePatchAsync(_repoPath, patch);
+            }
+            finally
+            {
+                _pending.Remove(pending);
+            }
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Stage lines failed: {ex.Message}");
         }
         finally
         {
@@ -455,6 +721,33 @@ public partial class WorkingCopyViewModel : ObservableObject
             await LoadDiffForSelectionAsync(SelectedFile);
         }
     }
+
+    [RelayCommand]
+    private async Task UnstageSelectedLinesAsync(IReadOnlyList<LineSelection>? lines)
+    {
+        if (lines is null || lines.Count == 0 || _currentDiff is null || _repoPath is null) return;
+        if (_currentDiff.Target != DiffTarget.HeadToIndex) return;
+        try
+        {
+            var patch = PatchSynthesizer.SynthesizeLines(_currentDiff, lines);
+            await _staging.UnstagePatchAsync(_repoPath, patch);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Unstage lines failed: {ex.Message}");
+        }
+        finally
+        {
+            await RefreshAsync();
+            await LoadDiffForSelectionAsync(SelectedFile);
+        }
+    }
+
+    public bool CanStageLines =>
+        _currentDiff?.Target == DiffTarget.IndexToWorktree;
+
+    public bool CanUnstageLines =>
+        _currentDiff?.Target == DiffTarget.HeadToIndex;
 
     private void ProjectRowsOptimisticRemoveHunk(int hunkIndex)
     {
@@ -505,6 +798,8 @@ public partial class WorkingCopyViewModel : ObservableObject
             CommitMessage = "";
             AmendCommit = false;
             await RefreshAsync();
+            if (PushAfterCommit)
+                await ExecutePushAsync();
         }
         catch (Exception ex)
         {
@@ -519,7 +814,14 @@ public partial class WorkingCopyViewModel : ObservableObject
     [RelayCommand]
     private async Task PushAsync()
     {
+        if (_repoPath is null || IsRemoteBusy) return;
+        await ExecutePushAsync();
+    }
+
+    private async Task ExecutePushAsync()
+    {
         if (_repoPath is null) return;
+        IsPushing = true;
         try
         {
             var sw = Stopwatch.StartNew();
@@ -531,12 +833,17 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             _notifications.Error($"Push failed: {ex.Message}", () => _ = PushAsync());
         }
+        finally
+        {
+            IsPushing = false;
+        }
     }
 
     [RelayCommand]
     private async Task PullAsync()
     {
-        if (_repoPath is null) return;
+        if (_repoPath is null || IsRemoteBusy) return;
+        IsPulling = true;
         try
         {
             var sw = Stopwatch.StartNew();
@@ -548,6 +855,10 @@ public partial class WorkingCopyViewModel : ObservableObject
         catch (Exception ex)
         {
             _notifications.Error($"Pull failed: {ex.Message}", () => _ = PullAsync());
+        }
+        finally
+        {
+            IsPulling = false;
         }
     }
 

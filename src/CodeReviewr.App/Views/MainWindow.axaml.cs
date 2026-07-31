@@ -1,6 +1,9 @@
+using System;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
 
@@ -8,12 +11,46 @@ namespace CodeReviewr.App.Views;
 
 public partial class MainWindow : Window
 {
+    private bool _suppressSelectionSync;
+    private bool _multiSelectModifiers;
+
+    
+    
+    
     public MainWindow()
     {
-        InitializeComponent();
+           //hello
+           InitializeComponent();
+        WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        Opened += OnOpened;
+        Closing += OnClosing;
     }
 
     private MainWindowViewModel Vm => (MainWindowViewModel)DataContext!;
+
+    private void OnOpened(object? sender, EventArgs e)
+    {
+        if (Vm.WindowWidth >= 640) Width = Vm.WindowWidth;
+        if (Vm.WindowHeight >= 480) Height = Vm.WindowHeight;
+        ApplyColumnWidths();
+
+        // Defer repo open so the window can paint first.
+        Dispatcher.UIThread.Post(() => _ = Vm.TryOpenLastRepositoryAsync(), DispatcherPriority.Background);
+    }
+
+    private void ApplyColumnWidths()
+    {
+        if (MainColumns.ColumnDefinitions.Count < 5) return;
+        MainColumns.ColumnDefinitions[0].Width = Vm.NavigatorColumnWidth;
+        MainColumns.ColumnDefinitions[2].Width = Vm.FileListColumnWidth;
+    }
+
+    private void OnClosing(object? sender, WindowClosingEventArgs e)
+    {
+        Vm.WindowWidth = Width;
+        Vm.WindowHeight = Height;
+        Vm.PersistLayout();
+    }
 
     private async void OnOpenRepository(object? sender, RoutedEventArgs e)
     {
@@ -53,6 +90,12 @@ public partial class MainWindow : Window
     private void OnToggleUnstaged(object? sender, RoutedEventArgs e) =>
         Vm.WorkingCopy.UnstagedExpanded = !Vm.WorkingCopy.UnstagedExpanded;
 
+    private void OnToggleNavigatorCollapsed(object? sender, RoutedEventArgs e)
+    {
+        Vm.IsNavigatorCollapsed = !Vm.IsNavigatorCollapsed;
+        ApplyColumnWidths();
+    }
+
     private void OnFileCheckClick(object? sender, RoutedEventArgs e)
     {
         if (sender is CheckBox { Tag: FileItemViewModel file })
@@ -61,4 +104,63 @@ public partial class MainWindow : Window
             _ = Vm.WorkingCopy.ToggleFileStagedCommand.ExecuteAsync(file);
         }
     }
+
+    private void OnFileListPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _multiSelectModifiers = e.KeyModifiers.HasFlag(KeyModifiers.Control)
+                                || e.KeyModifiers.HasFlag(KeyModifiers.Meta)
+                                || e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+    }
+
+    private void OnFileSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionSync) return;
+
+        if (!_multiSelectModifiers && sender is ListBox source)
+        {
+            _suppressSelectionSync = true;
+            try
+            {
+                ClearPeerSelections(source);
+            }
+            finally
+            {
+                _suppressSelectionSync = false;
+            }
+        }
+
+        SyncFileSelection();
+    }
+
+    private void ClearPeerSelections(ListBox source)
+    {
+        if (!ReferenceEquals(source, StagedFileList))
+            StagedFileList.SelectedItems?.Clear();
+        if (!ReferenceEquals(source, UnstagedFileList))
+            UnstagedFileList.SelectedItems?.Clear();
+        if (!ReferenceEquals(source, ConflictedFileList))
+            ConflictedFileList.SelectedItems?.Clear();
+    }
+
+    private void SyncFileSelection()
+    {
+        var selected = new List<FileItemViewModel>();
+        CollectSelected(StagedFileList, selected);
+        CollectSelected(UnstagedFileList, selected);
+        CollectSelected(ConflictedFileList, selected);
+        Vm.WorkingCopy.SetFileSelection(selected);
+    }
+
+    private static void CollectSelected(ListBox? list, List<FileItemViewModel> into)
+    {
+        if (list?.SelectedItems is null) return;
+        foreach (var item in list.SelectedItems)
+        {
+            if (item is FileItemViewModel file)
+                into.Add(file);
+        }
+    }
+
+    private void OnColumnSplitterDragCompleted(object? sender, VectorEventArgs e) =>
+        Vm.CaptureColumnWidthsFromGrid(MainColumns);
 }

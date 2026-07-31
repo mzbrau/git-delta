@@ -53,21 +53,33 @@
             <TextBlock Text="Code Reviewr" FontWeight="SemiBold" FontSize="13"
                        Foreground="{DynamicResource ForgePrimaryBrush}"
                        VerticalAlignment="Center" Margin="4,0,12,0" />
-            <Button Classes="Ghost" Command="{Binding WorkingCopy.PushCommand}">
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.PushCommand}"
+                    IsEnabled="{Binding WorkingCopy.IsRemoteBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <StackPanel Orientation="Horizontal" Spacing="4">
-                <icons:MaterialIcon Kind="Upload" Width="16" Height="16" />
+                <ProgressBar Width="16" Height="16" IsIndeterminate="True"
+                             IsVisible="{Binding WorkingCopy.IsPushing}" />
+                <icons:MaterialIcon Kind="Upload" Width="16" Height="16"
+                                    IsVisible="{Binding WorkingCopy.IsPushing, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
                 <TextBlock Text="Push" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
-            <Button Classes="Ghost" Command="{Binding WorkingCopy.PullCommand}">
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.PullCommand}"
+                    IsEnabled="{Binding WorkingCopy.IsRemoteBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <StackPanel Orientation="Horizontal" Spacing="4">
-                <icons:MaterialIcon Kind="Download" Width="16" Height="16" />
+                <ProgressBar Width="16" Height="16" IsIndeterminate="True"
+                             IsVisible="{Binding WorkingCopy.IsPulling}" />
+                <icons:MaterialIcon Kind="Download" Width="16" Height="16"
+                                    IsVisible="{Binding WorkingCopy.IsPulling, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
                 <TextBlock Text="Pull" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
-            <Button Classes="Ghost" Command="{Binding WorkingCopy.FetchCommand}">
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.FetchCommand}"
+                    IsEnabled="{Binding WorkingCopy.IsRemoteBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <StackPanel Orientation="Horizontal" Spacing="4">
-                <icons:MaterialIcon Kind="Sync" Width="16" Height="16" />
+                <ProgressBar Width="16" Height="16" IsIndeterminate="True"
+                             IsVisible="{Binding WorkingCopy.IsFetching}" />
+                <icons:MaterialIcon Kind="Sync" Width="16" Height="16"
+                                    IsVisible="{Binding WorkingCopy.IsFetching, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
                 <TextBlock Text="Fetch" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
@@ -96,26 +108,43 @@
                    VerticalAlignment="Center" />
       </Border>
 
-      <!-- Notifications -->
-      <ItemsControl DockPanel.Dock="Bottom" ItemsSource="{Binding Notifications.Notifications}" Margin="12,0,12,8"
-                    HorizontalAlignment="Right" MaxWidth="360">
-        <ItemsControl.ItemTemplate>
-          <DataTemplate x:DataType="svc:AppNotification">
-            <Border Background="{DynamicResource ForgeSurfaceContainerHighBrush}"
-                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
-                    BorderThickness="1" Padding="12,8" Margin="0,0,0,4" CornerRadius="4">
-              <DockPanel>
-                <Button DockPanel.Dock="Right" Classes="Link"
-                        Content="{Binding ActionLabel}"
-                        IsVisible="{Binding ActionLabel, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
-                        Click="OnNotificationAction" Tag="{Binding}" Margin="8,0,0,0" />
-                <TextBlock Text="{Binding Message}" TextWrapping="Wrap"
-                           Foreground="{DynamicResource ForgeOnSurfaceBrush}" FontSize="12" />
-              </DockPanel>
-            </Border>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
+      <!-- Git command console -->
+      <Border DockPanel.Dock="Bottom"
+              Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
+              BorderThickness="0,1,0,0">
+        <DockPanel>
+          <Border DockPanel.Dock="Top" Height="28" Padding="8,0"
+                  Background="{DynamicResource ForgeSurfaceContainerBrush}">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                <Button Classes="Link" Content="Clear" Command="{Binding GitConsole.ClearCommand}" FontSize="11" />
+                <Button Classes="Ghost" Padding="4" Command="{Binding GitConsole.ToggleExpandedCommand}">
+                  <icons:MaterialIcon Kind="{Binding GitConsole.IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                      Width="14" Height="14" />
+                </Button>
+              </StackPanel>
+              <Button Classes="Ghost" Padding="4,0" HorizontalAlignment="Left"
+                      Command="{Binding GitConsole.ToggleExpandedCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <icons:MaterialIcon Kind="Console" Width="14" Height="14" />
+                  <TextBlock Text="Git Output" FontSize="11" VerticalAlignment="Center"
+                             Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                </StackPanel>
+              </Button>
+            </DockPanel>
+          </Border>
+          <Border Height="180" IsVisible="{Binding GitConsole.IsExpanded}" Padding="8,4">
+            <TextBox Classes="Forge" IsReadOnly="True" AcceptsReturn="True"
+                     Text="{Binding GitConsole.LogText, Mode=OneWay}"
+                     FontFamily="{DynamicResource ForgeCodeFont}"
+                     FontSize="11"
+                     TextWrapping="NoWrap"
+                     VerticalAlignment="Stretch"
+                     HorizontalAlignment="Stretch" />
+          </Border>
+        </DockPanel>
+      </Border>
 
       <!-- In-progress banner -->
       <Border DockPanel.Dock="Top" Padding="12,8"
@@ -130,16 +159,41 @@
         </DockPanel>
       </Border>
 
-      <!-- Three columns -->
-      <Grid ColumnDefinitions="260,300,*">
+      <!-- Three columns: navigator | splitter | files | splitter | diff -->
+      <Grid x:Name="MainColumns">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="260" MinWidth="36" />
+          <ColumnDefinition Width="4" />
+          <ColumnDefinition Width="300" MinWidth="180" />
+          <ColumnDefinition Width="4" />
+          <ColumnDefinition Width="*" MinWidth="200" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Navigator (collapsed strip) -->
+        <Border Grid.Column="0"
+                Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0"
+                IsVisible="{Binding IsNavigatorCollapsed}">
+          <Button Classes="Ghost" HorizontalAlignment="Stretch" VerticalAlignment="Top"
+                  Margin="0,8,0,0" Padding="4" Click="OnToggleNavigatorCollapsed"
+                  ToolTip.Tip="Expand navigator">
+            <icons:MaterialIcon Kind="ChevronRight" Width="18" Height="18" />
+          </Button>
+        </Border>
+
         <!-- Navigator -->
         <Border Grid.Column="0" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
-                BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0">
+                BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0"
+                IsVisible="{Binding IsNavigatorCollapsed, Converter={x:Static conv:ForgeConverters.InvertBool}}">
           <DockPanel>
-            <Border DockPanel.Dock="Top" Padding="16,12"
+            <Border DockPanel.Dock="Top" Padding="12,12"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
               <DockPanel>
-                <Border DockPanel.Dock="Right" Classes="Chip"
+                <Button DockPanel.Dock="Right" Classes="Ghost" Padding="4"
+                        Click="OnToggleNavigatorCollapsed" ToolTip.Tip="Collapse navigator">
+                  <icons:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" />
+                </Button>
+                <Border DockPanel.Dock="Right" Classes="Chip" Margin="0,0,4,0"
                         IsVisible="{Binding WorkingCopy.StatusUpdated}">
                   <TextBlock Text="Updated" FontSize="10"
                              Foreground="{DynamicResource ForgeOnSecondaryContainerBrush}" />
@@ -247,42 +301,39 @@
           </DockPanel>
         </Border>
 
+        <GridSplitter Grid.Column="1" Width="4" ResizeDirection="Columns"
+                      Background="{DynamicResource ForgeOutlineVariantBrush}"
+                      DragCompleted="OnColumnSplitterDragCompleted" />
+
         <!-- File Status -->
-        <Border Grid.Column="1" Background="{DynamicResource ForgeBackgroundBrush}"
-                BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0">
-          <DockPanel>
-            <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
+        <Border Grid.Column="2" Background="{DynamicResource ForgeBackgroundBrush}"
+                BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0"
+                ClipToBounds="True">
+          <Grid RowDefinitions="Auto,Auto,*,Auto">
+            <Border Grid.Row="0" Height="40" Padding="16,0"
                     Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
               <TextBlock Text="File Status" FontWeight="SemiBold" VerticalAlignment="Center" />
             </Border>
 
-            <!-- Commit dock -->
-            <Border DockPanel.Dock="Bottom" Padding="12"
-                    Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
-                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0">
-              <StackPanel Spacing="8">
-                <TextBox Classes="Forge" AcceptsReturn="True" Height="80"
-                         Text="{Binding WorkingCopy.CommitMessage}"
-                         PlaceholderText="Commit message..." />
-                <Button Classes="Primary" Content="{Binding WorkingCopy.CommitButtonLabel}"
-                        Command="{Binding WorkingCopy.CommitCommand}" />
-                <StackPanel Orientation="Horizontal" Spacing="12">
-                  <CheckBox Content="Amend" IsChecked="{Binding WorkingCopy.AmendCommit}" FontSize="11" />
-                  <CheckBox Content="--no-verify" IsChecked="{Binding WorkingCopy.NoVerify}" FontSize="11" />
-                </StackPanel>
-                <TextBlock Text="{Binding WorkingCopy.HookOutput}" FontSize="10" Opacity="0.7"
-                           TextWrapping="Wrap" IsVisible="{Binding WorkingCopy.HookOutput, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
-              </StackPanel>
+            <Border Grid.Row="1" Padding="8,6"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <TextBox Classes="Forge" Text="{Binding WorkingCopy.FileFilter}"
+                       PlaceholderText="Filter files…" />
             </Border>
 
-            <ScrollViewer Padding="8">
-              <StackPanel Spacing="16">
+            <ScrollViewer Grid.Row="2" Padding="8,8,8,16">
+              <StackPanel Spacing="16" Margin="0,0,0,8">
                 <!-- Staged -->
                 <StackPanel>
                   <DockPanel Margin="8,0,8,4">
-                    <Button DockPanel.Dock="Right" Classes="Link" Content="Unstage All"
-                            Command="{Binding WorkingCopy.UnstageAllCommand}" />
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                      <Button Classes="Link" Content="Unstage Selected"
+                              Command="{Binding WorkingCopy.UnstageSelectedCommand}"
+                              IsVisible="{Binding WorkingCopy.HasStagedSelection}" />
+                      <Button Classes="Link" Content="Unstage All"
+                              Command="{Binding WorkingCopy.UnstageAllCommand}" />
+                    </StackPanel>
                     <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnToggleStaged">
                       <StackPanel Orientation="Horizontal" Spacing="6">
                         <icons:MaterialIcon Kind="{Binding WorkingCopy.StagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
@@ -291,8 +342,13 @@
                       </StackPanel>
                     </Button>
                   </DockPanel>
-                  <ListBox ItemsSource="{Binding WorkingCopy.StagedFiles}"
-                           SelectedItem="{Binding WorkingCopy.SelectedFile}"
+                  <ListBox x:Name="StagedFileList"
+                           ItemsSource="{Binding WorkingCopy.StagedFiles}"
+                           SelectionMode="Multiple"
+                           SelectionChanged="OnFileSelectionChanged"
+                           PointerPressed="OnFileListPointerPressed"
+                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                            IsVisible="{Binding WorkingCopy.StagedExpanded}">
                     <ListBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:FileItemViewModel">
@@ -326,8 +382,13 @@
                 <!-- Unstaged -->
                 <StackPanel>
                   <DockPanel Margin="8,0,8,4">
-                    <Button DockPanel.Dock="Right" Classes="Link" Content="Stage All"
-                            Command="{Binding WorkingCopy.StageAllCommand}" />
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                      <Button Classes="Link" Content="Stage Selected"
+                              Command="{Binding WorkingCopy.StageSelectedCommand}"
+                              IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
+                      <Button Classes="Link" Content="Stage All"
+                              Command="{Binding WorkingCopy.StageAllCommand}" />
+                    </StackPanel>
                     <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnToggleUnstaged">
                       <StackPanel Orientation="Horizontal" Spacing="6">
                         <icons:MaterialIcon Kind="{Binding WorkingCopy.UnstagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
@@ -336,8 +397,13 @@
                       </StackPanel>
                     </Button>
                   </DockPanel>
-                  <ListBox ItemsSource="{Binding WorkingCopy.UnstagedFiles}"
-                           SelectedItem="{Binding WorkingCopy.SelectedFile}"
+                  <ListBox x:Name="UnstagedFileList"
+                           ItemsSource="{Binding WorkingCopy.UnstagedFiles}"
+                           SelectionMode="Multiple"
+                           SelectionChanged="OnFileSelectionChanged"
+                           PointerPressed="OnFileListPointerPressed"
+                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                            IsVisible="{Binding WorkingCopy.UnstagedExpanded}">
                     <ListBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:FileItemViewModel">
@@ -372,8 +438,13 @@
                 <StackPanel IsVisible="{Binding WorkingCopy.HasConflictedFiles}">
                   <TextBlock Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
                              Foreground="{DynamicResource ForgeErrorBrush}" />
-                  <ListBox ItemsSource="{Binding WorkingCopy.ConflictedFiles}"
-                           SelectedItem="{Binding WorkingCopy.SelectedFile}">
+                  <ListBox x:Name="ConflictedFileList"
+                           ItemsSource="{Binding WorkingCopy.ConflictedFiles}"
+                           SelectionMode="Multiple"
+                           SelectionChanged="OnFileSelectionChanged"
+                           PointerPressed="OnFileListPointerPressed"
+                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:FileItemViewModel">
                         <Border Padding="8,4">
@@ -393,11 +464,36 @@
                 </StackPanel>
               </StackPanel>
             </ScrollViewer>
-          </DockPanel>
+
+            <!-- Commit dock -->
+            <Border Grid.Row="3" Padding="12"
+                    Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
+                    IsVisible="{Binding WorkingCopy.HasStagedFiles}">
+              <StackPanel Spacing="8">
+                <TextBox Classes="Forge" AcceptsReturn="True" Height="80"
+                         Text="{Binding WorkingCopy.CommitMessage}"
+                         PlaceholderText="Commit message..." />
+                <Button Classes="Primary" Content="{Binding WorkingCopy.CommitButtonLabel}"
+                        Command="{Binding WorkingCopy.CommitCommand}" />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <CheckBox Content="Amend" IsChecked="{Binding WorkingCopy.AmendCommit}" FontSize="11" />
+                  <CheckBox Content="--no-verify" IsChecked="{Binding WorkingCopy.NoVerify}" FontSize="11" />
+                  <CheckBox Content="Push" IsChecked="{Binding WorkingCopy.PushAfterCommit}" FontSize="11" />
+                </StackPanel>
+                <TextBlock Text="{Binding WorkingCopy.HookOutput}" FontSize="10" Opacity="0.7"
+                           TextWrapping="Wrap" IsVisible="{Binding WorkingCopy.HookOutput, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+              </StackPanel>
+            </Border>
+          </Grid>
         </Border>
 
+        <GridSplitter Grid.Column="3" Width="4" ResizeDirection="Columns"
+                      Background="{DynamicResource ForgeOutlineVariantBrush}"
+                      DragCompleted="OnColumnSplitterDragCompleted" />
+
         <!-- Diff pane -->
-        <DockPanel Grid.Column="2" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}">
+        <DockPanel Grid.Column="4" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}">
           <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
                   Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
@@ -464,12 +560,48 @@
             </StackPanel>
           </Border>
 
-          <controls:DiffViewer Rows="{Binding WorkingCopy.DiffRows}"
-                               ViewMode="{Binding WorkingCopy.ViewMode}"
-                               RowHeight="20" />
+          <Panel>
+            <controls:DiffViewer Rows="{Binding WorkingCopy.DiffRows}"
+                                 ViewMode="{Binding WorkingCopy.ViewMode}"
+                                 EmptyMessage="{Binding WorkingCopy.DiffEmptyMessage}"
+                                 CanStageLines="{Binding WorkingCopy.CanStageLines}"
+                                 CanUnstageLines="{Binding WorkingCopy.CanUnstageLines}"
+                                 RowHeight="20" />
+            <Border Background="#80060e20"
+                    IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
+              <ProgressBar Width="36" Height="36" IsIndeterminate="True"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <TextBlock Text="{Binding WorkingCopy.DiffOverlayMessage}"
+                       IsVisible="{Binding WorkingCopy.DiffOverlayMessage, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       FontSize="14" Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+          </Panel>
         </DockPanel>
       </Grid>
     </DockPanel>
+
+    <!-- Notifications overlay (does not affect layout) -->
+    <ItemsControl ItemsSource="{Binding Notifications.Notifications}"
+                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                  Margin="12,0,12,36" MaxWidth="360" ZIndex="100">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="svc:AppNotification">
+          <Border Background="{DynamicResource ForgeSurfaceContainerHighBrush}"
+                  BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
+                  BorderThickness="1" Padding="12,8" Margin="0,0,0,4" CornerRadius="4">
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Classes="Link"
+                      Content="{Binding ActionLabel}"
+                      IsVisible="{Binding ActionLabel, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
+                      Click="OnNotificationAction" Tag="{Binding}" Margin="8,0,0,0" />
+              <TextBlock Text="{Binding Message}" TextWrapping="Wrap"
+                         Foreground="{DynamicResource ForgeOnSurfaceBrush}" FontSize="12" />
+            </DockPanel>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
 
     <!-- Settings overlay -->
     <Border IsVisible="{Binding ShowSettings}" Background="#99060e20" ZIndex="200">

@@ -22,18 +22,28 @@ public sealed class JsonSettingsStore : ISettingsStore
         get { lock (_lock) return _current; }
     }
 
-    public async Task LoadAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Synchronous load for startup. Prefer this over <see cref="LoadAsync"/> when called
+    /// via GetResult on the UI thread — async load can deadlock on the Avalonia sync context.
+    /// </summary>
+    public void Load()
     {
         if (!File.Exists(_path))
             return;
 
-        await using var stream = File.OpenRead(_path);
-        var loaded = await JsonSerializer.DeserializeAsync<AppSettings>(stream, cancellationToken: ct);
+        var json = File.ReadAllText(_path);
+        var loaded = JsonSerializer.Deserialize<AppSettings>(json);
         if (loaded is not null)
         {
             lock (_lock)
                 _current = loaded;
         }
+    }
+
+    public Task LoadAsync(CancellationToken ct = default)
+    {
+        Load();
+        return Task.CompletedTask;
     }
 
     public async Task SaveAsync(CancellationToken ct = default)
@@ -47,7 +57,11 @@ public sealed class JsonSettingsStore : ISettingsStore
         var tmp = _path + ".tmp";
         await using (var stream = File.Create(tmp))
         {
-            await JsonSerializer.SerializeAsync(stream, snapshot, new JsonSerializerOptions { WriteIndented = true }, ct);
+            await JsonSerializer.SerializeAsync(
+                stream,
+                snapshot,
+                new JsonSerializerOptions { WriteIndented = true },
+                ct).ConfigureAwait(false);
         }
         File.Move(tmp, _path, overwrite: true);
     }
@@ -86,5 +100,6 @@ public sealed class JsonSettingsStore : ISettingsStore
         WindowHeight = s.WindowHeight,
         NavigatorWidth = s.NavigatorWidth,
         FileListWidth = s.FileListWidth,
+        NavigatorCollapsed = s.NavigatorCollapsed,
     };
 }

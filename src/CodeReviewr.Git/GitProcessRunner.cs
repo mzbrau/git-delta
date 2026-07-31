@@ -25,12 +25,17 @@ namespace CodeReviewr.Git;
 public sealed class GitProcessRunner : IGitProcessRunner
 {
     private readonly ILogger<GitProcessRunner> _logger;
+    private readonly IGitCommandLog? _commandLog;
     private readonly bool _assertNoUiSyncContext;
     private volatile string _executablePath = "git";
 
-    public GitProcessRunner(ILogger<GitProcessRunner>? logger = null, bool assertNoUiSyncContext = false)
+    public GitProcessRunner(
+        ILogger<GitProcessRunner>? logger = null,
+        IGitCommandLog? commandLog = null,
+        bool assertNoUiSyncContext = false)
     {
         _logger = logger ?? NullLogger<GitProcessRunner>.Instance;
+        _commandLog = commandLog;
         _assertNoUiSyncContext = assertNoUiSyncContext;
     }
 
@@ -107,6 +112,14 @@ public sealed class GitProcessRunner : IGitProcessRunner
             GitErrorClassifier.IsAuthFailure(stderr),
             GitErrorClassifier.IsIndexLocked(stderr));
 
+        _commandLog?.Append(new GitCommandLogEntry(
+            DateTimeOffset.Now,
+            workingDirectory,
+            FormatCommandLine(fullArguments),
+            result.ExitCode,
+            stdout,
+            stderr));
+
         if (!commandResult.Succeeded && !options.AllowNonZeroExitCode)
         {
             _logger.LogWarning("git {Arguments} exited {ExitCode}: {Stderr}", fullArguments, commandResult.ExitCode, stderr);
@@ -141,10 +154,22 @@ public sealed class GitProcessRunner : IGitProcessRunner
         CodeReviewrMeters.GitInvocations.Add(1);
         _logger.LogDebug("git {Arguments} (long-lived)", string.Join(' ', fullArguments));
 
+        _commandLog?.Append(new GitCommandLogEntry(
+            DateTimeOffset.Now,
+            workingDirectory,
+            FormatCommandLine(fullArguments) + " (long-lived)",
+            ExitCode: null,
+            Stdout: "",
+            Stderr: "",
+            IsLongLivedStart: true));
+
         var completion = RunLongLivedAsync(command, stdoutPipe.Writer, stderrBuilder, cts.Token);
 
         return new LongLivedGitProcess(stdinPipe.Writer.AsStream(), stdoutPipe.Reader.AsStream(), completion, cts);
     }
+
+    private string FormatCommandLine(IReadOnlyList<string> fullArguments) =>
+        $"{_executablePath} {string.Join(' ', fullArguments)}";
 
     private async Task<int> RunLongLivedAsync(Command command, PipeWriter stdoutWriter, StringBuilder stderrBuilder, CancellationToken ct)
     {

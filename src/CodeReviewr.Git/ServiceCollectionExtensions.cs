@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddCodeReviewrGit(this IServiceCollection services)
     {
+        services.AddSingleton<IGitCommandLog, GitCommandLog>();
         services.AddSingleton<IGitProcessRunner, GitProcessRunner>();
         services.AddSingleton<IGitEnvironment, GitEnvironment>();
         services.AddSingleton<IRepositoryGate, RepositoryGate>();

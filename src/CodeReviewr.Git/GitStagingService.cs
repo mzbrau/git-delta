@@ -15,10 +15,28 @@ namespace CodeReviewr.Git;
 public sealed class GitStagingService(IGitProcessRunner runner, IRepositoryGate gate) : IGitStagingService
 {
     public Task StageFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default) =>
-        RunIndexWrite(repositoryPath, ["add", "--", path.Value], stdin: null, ct);
+        StageFilesAsync(repositoryPath, [path], ct);
 
     public Task UnstageFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default) =>
-        RunIndexWrite(repositoryPath, ["reset", "--", path.Value], stdin: null, ct);
+        UnstageFilesAsync(repositoryPath, [path], ct);
+
+    public Task StageFilesAsync(string repositoryPath, IReadOnlyList<FilePath> paths, CancellationToken ct = default)
+    {
+        if (paths.Count == 0) return Task.CompletedTask;
+        var args = new List<string>(2 + paths.Count) { "add", "--" };
+        foreach (var p in paths)
+            args.Add(p.Value);
+        return RunIndexWrite(repositoryPath, args, stdin: null, ct);
+    }
+
+    public Task UnstageFilesAsync(string repositoryPath, IReadOnlyList<FilePath> paths, CancellationToken ct = default)
+    {
+        if (paths.Count == 0) return Task.CompletedTask;
+        var args = new List<string>(2 + paths.Count) { "reset", "--" };
+        foreach (var p in paths)
+            args.Add(p.Value);
+        return RunIndexWrite(repositoryPath, args, stdin: null, ct);
+    }
 
     public Task StagePatchAsync(string repositoryPath, string patch, CancellationToken ct = default) =>
         RunIndexWrite(repositoryPath, ["apply", "--cached", "--whitespace=nowarn", "-"], patch, ct);

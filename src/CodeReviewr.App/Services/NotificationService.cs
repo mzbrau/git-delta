@@ -10,7 +10,7 @@ public sealed class NotificationService : ObservableObject
 
     public void Info(string message, Action? undo = null, string? undoLabel = null)
     {
-        var n = new AppNotification(message, undo, undoLabel ?? "Undo");
+        var n = new AppNotification(message, undo, undo is null ? null : (undoLabel ?? "Undo"));
         Notifications.Insert(0, n);
         _ = DismissAfterAsync(n, TimeSpan.FromSeconds(8));
     }
