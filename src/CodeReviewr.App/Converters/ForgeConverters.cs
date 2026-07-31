@@ -1,6 +1,7 @@
 using System.Globalization;
 using Avalonia.Data.Converters;
 using Avalonia.Media;
+using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
 using Material.Icons;
 
@@ -51,6 +52,15 @@ public static class ForgeConverters
 
     public static readonly IValueConverter IsSideBySide =
         new FuncValueConverter<DiffViewMode, bool>(mode => mode == DiffViewMode.SideBySide);
+
+    public static readonly IValueConverter GitConsoleLineBrush =
+        new FuncValueConverter<GitConsoleLineKind, IBrush>(kind => kind switch
+        {
+            GitConsoleLineKind.Command => Brush("ForgePrimaryBrush"),
+            GitConsoleLineKind.Stderr => Brush("ForgeErrorBrush"),
+            GitConsoleLineKind.Meta => Brush("ForgeOnSurfaceVariantBrush"),
+            _ => Brush("ForgeOnSurfaceBrush"),
+        });
 
     private static IBrush Brush(string key)
     {

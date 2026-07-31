@@ -46,6 +46,26 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
         RecordDiscarded(path, preImage, wasUntracked: !isTracked);
     }
 
+    public async Task DiscardStagedFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default)
+    {
+        var absolutePath = Path.Combine(repositoryPath, path.Value);
+        ContentId? preImage = File.Exists(absolutePath)
+            ? await objectReader.HashObjectAsync(repositoryPath, absolutePath, write: true, ct).ConfigureAwait(false)
+            : null;
+
+        await gate.RunWorktreeWriteAsync(async token =>
+        {
+            await runner.RunAsync(
+                repositoryPath,
+                ["restore", "--source=HEAD", "--staged", "--worktree", "--", path.Value],
+                options: null,
+                token).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+
+        if (preImage is { } oid)
+            RecordDiscarded(path, oid, wasUntracked: false);
+    }
+
     public async Task DiscardPatchAsync(string repositoryPath, string patch, CancellationToken ct = default)
     {
         var path = ExtractPathFromPatch(patch)

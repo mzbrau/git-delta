@@ -78,6 +78,8 @@ public interface IGitStagingService
 public interface IGitDiscardService
 {
     Task DiscardFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default);
+    /// <summary>Restores index and worktree to HEAD for a staged (or partially staged) path.</summary>
+    Task DiscardStagedFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default);
     Task DiscardPatchAsync(string repositoryPath, string patch, CancellationToken ct = default);
     Task RestoreDiscardedAsync(string repositoryPath, DiscardedEntry entry, CancellationToken ct = default);
     IReadOnlyList<DiscardedEntry> RecentlyDiscarded { get; }

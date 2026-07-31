@@ -22,32 +22,50 @@ public sealed class AlwaysConfirmDialog(bool result = true) : IConfirmDialog
 
 public sealed class WorkingCopyViewModelDiscardTests
 {
-    private readonly IGitStatusService _status = Substitute.For<IGitStatusService>();
-    private readonly IGitDiffService _diff = Substitute.For<IGitDiffService>();
-    private readonly IGitStagingService _staging = Substitute.For<IGitStagingService>();
-    private readonly IGitDiscardService _discard = Substitute.For<IGitDiscardService>();
-    private readonly IGitCommitService _commit = Substitute.For<IGitCommitService>();
-    private readonly IGitBranchService _branches = Substitute.For<IGitBranchService>();
-    private readonly IGitRemoteService _remotes = Substitute.For<IGitRemoteService>();
-    private readonly IGitConflictService _conflicts = Substitute.For<IGitConflictService>();
-    private readonly IGitStashService _stash = Substitute.For<IGitStashService>();
-    private readonly ISettingsStore _settings = Substitute.For<ISettingsStore>();
-    private readonly IGitProcessRunner _runner = Substitute.For<IGitProcessRunner>();
-    private readonly NotificationService _notifications = new();
-    private readonly AlwaysConfirmDialog _confirm = new();
-    private readonly GitRepositoryWatcher _watcher = new();
+    private IGitStatusService _status = null!;
+    private IGitDiffService _diff = null!;
+    private IGitStagingService _staging = null!;
+    private IGitDiscardService _discard = null!;
+    private IGitCommitService _commit = null!;
+    private IGitBranchService _branches = null!;
+    private IGitRemoteService _remotes = null!;
+    private IGitConflictService _conflicts = null!;
+    private IGitStashService _stash = null!;
+    private ISettingsStore _settings = null!;
+    private IGitProcessRunner _runner = null!;
+    private NotificationService _notifications = null!;
+    private AlwaysConfirmDialog _confirm = null!;
+    private GitRepositoryWatcher _watcher = null!;
 
     [SetUp]
     public void SetUp()
     {
+        _status = Substitute.For<IGitStatusService>();
+        _diff = Substitute.For<IGitDiffService>();
+        _staging = Substitute.For<IGitStagingService>();
+        _discard = Substitute.For<IGitDiscardService>();
+        _commit = Substitute.For<IGitCommitService>();
+        _branches = Substitute.For<IGitBranchService>();
+        _remotes = Substitute.For<IGitRemoteService>();
+        _conflicts = Substitute.For<IGitConflictService>();
+        _stash = Substitute.For<IGitStashService>();
+        _settings = Substitute.For<ISettingsStore>();
+        _runner = Substitute.For<IGitProcessRunner>();
+        _notifications = new NotificationService();
+        _confirm = new AlwaysConfirmDialog();
+        _watcher = new GitRepositoryWatcher();
+
         _settings.Current.Returns(new AppSettings());
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns([]);
         _discard.RecentlyDiscarded.Returns([]);
     }
 
+    [TearDown]
+    public void TearDown() => _watcher.Dispose();
+
     private WorkingCopyViewModel CreateVm() =>
-        new(_status, _diff, _staging, _discard, _commit, _branches, _remotes, _conflicts, _stash,
+        new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash,
             _settings, _notifications, _confirm, new IntraLineDiffer(), _runner, _watcher);
 
     private static StatusEntry Unstaged(string path, ChangeKind kind = ChangeKind.Modified) =>
@@ -63,7 +81,7 @@ public sealed class WorkingCopyViewModelDiscardTests
         new(staged ?? [], unstaged ?? [], [], InProgressOperation.None, "main", epoch);
 
     [Test]
-    public async Task DiscardSelected_Confirms_And_Discards_Unstaged_Only()
+    public async Task DiscardSelected_Discards_Unstaged_And_Staged()
     {
         var repo = Path.Combine(Path.GetTempPath(), "codereviewr-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repo);
@@ -87,7 +105,34 @@ public sealed class WorkingCopyViewModelDiscardTests
 
             Assert.That(_confirm.CallCount, Is.EqualTo(1));
             await _discard.Received(1).DiscardFileAsync(repo, FilePath.From("work.txt"), Arg.Any<CancellationToken>());
+            await _discard.Received(1).DiscardStagedFileAsync(repo, FilePath.From("staged.txt"), Arg.Any<CancellationToken>());
             await _discard.DidNotReceive().DiscardFileAsync(repo, FilePath.From("staged.txt"), Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task DiscardSelected_Staged_Only_Calls_DiscardStaged()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "codereviewr-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status(staged: [Staged("staged.txt")]));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+            vm.SetFileSelection([vm.StagedFiles[0]]);
+            Assert.That(vm.CanDiscardSelection, Is.True);
+
+            await vm.DiscardSelectedFilesCommand.ExecuteAsync(null);
+
+            await _discard.Received(1).DiscardStagedFileAsync(repo, FilePath.From("staged.txt"), Arg.Any<CancellationToken>());
+            await _discard.DidNotReceive().DiscardFileAsync(Arg.Any<string>(), Arg.Any<FilePath>(), Arg.Any<CancellationToken>());
         }
         finally
         {
@@ -107,7 +152,7 @@ public sealed class WorkingCopyViewModelDiscardTests
                 .Returns(Status(unstaged: [Unstaged("work.txt")]));
 
             var vm = new WorkingCopyViewModel(
-                _status, _diff, _staging, _discard, _commit, _branches, _remotes, _conflicts, _stash,
+                _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash,
                 _settings, _notifications, confirm, new IntraLineDiffer(), _runner, _watcher);
             await vm.OpenAsync(repo);
             vm.SetFileSelection([vm.UnstagedFiles[0]]);

@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -20,6 +21,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly IGitDiffService _diffService;
     private readonly IGitStagingService _staging;
     private readonly IGitDiscardService _discard;
+    private readonly IGitObjectReader _objects;
     private readonly IGitCommitService _commit;
     private readonly IGitBranchService _branches;
     private readonly IGitRemoteService _remotes;
@@ -47,12 +49,17 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly HashSet<(int HunkIndex, int LineIndexInHunk)> _expandedCollapses = [];
     private const int DefaultCollapseThreshold = 8;
     private const int FullFileContextLines = 100_000;
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
+    };
 
     public WorkingCopyViewModel(
         IGitStatusService statusService,
         IGitDiffService diffService,
         IGitStagingService staging,
         IGitDiscardService discard,
+        IGitObjectReader objects,
         IGitCommitService commit,
         IGitBranchService branches,
         IGitRemoteService remotes,
@@ -69,6 +76,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         _diffService = diffService;
         _staging = staging;
         _discard = discard;
+        _objects = objects;
         _commit = commit;
         _branches = branches;
         _remotes = remotes;
@@ -124,6 +132,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private bool _branchesExpanded = true;
     [ObservableProperty] private bool _explorerExpanded = true;
     [ObservableProperty] private string _fileFilter = "";
+    [ObservableProperty] private bool _hasFileFilter;
     [ObservableProperty] private bool _isPushing;
     [ObservableProperty] private bool _isPulling;
     [ObservableProperty] private bool _isFetching;
@@ -135,6 +144,11 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private bool _ignoreWhitespace;
     [ObservableProperty] private int _contextLines = 3;
     [ObservableProperty] private bool _showFullFile;
+    [ObservableProperty] private bool _isImagePreview;
+    [ObservableProperty] private bool _hasImageBefore;
+    [ObservableProperty] private bool _isSingleImagePreview;
+    [ObservableProperty] private Bitmap? _imageBefore;
+    [ObservableProperty] private Bitmap? _imageAfter;
 
     /// <summary>Raised after the VM restores selection following a list rebuild so the view can rebind ListBoxes.</summary>
     public event Action? SelectionSyncRequested;
@@ -157,6 +171,13 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
 
     public string FullFileToggleLabel => ShowFullFile ? "Diff only" : "Full file";
+
+    public string RevealInFileManagerLabel => FileManagerReveal.Label;
+
+    public string? SelectedFileAbsolutePath =>
+        _repoPath is null || SelectedFile is null
+            ? null
+            : AbsolutePathFor(SelectedFile);
 
     public IReadOnlyList<FileItemViewModel> SelectedFilesSnapshot => _selectedFiles;
 
@@ -188,12 +209,20 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
     partial void OnSelectedAddedLinesChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
     partial void OnSelectedRemovedLinesChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
-    partial void OnFileFilterChanged(string value) => ApplyFileFilter();
+    partial void OnFileFilterChanged(string value)
+    {
+        HasFileFilter = !string.IsNullOrWhiteSpace(value);
+        ApplyFileFilter();
+    }
+
+    [RelayCommand]
+    private void ClearFileFilter() => FileFilter = "";
     partial void OnIsPushingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsPullingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsFetchingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnSelectedFileCountChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
     partial void OnHasUnstagedSelectionChanged(bool value) => OnPropertyChanged(nameof(CanDiscardSelection));
+    partial void OnHasStagedSelectionChanged(bool value) => OnPropertyChanged(nameof(CanDiscardSelection));
 
     partial void OnIgnoreWhitespaceChanged(bool value)
     {
@@ -224,6 +253,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         _repoPath = path;
         RepositoryPath = path;
         OnPropertyChanged(nameof(HasRepository));
+        OnPropertyChanged(nameof(SelectedFileAbsolutePath));
         _watcher.WatchRepository(path);
         await RefreshAsync();
         await LoadBranchesAsync();
@@ -463,6 +493,8 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     partial void OnSelectedFileChanged(FileItemViewModel? value)
     {
+        OnPropertyChanged(nameof(SelectedFileAbsolutePath));
+
         if (_skipNextSelectedFileLoad)
         {
             _skipNextSelectedFileLoad = false;
@@ -472,6 +504,20 @@ public partial class WorkingCopyViewModel : ObservableObject
         if (SelectedFileCount <= 1)
             _ = LoadDiffForSelectionAsync(value);
     }
+
+    [RelayCommand]
+    private void RevealSelectedInFileManager() => RevealInFileManager(SelectedFile);
+
+    [RelayCommand]
+    private void RevealInFileManager(FileItemViewModel? file)
+    {
+        file ??= SelectedFile;
+        if (file is null || _repoPath is null) return;
+        FileManagerReveal.Reveal(AbsolutePathFor(file));
+    }
+
+    private string AbsolutePathFor(FileItemViewModel file) =>
+        Path.GetFullPath(Path.Combine(_repoPath!, file.Path.Value.Replace('/', Path.DirectorySeparatorChar)));
 
     partial void OnViewModeChanged(DiffViewMode value)
     {
@@ -506,8 +552,10 @@ public partial class WorkingCopyViewModel : ObservableObject
         _expandedCollapses.Clear();
         SelectedAddedLines = 0;
         SelectedRemovedLines = 0;
+        ClearImagePreview();
         if (file is null || _repoPath is null)
         {
+            DiffEmptyMessage = "Select a file to view its diff";
             OnPropertyChanged(nameof(DiffFooterText));
             return;
         }
@@ -555,7 +603,25 @@ public partial class WorkingCopyViewModel : ObservableObject
 
             _currentDiff = ApplyIntraLine(diff);
             UpdateDiffStats(_currentDiff);
-            ProjectRows(_currentDiff);
+
+            if (IsImagePath(file.Path.Value))
+            {
+                await LoadImagePreviewAsync(file, _currentDiff, target, ct);
+                DiffRows.Clear();
+                DiffEmptyMessage = "";
+            }
+            else if (_currentDiff.IsBinary)
+            {
+                DiffRows.Clear();
+                DiffEmptyMessage = "Binary file";
+                IsImagePreview = false;
+            }
+            else
+            {
+                DiffEmptyMessage = "Select a file to view its diff";
+                ProjectRows(_currentDiff);
+            }
+
             OnPropertyChanged(nameof(CanStageLines));
             OnPropertyChanged(nameof(CanUnstageLines));
             OnPropertyChanged(nameof(CanDiscardLines));
@@ -566,6 +632,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             SelectedAddedLines = 0;
             SelectedRemovedLines = 0;
+            ClearImagePreview();
             _notifications.Error($"Diff failed: {ex.Message}", () => _ = LoadDiffForSelectionAsync(file));
         }
         finally
@@ -573,6 +640,91 @@ public partial class WorkingCopyViewModel : ObservableObject
             IsLoadingDiff = false;
             OnPropertyChanged(nameof(DiffFooterText));
         }
+    }
+
+    private static bool IsImagePath(string path)
+    {
+        var ext = System.IO.Path.GetExtension(path);
+        return ImageExtensions.Contains(ext);
+    }
+
+    private async Task LoadImagePreviewAsync(
+        FileItemViewModel file,
+        FileDiff diff,
+        DiffTarget target,
+        CancellationToken ct)
+    {
+        byte[]? afterBytes = null;
+        byte[]? beforeBytes = null;
+
+        var worktreePath = System.IO.Path.Combine(
+            _repoPath!,
+            file.Path.Value.Replace('/', System.IO.Path.DirectorySeparatorChar));
+
+        // After image: prefer worktree for worktree-facing targets; else NewContent blob.
+        if (target is DiffTarget.IndexToWorktree or DiffTarget.HeadToWorktree
+            || file.Kind == ChangeKind.Untracked)
+        {
+            if (System.IO.File.Exists(worktreePath))
+                afterBytes = await System.IO.File.ReadAllBytesAsync(worktreePath, ct);
+        }
+        else if (!diff.NewContent.IsEmpty)
+        {
+            afterBytes = await _objects.ReadBlobAsync(_repoPath!, diff.NewContent, ct);
+        }
+
+        if (afterBytes is null && !diff.NewContent.IsEmpty)
+            afterBytes = await _objects.ReadBlobAsync(_repoPath!, diff.NewContent, ct);
+
+        // Before image: OldContent when present and not a pure add/untracked.
+        if (file.Kind is not ChangeKind.Untracked and not ChangeKind.Added
+            && !diff.OldContent.IsEmpty)
+        {
+            beforeBytes = await _objects.ReadBlobAsync(_repoPath!, diff.OldContent, ct);
+        }
+
+        ct.ThrowIfCancellationRequested();
+
+        var after = DecodeBitmap(afterBytes);
+        var before = DecodeBitmap(beforeBytes);
+        ClearImagePreviewBitmaps();
+        ImageAfter = after;
+        ImageBefore = before;
+        HasImageBefore = before is not null;
+        IsImagePreview = after is not null || before is not null;
+        IsSingleImagePreview = IsImagePreview && !HasImageBefore;
+        if (!IsImagePreview)
+            DiffEmptyMessage = "Unable to preview image";
+    }
+
+    private static Bitmap? DecodeBitmap(byte[]? bytes)
+    {
+        if (bytes is null || bytes.Length == 0) return null;
+        try
+        {
+            using var ms = new MemoryStream(bytes);
+            return new Bitmap(ms);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void ClearImagePreview()
+    {
+        ClearImagePreviewBitmaps();
+        IsImagePreview = false;
+        HasImageBefore = false;
+        IsSingleImagePreview = false;
+    }
+
+    private void ClearImagePreviewBitmaps()
+    {
+        ImageBefore?.Dispose();
+        ImageAfter?.Dispose();
+        ImageBefore = null;
+        ImageAfter = null;
     }
 
     private DiffOptions BuildDiffOptions()
@@ -907,8 +1059,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     /// <summary>True when the open diff is a worktree diff (stage and discard line/hunk ops apply).</summary>
     public bool CanDiscardLines => CanStageLines;
 
-    /// <summary>True when at least one selected file can be discarded (unstaged / untracked).</summary>
-    public bool CanDiscardSelection => HasUnstagedSelection;
+    /// <summary>True when at least one selected non-conflicted file can be discarded.</summary>
+    public bool CanDiscardSelection => HasUnstagedSelection || HasStagedSelection;
 
     private void ProjectRowsOptimisticRemoveHunk(int hunkIndex)
     {
@@ -921,14 +1073,14 @@ public partial class WorkingCopyViewModel : ObservableObject
     [RelayCommand]
     private async Task DiscardSelectedFilesAsync()
     {
-        var files = _selectedFiles.Where(f => !f.IsStagedList && !f.IsConflicted).ToList();
+        var files = _selectedFiles.Where(f => !f.IsConflicted).ToList();
         await DiscardFilesWithConfirmAsync(files);
     }
 
     [RelayCommand]
     private async Task DiscardFileAsync(FileItemViewModel? file)
     {
-        if (file is null || file.IsStagedList || file.IsConflicted) return;
+        if (file is null || file.IsConflicted) return;
         await DiscardFilesWithConfirmAsync([file]);
     }
 
@@ -936,32 +1088,41 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         if (_repoPath is null || files.Count == 0) return;
 
-        var message = files.Count == 1
-            ? $"Discard all changes in {files[0].Path.Name}? This cannot be undone except via Undo."
-            : $"Discard changes in {files.Count} files? This cannot be undone except via Undo.";
+        // Deduplicate by path: prefer staged discard when the same path appears in both lists.
+        var byPath = files
+            .GroupBy(f => f.Path.Value, StringComparer.Ordinal)
+            .Select(g => g.FirstOrDefault(f => f.IsStagedList) ?? g.First())
+            .ToList();
+
+        var message = byPath.Count == 1
+            ? $"Discard all changes in {byPath[0].Path.Name}? This cannot be undone except via Undo."
+            : $"Discard changes in {byPath.Count} files? This cannot be undone except via Undo.";
         if (!await _confirm.ConfirmAsync("Discard changes", message))
             return;
 
         var discarded = new List<DiscardedEntry>();
         try
         {
-            foreach (var file in files)
+            foreach (var file in byPath)
             {
-                await _discard.DiscardFileAsync(_repoPath, file.Path);
+                if (file.IsStagedList)
+                    await _discard.DiscardStagedFileAsync(_repoPath, file.Path);
+                else
+                    await _discard.DiscardFileAsync(_repoPath, file.Path);
                 var entry = _discard.RecentlyDiscarded.FirstOrDefault(e => e.Path.Equals(file.Path));
                 if (entry is not null)
                     discarded.Add(entry);
             }
 
-            var label = files.Count == 1
-                ? $"Discarded {files[0].Path.Name}"
-                : $"Discarded {files.Count} files";
+            var label = byPath.Count == 1
+                ? $"Discarded {byPath[0].Path.Name}"
+                : $"Discarded {byPath.Count} files";
             _notifications.Info(
                 label,
                 discarded.Count == 0 ? null : () => _ = RestoreDiscardedManyAsync(discarded),
                 "Undo");
 
-            var paths = files.Select(f => f.Path).ToList();
+            var paths = byPath.Select(f => f.Path).ToList();
             await RefreshAndMaybeReloadDiffAsync(paths);
         }
         catch (Exception ex)

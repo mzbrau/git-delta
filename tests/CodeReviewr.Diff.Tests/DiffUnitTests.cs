@@ -304,5 +304,81 @@ public sealed class SideBySideProjectionTests
         Assert.That(rows.Any(r => r.LeftText.ToString().Contains('x') || r.Kind == DiffRowKind.Removed), Is.True);
         Assert.That(rows.Any(r => r.RightText.ToString().Contains('y') || r.Kind == DiffRowKind.Added), Is.True);
     }
+
+    [Test]
+    public void Mixed_Block_With_Extra_Adds_Uses_Padding_And_Per_Pane_Kinds()
+    {
+        var diff = PatchParser.Parse(
+            """
+            diff --git a/a.txt b/a.txt
+            --- a/a.txt
+            +++ b/a.txt
+            @@ -1,2 +1,4 @@
+             keep
+            -old
+            +new1
+            +new2
+            +new3
+            """, DiffTarget.IndexToWorktree);
+
+        var rows = SideBySideRowProjector.Project(diff)
+            .Where(r => r.Kind is DiffRowKind.Removed or DiffRowKind.Added or DiffRowKind.Padding)
+            .ToList();
+
+        Assert.That(rows.Count, Is.EqualTo(3));
+
+        // Paired replace: tagged Removed, both sides present
+        Assert.That(rows[0].Kind, Is.EqualTo(DiffRowKind.Removed));
+        Assert.That(rows[0].OldLineNumber, Is.Not.Null);
+        Assert.That(rows[0].NewLineNumber, Is.Not.Null);
+        Assert.That(DiffRowPresentation.SideBySideLeftKind(rows[0]), Is.EqualTo(DiffRowKind.Removed));
+        Assert.That(DiffRowPresentation.SideBySideRightKind(rows[0]), Is.EqualTo(DiffRowKind.Added));
+
+        // Overflow adds: Padding with only new side
+        Assert.That(rows[1].Kind, Is.EqualTo(DiffRowKind.Padding));
+        Assert.That(rows[1].OldLineNumber, Is.Null);
+        Assert.That(rows[1].NewLineNumber, Is.Not.Null);
+        Assert.That(rows[1].LeftText.IsEmpty, Is.True);
+        Assert.That(rows[1].RightText.ToString(), Does.Contain("new2"));
+        Assert.That(DiffRowPresentation.SideBySideLeftKind(rows[1]), Is.EqualTo(DiffRowKind.Context));
+        Assert.That(DiffRowPresentation.SideBySideRightKind(rows[1]), Is.EqualTo(DiffRowKind.Added));
+
+        Assert.That(rows[2].Kind, Is.EqualTo(DiffRowKind.Padding));
+        Assert.That(DiffRowPresentation.SideBySideRightKind(rows[2]), Is.EqualTo(DiffRowKind.Added));
+    }
+
+    [Test]
+    public void Pure_Add_Block_Paints_Right_As_Added()
+    {
+        var row = new DiffRow(
+            DiffRowKind.Added,
+            null,
+            10,
+            ReadOnlyMemory<char>.Empty,
+            "added".AsMemory(),
+            null,
+            null,
+            0,
+            0);
+        Assert.That(DiffRowPresentation.SideBySideLeftKind(row), Is.EqualTo(DiffRowKind.Context));
+        Assert.That(DiffRowPresentation.SideBySideRightKind(row), Is.EqualTo(DiffRowKind.Added));
+    }
+
+    [Test]
+    public void Context_Row_Paints_Neither_Side_As_Change()
+    {
+        var row = new DiffRow(
+            DiffRowKind.Context,
+            1,
+            1,
+            "keep".AsMemory(),
+            "keep".AsMemory(),
+            null,
+            null,
+            0,
+            0);
+        Assert.That(DiffRowPresentation.SideBySideLeftKind(row), Is.EqualTo(DiffRowKind.Context));
+        Assert.That(DiffRowPresentation.SideBySideRightKind(row), Is.EqualTo(DiffRowKind.Context));
+    }
 }
 

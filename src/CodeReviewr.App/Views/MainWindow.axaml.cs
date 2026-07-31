@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private bool _suppressSelectionSync;
     private bool _multiSelectModifiers;
     private bool _selectionSyncSubscribed;
+    private bool _gitConsoleSubscribed;
 
     public MainWindow()
     {
@@ -29,9 +30,29 @@ public partial class MainWindow : Window
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
-        if (_selectionSyncSubscribed || DataContext is not MainWindowViewModel vm) return;
-        vm.WorkingCopy.SelectionSyncRequested += ApplySelectionToListBoxes;
-        _selectionSyncSubscribed = true;
+        if (DataContext is not MainWindowViewModel vm) return;
+
+        if (!_selectionSyncSubscribed)
+        {
+            vm.WorkingCopy.SelectionSyncRequested += ApplySelectionToListBoxes;
+            _selectionSyncSubscribed = true;
+        }
+
+        if (!_gitConsoleSubscribed)
+        {
+            vm.GitConsole.LinesUpdated += ScrollGitConsoleToEnd;
+            _gitConsoleSubscribed = true;
+        }
+    }
+
+    private void ScrollGitConsoleToEnd()
+    {
+        if (!Vm.GitConsole.IsExpanded) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<ScrollViewer>("GitConsoleScroll") is { } scroll)
+                scroll.Offset = new Avalonia.Vector(scroll.Offset.X, double.MaxValue);
+        }, DispatcherPriority.Background);
     }
 
     private void OnOpened(object? sender, EventArgs e)

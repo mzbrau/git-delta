@@ -10,6 +10,7 @@
         x:DataType="vm:MainWindowViewModel"
         x:Name="RootWindow"
         Title="Code Reviewr"
+        Icon="/Assets/logo.png"
         Width="1280" Height="800"
         Background="{DynamicResource ForgeBackgroundBrush}">
 
@@ -18,6 +19,7 @@
     <Border IsVisible="{Binding WorkingCopy.HasRepository, Converter={x:Static conv:ForgeConverters.InvertBool}}"
             Background="{DynamicResource ForgeBackgroundBrush}">
       <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16" MaxWidth="420">
+        <Image Source="/Assets/logo.png" Width="64" Height="64" HorizontalAlignment="Center" />
         <TextBlock Text="Code Reviewr" FontSize="28" FontWeight="Bold"
                    Foreground="{DynamicResource ForgePrimaryBrush}"
                    HorizontalAlignment="Center" />
@@ -50,9 +52,11 @@
               BorderThickness="0,0,0,1">
         <Grid ColumnDefinitions="*,Auto">
           <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+            <Image Source="/Assets/logo.png" Width="22" Height="22" Margin="4,0,4,0"
+                   VerticalAlignment="Center" />
             <TextBlock Text="Code Reviewr" FontWeight="SemiBold" FontSize="13"
                        Foreground="{DynamicResource ForgePrimaryBrush}"
-                       VerticalAlignment="Center" Margin="4,0,12,0" />
+                       VerticalAlignment="Center" Margin="0,0,12,0" />
             <Button Classes="Ghost" Command="{Binding WorkingCopy.PushCommand}"
                     IsEnabled="{Binding WorkingCopy.IsRemoteBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <StackPanel Orientation="Horizontal" Spacing="4">
@@ -135,13 +139,21 @@
             </DockPanel>
           </Border>
           <Border Height="180" IsVisible="{Binding GitConsole.IsExpanded}" Padding="8,4">
-            <TextBox Classes="Forge" IsReadOnly="True" AcceptsReturn="True"
-                     Text="{Binding GitConsole.LogText, Mode=OneWay}"
-                     FontFamily="{DynamicResource ForgeCodeFont}"
-                     FontSize="11"
-                     TextWrapping="NoWrap"
-                     VerticalAlignment="Stretch"
-                     HorizontalAlignment="Stretch" />
+            <ScrollViewer x:Name="GitConsoleScroll"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto">
+              <ItemsControl ItemsSource="{Binding GitConsole.Lines}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:GitConsoleLine">
+                    <TextBlock Text="{Binding Text}"
+                               FontFamily="{DynamicResource ForgeCodeFont}"
+                               FontSize="11"
+                               Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.GitConsoleLineBrush}}"
+                               TextWrapping="NoWrap" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
           </Border>
         </DockPanel>
       </Border>
@@ -318,8 +330,17 @@
 
             <Border DockPanel.Dock="Top" Padding="8,6"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-              <TextBox Classes="Forge" Text="{Binding WorkingCopy.FileFilter}"
-                       PlaceholderText="Filter files…" />
+              <Grid>
+                <TextBox Classes="Forge" Text="{Binding WorkingCopy.FileFilter}"
+                         PlaceholderText="Filter files…" Padding="8,6,28,6" />
+                <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
+                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
+                        Command="{Binding WorkingCopy.ClearFileFilterCommand}"
+                        IsVisible="{Binding WorkingCopy.HasFileFilter}"
+                        ToolTip.Tip="Clear filter">
+                  <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                </Button>
+              </Grid>
             </Border>
 
             <!-- Commit dock FIRST so fill gets remaining space -->
@@ -349,6 +370,9 @@
                 <StackPanel>
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                      <Button Classes="Link" Content="Discard"
+                              Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}"
+                              IsVisible="{Binding WorkingCopy.HasStagedSelection}" />
                       <Button Classes="Link" Content="Unstage Selected"
                               Command="{Binding WorkingCopy.UnstageSelectedCommand}"
                               IsVisible="{Binding WorkingCopy.HasStagedSelection}" />
@@ -375,6 +399,11 @@
                       <ContextMenu>
                         <MenuItem Header="Unstage"
                                   Command="{Binding WorkingCopy.UnstageSelectedCommand}" />
+                        <MenuItem Header="Discard"
+                                  Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
+                        <Separator />
+                        <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                  Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
                       </ContextMenu>
                     </ListBox.ContextMenu>
                     <ListBox.ItemsPanel>
@@ -446,6 +475,9 @@
                                   Command="{Binding WorkingCopy.StageSelectedCommand}" />
                         <MenuItem Header="Discard"
                                   Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
+                        <Separator />
+                        <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                  Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
                       </ContextMenu>
                     </ListBox.ContextMenu>
                     <ListBox.ItemsPanel>
@@ -493,6 +525,12 @@
                            PointerPressed="OnFileListPointerPressed"
                            ScrollViewer.VerticalScrollBarVisibility="Disabled"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                  Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
+                      </ContextMenu>
+                    </ListBox.ContextMenu>
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
                         <StackPanel />
@@ -564,6 +602,8 @@
                       <Separator />
                       <MenuItem Header="Discard file(s)"
                                 Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
+                      <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
                     </MenuFlyout>
                   </Button.Flyout>
                   <icons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
@@ -573,7 +613,8 @@
                           IsVisible="{Binding WorkingCopy.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                 <icons:MaterialIcon Kind="FileDocument" Width="18" Height="18"
                                     Foreground="{DynamicResource ForgeStatusAddedBrush}" />
-                <TextBlock Text="{Binding WorkingCopy.SelectedFile.Name}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding WorkingCopy.SelectedFile.Name}" FontWeight="SemiBold"
+                           ToolTip.Tip="{Binding WorkingCopy.SelectedFileAbsolutePath}" />
                 <StackPanel Orientation="Horizontal" Spacing="8" Margin="8,0,0,0">
                   <TextBlock Text="{Binding WorkingCopy.SelectedAddedLines, Converter={x:Static conv:ForgeConverters.PlusPrefix}}"
                              FontSize="10" Foreground="{DynamicResource ForgeStatusAddedBrush}" />
@@ -610,14 +651,51 @@
             </StackPanel>
           </Border>
 
-          <Panel>
+          <Panel ClipToBounds="True">
             <controls:DiffViewer Rows="{Binding WorkingCopy.DiffRows}"
                                  ViewMode="{Binding WorkingCopy.ViewMode}"
                                  EmptyMessage="{Binding WorkingCopy.DiffEmptyMessage}"
                                  CanStageLines="{Binding WorkingCopy.CanStageLines}"
                                  CanUnstageLines="{Binding WorkingCopy.CanUnstageLines}"
                                  CanDiscardLines="{Binding WorkingCopy.CanDiscardLines}"
-                                 RowHeight="20" />
+                                 RowHeight="20"
+                                 IsVisible="{Binding WorkingCopy.IsImagePreview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+
+            <!-- Changed image: before | after -->
+            <Grid IsVisible="{Binding WorkingCopy.HasImageBefore}"
+                  ColumnDefinitions="*,4,*"
+                  Background="{DynamicResource ForgeSurfaceContainerLowestBrush}">
+              <DockPanel Grid.Column="0" Margin="12">
+                <TextBlock DockPanel.Dock="Top" Text="Before" FontSize="11" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" Margin="0,0,0,8" />
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                  <Image Source="{Binding WorkingCopy.ImageBefore}" Stretch="Uniform"
+                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                         MaxWidth="1200" MaxHeight="1200" />
+                </ScrollViewer>
+              </DockPanel>
+              <Border Grid.Column="1" Background="{DynamicResource ForgeOutlineVariantBrush}" />
+              <DockPanel Grid.Column="2" Margin="12">
+                <TextBlock DockPanel.Dock="Top" Text="After" FontSize="11" FontWeight="SemiBold"
+                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" Margin="0,0,0,8" />
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                  <Image Source="{Binding WorkingCopy.ImageAfter}" Stretch="Uniform"
+                         HorizontalAlignment="Center" VerticalAlignment="Center"
+                         MaxWidth="1200" MaxHeight="1200" />
+                </ScrollViewer>
+              </DockPanel>
+            </Grid>
+
+            <!-- Single image (added / untracked / no before) -->
+            <ScrollViewer IsVisible="{Binding WorkingCopy.IsSingleImagePreview}"
+                          Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                          HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                          Padding="12">
+              <Image Source="{Binding WorkingCopy.ImageAfter}" Stretch="Uniform"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     MaxWidth="1200" MaxHeight="1200" />
+            </ScrollViewer>
+
             <Border Background="#80060e20"
                     IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
               <ProgressBar Width="36" Height="36" IsIndeterminate="True"

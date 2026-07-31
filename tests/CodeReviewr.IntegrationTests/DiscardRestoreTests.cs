@@ -44,6 +44,31 @@ public sealed class DiscardRestoreTests
     }
 
     [Test]
+    public async Task Discard_Staged_File_Restores_Index_And_Worktree_To_Head()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "original\n")
+            .WithInitialCommit("init")
+            .WithStagedChange("a.txt", "staged\n");
+        var path = repo.Build();
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var discard = sp.GetRequiredService<IGitDiscardService>();
+        var statusSvc = sp.GetRequiredService<IGitStatusService>();
+
+        var before = await statusSvc.GetStatusAsync(path);
+        Assert.That(before.Staged, Is.Not.Empty);
+
+        await discard.DiscardStagedFileAsync(path, FilePath.From("a.txt"));
+
+        Assert.That(await File.ReadAllTextAsync(Path.Combine(path, "a.txt")), Is.EqualTo("original\n"));
+        var after = await statusSvc.GetStatusAsync(path);
+        Assert.That(after.Staged, Is.Empty);
+        Assert.That(after.Unstaged, Is.Empty);
+    }
+
+    [Test]
     public async Task Discard_Untracked_File_Deletes_It_And_Undo_Restores()
     {
         using var repo = RepositoryBuilder.Create()

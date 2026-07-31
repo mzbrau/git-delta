@@ -18,6 +18,11 @@ namespace CodeReviewr.App.Controls;
 /// <summary>Purpose-built virtualized diff control. Fixed row height; paints O(viewport).</summary>
 public sealed class DiffViewer : Control
 {
+    public DiffViewer()
+    {
+        ClipToBounds = true;
+    }
+
     public static readonly StyledProperty<IReadOnlyList<DiffRow>?> RowsProperty =
         AvaloniaProperty.Register<DiffViewer, IReadOnlyList<DiffRow>?>(nameof(Rows));
 
@@ -186,8 +191,9 @@ public sealed class DiffViewer : Control
 
     protected override Size MeasureOverride(Size availableSize)
     {
-        var rows = Rows?.Count ?? 0;
-        return new Size(availableSize.Width, Math.Max(rows * RowHeight, availableSize.Height));
+        var width = double.IsInfinity(availableSize.Width) ? 0 : availableSize.Width;
+        var height = double.IsInfinity(availableSize.Height) ? 0 : availableSize.Height;
+        return new Size(width, height);
     }
 
     public IReadOnlyList<LineSelection> GetSelectedLineSelections()
@@ -211,6 +217,7 @@ public sealed class DiffViewer : Control
         _hunkButtons.Clear();
         var rows = Rows;
         var bounds = Bounds;
+        using var clip = context.PushClip(new Rect(bounds.Size));
         var bg = Brush("ForgeSurfaceContainerLowestBrush", Brushes.Black);
         context.FillRectangle(bg, new Rect(bounds.Size));
 
@@ -251,34 +258,32 @@ public sealed class DiffViewer : Control
 
             if (ViewMode == DiffViewMode.SideBySide)
             {
+                var leftKind = DiffRowPresentation.SideBySideLeftKind(row);
+                var rightKind = DiffRowPresentation.SideBySideRightKind(row);
                 using (context.PushClip(new Rect(contentLeft, y, midX - contentLeft, rowH)))
-                    context.FillRectangle(RowBrush(row.Kind, selected), new Rect(contentLeft, y, midX - contentLeft, rowH));
+                    context.FillRectangle(RowBrush(leftKind, selected), new Rect(contentLeft, y, midX - contentLeft, rowH));
                 using (context.PushClip(new Rect(midX, y, bounds.Width - midX, rowH)))
-                    context.FillRectangle(RowBrush(row.Kind, selected), new Rect(midX, y, bounds.Width - midX, rowH));
+                    context.FillRectangle(RowBrush(rightKind, selected), new Rect(midX, y, bounds.Width - midX, rowH));
+
+                if (leftKind == DiffRowKind.Removed)
+                    context.FillRectangle(removedAccent, new Rect(contentLeft, y, 2, rowH));
+                if (rightKind == DiffRowKind.Added)
+                    context.FillRectangle(addedAccent, new Rect(midX, y, 2, rowH));
             }
             else
             {
                 context.FillRectangle(RowBrush(row.Kind, selected), new Rect(contentLeft, y, contentWidth, rowH));
-            }
-
-            if (row.Kind is DiffRowKind.Added or DiffRowKind.Removed)
-            {
-                var accent = row.Kind == DiffRowKind.Added ? addedAccent : removedAccent;
-                if (ViewMode == DiffViewMode.SideBySide)
+                if (row.Kind is DiffRowKind.Added or DiffRowKind.Removed)
                 {
-                    if (row.Kind == DiffRowKind.Removed || !row.LeftText.IsEmpty)
-                        context.FillRectangle(accent, new Rect(contentLeft, y, 2, rowH));
-                    if (row.Kind == DiffRowKind.Added || !row.RightText.IsEmpty)
-                        context.FillRectangle(accent, new Rect(midX, y, 2, rowH));
-                }
-                else
-                {
+                    var accent = row.Kind == DiffRowKind.Added ? addedAccent : removedAccent;
                     context.FillRectangle(accent, new Rect(contentLeft, y, 2, rowH));
                 }
             }
 
             if (ViewMode == DiffViewMode.SideBySide)
             {
+                var leftKind = DiffRowPresentation.SideBySideLeftKind(row);
+                var rightKind = DiffRowPresentation.SideBySideRightKind(row);
                 using (context.PushClip(new Rect(contentLeft, 0, midX - contentLeft, bounds.Height)))
                 {
                     DrawGutter(context, row.OldLineNumber, contentLeft, y);
@@ -288,14 +293,14 @@ public sealed class DiffViewer : Control
                         DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines — click to expand",
                             contentLeft + GutterWidth + 8, y, muted);
                     else if (!row.LeftText.IsEmpty)
-                        DrawText(context, FormatText(row.LeftText), contentLeft + GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind, contextText));
+                        DrawText(context, FormatText(row.LeftText), contentLeft + GutterWidth + 8 - _scrollX, y, TextBrush(leftKind, contextText));
                 }
 
                 using (context.PushClip(new Rect(midX, 0, bounds.Width - midX, bounds.Height)))
                 {
                     DrawGutter(context, row.NewLineNumber, midX, y);
                     if (row.Kind is not DiffRowKind.HunkHeader and not DiffRowKind.Collapsed && !row.RightText.IsEmpty)
-                        DrawText(context, FormatText(row.RightText), midX + GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind, contextText));
+                        DrawText(context, FormatText(row.RightText), midX + GutterWidth + 8 - _scrollX, y, TextBrush(rightKind, contextText));
                 }
             }
             else
@@ -341,13 +346,32 @@ public sealed class DiffViewer : Control
 
         for (var i = 0; i < rows.Count; i++)
         {
-            var kind = rows[i].Kind;
-            if (kind is not (DiffRowKind.Added or DiffRowKind.Removed)) continue;
+            var row = rows[i];
             var y = i / (double)total * bounds.Height;
             var h = Math.Max(2, bounds.Height / total);
-            context.FillRectangle(
-                kind == DiffRowKind.Added ? added : removed,
-                new Rect(2, y, MinimapWidth - 4, h));
+            var markRect = new Rect(2, y, MinimapWidth - 4, h);
+
+            if (ViewMode == DiffViewMode.SideBySide)
+            {
+                var leftKind = DiffRowPresentation.SideBySideLeftKind(row);
+                var rightKind = DiffRowPresentation.SideBySideRightKind(row);
+                if (leftKind == DiffRowKind.Removed && rightKind == DiffRowKind.Added)
+                {
+                    var half = (MinimapWidth - 4) / 2;
+                    context.FillRectangle(removed, new Rect(2, y, half, h));
+                    context.FillRectangle(added, new Rect(2 + half, y, MinimapWidth - 4 - half, h));
+                }
+                else if (rightKind == DiffRowKind.Added)
+                    context.FillRectangle(added, markRect);
+                else if (leftKind == DiffRowKind.Removed)
+                    context.FillRectangle(removed, markRect);
+            }
+            else if (row.Kind is DiffRowKind.Added or DiffRowKind.Removed)
+            {
+                context.FillRectangle(
+                    row.Kind == DiffRowKind.Added ? added : removed,
+                    markRect);
+            }
         }
 
         var contentHeight = total * RowHeight;
