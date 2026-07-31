@@ -1,0 +1,520 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:CodeReviewr.App.ViewModels"
+        xmlns:controls="using:CodeReviewr.App.Controls"
+        xmlns:conv="using:CodeReviewr.App.Converters"
+        xmlns:core="using:CodeReviewr.Core"
+        xmlns:icons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+        xmlns:svc="using:CodeReviewr.App.Services"
+        x:Class="CodeReviewr.App.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        x:Name="RootWindow"
+        Title="Code Reviewr"
+        Width="1280" Height="800"
+        Background="{DynamicResource ForgeBackgroundBrush}">
+
+  <Panel>
+    <!-- Empty repository state -->
+    <Border IsVisible="{Binding WorkingCopy.HasRepository, Converter={x:Static conv:ForgeConverters.InvertBool}}"
+            Background="{DynamicResource ForgeBackgroundBrush}">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16" MaxWidth="420">
+        <TextBlock Text="Code Reviewr" FontSize="28" FontWeight="Bold"
+                   Foreground="{DynamicResource ForgePrimaryBrush}"
+                   HorizontalAlignment="Center" />
+        <TextBlock Text="Open a local Git repository to review changes."
+                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                   HorizontalAlignment="Center" TextWrapping="Wrap" TextAlignment="Center" />
+        <Button Classes="Primary" Content="Open Repository…" Click="OnOpenRepository" Width="220"
+                HorizontalAlignment="Center" />
+        <StackPanel Spacing="4" IsVisible="{Binding HasRecentRepositories}" Margin="0,12,0,0">
+          <TextBlock Text="RECENT" Classes="PanelHeader" Opacity="0.7" Margin="0,0,0,4" />
+          <ItemsControl ItemsSource="{Binding RecentRepositories}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Button Classes="Ghost" Content="{Binding}" Tag="{Binding}" Click="OnRecentClick"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        FontFamily="{DynamicResource ForgeCodeFont}" FontSize="12" />
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+
+    <!-- Main workspace -->
+    <DockPanel IsVisible="{Binding WorkingCopy.HasRepository}">
+      <!-- Top bar -->
+      <Border DockPanel.Dock="Top" Height="48" Padding="8,0"
+              Background="{DynamicResource ForgeBackgroundBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
+              BorderThickness="0,0,0,1">
+        <Grid ColumnDefinitions="*,Auto">
+          <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+            <TextBlock Text="Code Reviewr" FontWeight="SemiBold" FontSize="13"
+                       Foreground="{DynamicResource ForgePrimaryBrush}"
+                       VerticalAlignment="Center" Margin="4,0,12,0" />
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.PushCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <icons:MaterialIcon Kind="Upload" Width="16" Height="16" />
+                <TextBlock Text="Push" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.PullCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <icons:MaterialIcon Kind="Download" Width="16" Height="16" />
+                <TextBlock Text="Pull" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.FetchCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <icons:MaterialIcon Kind="Sync" Width="16" Height="16" />
+                <TextBlock Text="Fetch" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Border Width="1" Height="16" Background="{DynamicResource ForgeOutlineVariantBrush}" Margin="8,0" />
+            <Button Classes="Ghost">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <icons:MaterialIcon Kind="SourceBranch" Width="16" Height="16" />
+                <TextBlock Text="{Binding WorkingCopy.CurrentBranch}" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+          </StackPanel>
+          <Button Grid.Column="1" Classes="IconOnly" Command="{Binding OpenSettingsCommand}"
+                  VerticalAlignment="Center" ToolTip.Tip="Settings">
+            <icons:MaterialIcon Kind="Settings" Width="18" Height="18" />
+          </Button>
+        </Grid>
+      </Border>
+
+      <!-- Status bar -->
+      <Border DockPanel.Dock="Bottom" Height="24" Padding="12,0"
+              Background="{DynamicResource ForgeSurfaceContainerBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
+              BorderThickness="0,1,0,0">
+        <TextBlock Text="{Binding StatusText}" FontSize="10"
+                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                   VerticalAlignment="Center" />
+      </Border>
+
+      <!-- Notifications -->
+      <ItemsControl DockPanel.Dock="Bottom" ItemsSource="{Binding Notifications.Notifications}" Margin="12,0,12,8"
+                    HorizontalAlignment="Right" MaxWidth="360">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="svc:AppNotification">
+            <Border Background="{DynamicResource ForgeSurfaceContainerHighBrush}"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
+                    BorderThickness="1" Padding="12,8" Margin="0,0,0,4" CornerRadius="4">
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Classes="Link"
+                        Content="{Binding ActionLabel}"
+                        IsVisible="{Binding ActionLabel, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
+                        Click="OnNotificationAction" Tag="{Binding}" Margin="8,0,0,0" />
+                <TextBlock Text="{Binding Message}" TextWrapping="Wrap"
+                           Foreground="{DynamicResource ForgeOnSurfaceBrush}" FontSize="12" />
+              </DockPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <!-- In-progress banner -->
+      <Border DockPanel.Dock="Top" Padding="12,8"
+              Background="{DynamicResource ForgeBannerBrush}"
+              IsVisible="{Binding WorkingCopy.InProgressBanner, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
+            <Button Classes="Ghost" Content="Abort" Command="{Binding WorkingCopy.AbortInProgressCommand}" />
+            <Button Classes="Ghost" Content="Continue" Command="{Binding WorkingCopy.ContinueInProgressCommand}" />
+          </StackPanel>
+          <TextBlock Text="{Binding WorkingCopy.InProgressBanner}" VerticalAlignment="Center" />
+        </DockPanel>
+      </Border>
+
+      <!-- Three columns -->
+      <Grid ColumnDefinitions="260,300,*">
+        <!-- Navigator -->
+        <Border Grid.Column="0" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0">
+          <DockPanel>
+            <Border DockPanel.Dock="Top" Padding="16,12"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <DockPanel>
+                <Border DockPanel.Dock="Right" Classes="Chip"
+                        IsVisible="{Binding WorkingCopy.StatusUpdated}">
+                  <TextBlock Text="Updated" FontSize="10"
+                             Foreground="{DynamicResource ForgeOnSecondaryContainerBrush}" />
+                </Border>
+                <TextBlock Text="NAVIGATOR" Classes="PanelHeader" VerticalAlignment="Center" />
+              </DockPanel>
+            </Border>
+
+            <Border DockPanel.Dock="Bottom" Padding="8"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0">
+              <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                      Command="{Binding OpenSettingsCommand}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <icons:MaterialIcon Kind="Settings" Width="16" Height="16" />
+                  <TextBlock Text="Repository Settings" FontSize="11" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+            </Border>
+
+            <ScrollViewer>
+              <StackPanel Margin="0,8,0,8">
+                <!-- Explorer -->
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="16,4" Click="OnToggleExplorer">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <icons:MaterialIcon Kind="{Binding WorkingCopy.ExplorerExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                        Width="14" Height="14" />
+                    <TextBlock Text="EXPLORER" FontWeight="SemiBold" FontSize="11" />
+                  </StackPanel>
+                </Button>
+                <Border IsVisible="{Binding WorkingCopy.ExplorerExpanded}"
+                        Background="#332d3449" Padding="0,4">
+                  <Border Background="{DynamicResource ForgeSurfaceVariantBrush}" Margin="0" Padding="32,6,16,6">
+                    <DockPanel>
+                      <TextBlock DockPanel.Dock="Right" Text="{Binding WorkingCopy.WorkingCopyChangeCount}"
+                                 FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.7"
+                                 VerticalAlignment="Center" />
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <icons:MaterialIcon Kind="NoteEdit" Width="16" Height="16" />
+                        <TextBlock Text="Working Copy" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </DockPanel>
+                  </Border>
+                </Border>
+
+                <!-- Stubs -->
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="16,4" IsEnabled="False">
+                  <StackPanel Orientation="Horizontal" Spacing="8" Opacity="0.55">
+                    <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
+                    <TextBlock Text="LOCAL FILES" FontWeight="SemiBold" FontSize="11" />
+                  </StackPanel>
+                </Button>
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="16,4" IsEnabled="False">
+                  <StackPanel Orientation="Horizontal" Spacing="8" Opacity="0.55">
+                    <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
+                    <TextBlock Text="CODE REVIEWS" FontWeight="SemiBold" FontSize="11" />
+                  </StackPanel>
+                </Button>
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="16,4" IsEnabled="False">
+                  <StackPanel Orientation="Horizontal" Spacing="8" Opacity="0.55">
+                    <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
+                    <TextBlock Text="HISTORY" FontWeight="SemiBold" FontSize="11" />
+                  </StackPanel>
+                </Button>
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="16,4" IsEnabled="False">
+                  <StackPanel Orientation="Horizontal" Spacing="8" Opacity="0.55">
+                    <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
+                    <TextBlock Text="STASHES" FontWeight="SemiBold" FontSize="11" />
+                  </StackPanel>
+                </Button>
+
+                <!-- Branches -->
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="16,4" Click="OnToggleBranches">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <icons:MaterialIcon Kind="{Binding WorkingCopy.BranchesExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                        Width="14" Height="14" />
+                    <TextBlock Text="BRANCHES" FontWeight="SemiBold" FontSize="11" />
+                  </StackPanel>
+                </Button>
+                <ItemsControl ItemsSource="{Binding WorkingCopy.Branches}"
+                              IsVisible="{Binding WorkingCopy.BranchesExpanded}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="core:BranchInfo">
+                      <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                              Padding="32,4,16,4"
+                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.CheckoutBranchCommand}"
+                              CommandParameter="{Binding}">
+                        <DockPanel>
+                          <icons:MaterialIcon DockPanel.Dock="Right" Kind="Check" Width="14" Height="14"
+                                              Foreground="{DynamicResource ForgePrimaryBrush}"
+                                              IsVisible="{Binding IsCurrent}" />
+                          <StackPanel Orientation="Horizontal" Spacing="8">
+                            <icons:MaterialIcon Kind="SourceBranch" Width="16" Height="16" />
+                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource ForgeOnSurfaceBrush}" />
+                          </StackPanel>
+                        </DockPanel>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </ScrollViewer>
+          </DockPanel>
+        </Border>
+
+        <!-- File Status -->
+        <Border Grid.Column="1" Background="{DynamicResource ForgeBackgroundBrush}"
+                BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0">
+          <DockPanel>
+            <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
+                    Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <TextBlock Text="File Status" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </Border>
+
+            <!-- Commit dock -->
+            <Border DockPanel.Dock="Bottom" Padding="12"
+                    Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0">
+              <StackPanel Spacing="8">
+                <TextBox Classes="Forge" AcceptsReturn="True" Height="80"
+                         Text="{Binding WorkingCopy.CommitMessage}"
+                         PlaceholderText="Commit message..." />
+                <Button Classes="Primary" Content="{Binding WorkingCopy.CommitButtonLabel}"
+                        Command="{Binding WorkingCopy.CommitCommand}" />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <CheckBox Content="Amend" IsChecked="{Binding WorkingCopy.AmendCommit}" FontSize="11" />
+                  <CheckBox Content="--no-verify" IsChecked="{Binding WorkingCopy.NoVerify}" FontSize="11" />
+                </StackPanel>
+                <TextBlock Text="{Binding WorkingCopy.HookOutput}" FontSize="10" Opacity="0.7"
+                           TextWrapping="Wrap" IsVisible="{Binding WorkingCopy.HookOutput, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+              </StackPanel>
+            </Border>
+
+            <ScrollViewer Padding="8">
+              <StackPanel Spacing="16">
+                <!-- Staged -->
+                <StackPanel>
+                  <DockPanel Margin="8,0,8,4">
+                    <Button DockPanel.Dock="Right" Classes="Link" Content="Unstage All"
+                            Command="{Binding WorkingCopy.UnstageAllCommand}" />
+                    <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnToggleStaged">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <icons:MaterialIcon Kind="{Binding WorkingCopy.StagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                            Width="14" Height="14" />
+                        <TextBlock Text="STAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Button>
+                  </DockPanel>
+                  <ListBox ItemsSource="{Binding WorkingCopy.StagedFiles}"
+                           SelectedItem="{Binding WorkingCopy.SelectedFile}"
+                           IsVisible="{Binding WorkingCopy.StagedExpanded}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:FileItemViewModel">
+                        <Border Classes="FileRow" Padding="8,4" CornerRadius="4">
+                          <DockPanel>
+                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                    Background="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                              <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold"
+                                         Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                            </Border>
+                            <CheckBox IsChecked="True" Margin="0,0,8,0" VerticalAlignment="Center"
+                                      Click="OnFileCheckClick" Tag="{Binding}" />
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
+                                                  Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                              <TextBlock Text="{Binding Name}" Classes="MonoPath" VerticalAlignment="Center" />
+                            </StackPanel>
+                          </DockPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.Styles>
+                      <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="32" />
+                      </Style>
+                    </ListBox.Styles>
+                  </ListBox>
+                </StackPanel>
+
+                <!-- Unstaged -->
+                <StackPanel>
+                  <DockPanel Margin="8,0,8,4">
+                    <Button DockPanel.Dock="Right" Classes="Link" Content="Stage All"
+                            Command="{Binding WorkingCopy.StageAllCommand}" />
+                    <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnToggleUnstaged">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <icons:MaterialIcon Kind="{Binding WorkingCopy.UnstagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                            Width="14" Height="14" />
+                        <TextBlock Text="UNSTAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Button>
+                  </DockPanel>
+                  <ListBox ItemsSource="{Binding WorkingCopy.UnstagedFiles}"
+                           SelectedItem="{Binding WorkingCopy.SelectedFile}"
+                           IsVisible="{Binding WorkingCopy.UnstagedExpanded}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:FileItemViewModel">
+                        <Border Padding="8,4" CornerRadius="4">
+                          <DockPanel>
+                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                    Background="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                              <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold"
+                                         Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                            </Border>
+                            <CheckBox IsChecked="False" Margin="0,0,8,0" VerticalAlignment="Center"
+                                      Click="OnFileCheckClick" Tag="{Binding}" />
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
+                                                  Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                              <TextBlock Text="{Binding Name}" Classes="MonoPath" VerticalAlignment="Center" />
+                            </StackPanel>
+                          </DockPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.Styles>
+                      <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="32" />
+                      </Style>
+                    </ListBox.Styles>
+                  </ListBox>
+                </StackPanel>
+
+                <!-- Conflicted -->
+                <StackPanel IsVisible="{Binding WorkingCopy.HasConflictedFiles}">
+                  <TextBlock Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
+                             Foreground="{DynamicResource ForgeErrorBrush}" />
+                  <ListBox ItemsSource="{Binding WorkingCopy.ConflictedFiles}"
+                           SelectedItem="{Binding WorkingCopy.SelectedFile}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:FileItemViewModel">
+                        <Border Padding="8,4">
+                          <DockPanel>
+                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1"
+                                    Background="{DynamicResource ForgeStatusDeletedBadgeBgBrush}">
+                              <TextBlock Text="C" FontSize="10" FontWeight="Bold"
+                                         Foreground="{DynamicResource ForgeErrorBrush}" />
+                            </Border>
+                            <TextBlock Text="{Binding Name}" Classes="MonoPath"
+                                       Foreground="{DynamicResource ForgeErrorBrush}" />
+                          </DockPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                </StackPanel>
+              </StackPanel>
+            </ScrollViewer>
+          </DockPanel>
+        </Border>
+
+        <!-- Diff pane -->
+        <DockPanel Grid.Column="2" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}">
+          <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
+                  Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                  BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <ComboBox SelectedItem="{Binding WorkingCopy.ViewMode}" MinWidth="140">
+                  <core:DiffViewMode>SideBySide</core:DiffViewMode>
+                  <core:DiffViewMode>Unified</core:DiffViewMode>
+                </ComboBox>
+                <Button Classes="IconOnly">
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="Combined review"
+                                Command="{Binding WorkingCopy.ToggleCombinedReviewCommand}" />
+                      <MenuItem Header="Stage hunk" Command="{Binding WorkingCopy.StageHunkCommand}" />
+                      <MenuItem Header="Unstage hunk" Command="{Binding WorkingCopy.UnstageHunkCommand}" />
+                      <Separator />
+                      <MenuItem Header="Discard file"
+                                Command="{Binding WorkingCopy.DiscardFileCommand}"
+                                CommandParameter="{Binding WorkingCopy.SelectedFile}" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                  <icons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
+                </Button>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center"
+                          IsVisible="{Binding WorkingCopy.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                <icons:MaterialIcon Kind="FileDocument" Width="18" Height="18"
+                                    Foreground="{DynamicResource ForgeStatusAddedBrush}" />
+                <TextBlock Text="{Binding WorkingCopy.SelectedFile.Name}" FontWeight="SemiBold" />
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="8,0,0,0">
+                  <TextBlock Text="{Binding WorkingCopy.SelectedAddedLines, Converter={x:Static conv:ForgeConverters.PlusPrefix}}"
+                             FontSize="10" Foreground="{DynamicResource ForgeStatusAddedBrush}" />
+                  <TextBlock Text="{Binding WorkingCopy.SelectedRemovedLines, Converter={x:Static conv:ForgeConverters.MinusPrefix}}"
+                             FontSize="10" Foreground="{DynamicResource ForgeStatusDeletedBrush}" />
+                </StackPanel>
+              </StackPanel>
+            </DockPanel>
+          </Border>
+
+          <Border DockPanel.Dock="Top"
+                  IsVisible="{Binding WorkingCopy.ViewMode, Converter={x:Static conv:ForgeConverters.IsSideBySide}}"
+                  Height="24" Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                  BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+            <Grid ColumnDefinitions="*,*">
+              <TextBlock Grid.Column="0" Text="PREVIOUS VERSION" FontSize="10" FontWeight="Bold"
+                         Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                         VerticalAlignment="Center" Margin="12,0" />
+              <Border Grid.Column="1" BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0">
+                <TextBlock Text="NEW VERSION" FontSize="10" FontWeight="Bold"
+                           Foreground="{DynamicResource ForgePrimaryBrush}"
+                           VerticalAlignment="Center" Margin="12,0" />
+              </Border>
+            </Grid>
+          </Border>
+
+          <Border DockPanel.Dock="Bottom" Height="24" Padding="16,0"
+                  Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                  BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0">
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <Ellipse Width="8" Height="8" Fill="{DynamicResource ForgeStatusAddedBrush}" />
+              <TextBlock Text="{Binding WorkingCopy.DiffFooterText}" FontSize="10"
+                         Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+            </StackPanel>
+          </Border>
+
+          <controls:DiffViewer Rows="{Binding WorkingCopy.DiffRows}"
+                               ViewMode="{Binding WorkingCopy.ViewMode}"
+                               RowHeight="20" />
+        </DockPanel>
+      </Grid>
+    </DockPanel>
+
+    <!-- Settings overlay -->
+    <Border IsVisible="{Binding ShowSettings}" Background="#99060e20" ZIndex="200">
+      <Border Width="440" HorizontalAlignment="Right" Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0">
+        <DockPanel Margin="20">
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+            <Button DockPanel.Dock="Right" Classes="IconOnly" Command="{Binding CloseSettingsCommand}">
+              <icons:MaterialIcon Kind="Close" Width="18" Height="18" />
+            </Button>
+            <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
+          <StackPanel Spacing="16">
+            <StackPanel Spacing="4">
+              <TextBlock Text="DEFAULT DIFF MODE" Classes="PanelHeader" Opacity="0.7" />
+              <ComboBox SelectedItem="{Binding DefaultDiffMode}" HorizontalAlignment="Stretch">
+                <core:DiffViewMode>SideBySide</core:DiffViewMode>
+                <core:DiffViewMode>Unified</core:DiffViewMode>
+              </ComboBox>
+            </StackPanel>
+            <StackPanel Spacing="4">
+              <TextBlock Text="GIT" Classes="PanelHeader" Opacity="0.7" />
+              <TextBlock Text="{Binding Diagnostics.GitPath, StringFormat=Path: {0}}" FontSize="12"
+                         FontFamily="{DynamicResource ForgeCodeFont}" TextWrapping="Wrap" />
+              <TextBlock Text="{Binding Diagnostics.GitVersion, StringFormat=Version: {0}}" FontSize="12" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+              <TextBlock Text="DIAGNOSTICS" Classes="PanelHeader" Opacity="0.7" />
+              <TextBlock Text="{Binding Diagnostics.Summary}" FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+              <ItemsControl ItemsSource="{Binding Diagnostics.LastTimings}" MaxHeight="160">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding}" FontSize="10"
+                               FontFamily="{DynamicResource ForgeCodeFont}"
+                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+            <Button Classes="Ghost" Content="Open Repository…" Click="OnOpenRepository"
+                    HorizontalAlignment="Left" />
+          </StackPanel>
+        </DockPanel>
+      </Border>
+    </Border>
+  </Panel>
+</Window>

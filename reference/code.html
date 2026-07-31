@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+            font-size: 18px;
+        }
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #424754;
+            border-radius: 2px;
+        }
+        .diff-added { background-color: rgba(34, 197, 94, 0.15); }
+        .diff-removed { background-color: rgba(239, 68, 68, 0.15); }
+        .line-number { width: 40px; text-align: right; padding-right: 8px; user-select: none; }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface": "#0b1326",
+                        "surface-variant": "#2d3449",
+                        "secondary-container": "#3a4a5f",
+                        "inverse-surface": "#dae2fd",
+                        "on-tertiary-fixed-variant": "#723600",
+                        "tertiary": "#ffb786",
+                        "outline-variant": "#424754",
+                        "background": "#0b1326",
+                        "on-background": "#dae2fd",
+                        "on-tertiary-container": "#461f00",
+                        "primary": "#adc6ff",
+                        "tertiary-fixed": "#ffdcc6",
+                        "on-secondary-fixed": "#0b1c30",
+                        "surface-container-highest": "#2d3449",
+                        "on-primary-fixed": "#001a42",
+                        "outline": "#8c909f",
+                        "tertiary-fixed-dim": "#ffb786",
+                        "on-surface-variant": "#c2c6d6",
+                        "error-container": "#93000a",
+                        "secondary-fixed": "#d3e4fe",
+                        "secondary": "#b7c8e1",
+                        "surface-tint": "#adc6ff",
+                        "on-tertiary-fixed": "#311400",
+                        "on-error-container": "#ffdad6",
+                        "error": "#ffb4ab",
+                        "surface-container-lowest": "#060e20",
+                        "primary-fixed-dim": "#adc6ff",
+                        "surface-dim": "#0b1326",
+                        "on-tertiary": "#502400",
+                        "on-primary-fixed-variant": "#004395",
+                        "on-secondary": "#213145",
+                        "surface-container-high": "#222a3d",
+                        "surface-bright": "#31394d",
+                        "surface-container-low": "#131b2e",
+                        "secondary-fixed-dim": "#b7c8e1",
+                        "surface-container": "#171f33",
+                        "primary-fixed": "#d8e2ff",
+                        "primary-container": "#4d8eff",
+                        "on-error": "#690005",
+                        "tertiary-container": "#df7412",
+                        "inverse-primary": "#005ac2",
+                        "on-secondary-container": "#a9bad3",
+                        "inverse-on-surface": "#283044",
+                        "on-secondary-fixed-variant": "#38485d",
+                        "on-primary-container": "#00285d",
+                        "on-primary": "#002e6a",
+                        "on-surface": "#dae2fd"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "padding_standard": "8px",
+                        "inset_margin": "12px",
+                        "gutter": "1px",
+                        "nav_column": "260px",
+                        "sidebar_narrow": "48px",
+                        "padding_condensed": "4px"
+                    },
+                    "fontFamily": {
+                        "ui-sans-sm": ["Inter"],
+                        "headline-panel": ["Inter"],
+                        "code-base": ["JetBrains Mono"],
+                        "code-bold": ["JetBrains Mono"],
+                        "ui-sans-bold": ["Inter"],
+                        "ui-sans-reg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "ui-sans-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                        "headline-panel": ["11px", {"lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                        "code-base": ["12px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "code-bold": ["12px", {"lineHeight": "20px", "fontWeight": "700"}],
+                        "ui-sans-bold": ["13px", {"lineHeight": "16px", "fontWeight": "600"}],
+                        "ui-sans-reg": ["13px", {"lineHeight": "16px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-surface text-on-surface overflow-hidden h-screen flex flex-col">
+<!-- TopNavBar -->
+<header class="flex justify-between items-center h-12 px-padding_standard w-full z-50 bg-surface text-primary border-b border-outline-variant font-ui-sans-reg text-ui-sans-reg">
+<div class="flex items-center gap-4">
+<span class="font-ui-sans-bold text-ui-sans-bold text-primary">CodeSift</span>
+<div class="flex gap-1 ml-4">
+<button class="flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-variant transition-colors duration-150 text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="publish">publish</span>
+<span>Push</span>
+</button>
+<button class="flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-variant transition-colors duration-150 text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="download">download</span>
+<span>Pull</span>
+</button>
+<button class="flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-variant transition-colors duration-150 text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="sync">sync</span>
+<span>Fetch</span>
+</button>
+<div class="w-px h-4 bg-outline-variant mx-2 self-center"></div>
+<button class="flex items-center gap-1 px-2 py-1 rounded hover:bg-surface-variant transition-colors duration-150 text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="account_tree">account_tree</span>
+<span>main</span>
+</button>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-1.5 rounded hover:bg-surface-variant transition-colors duration-150 text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+<div class="w-6 h-6 rounded-full bg-secondary-container flex items-center justify-center text-[10px] font-bold text-on-secondary-container">JD</div>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden relative">
+<!-- Navigation Column (Column 1 - Consolidated Explorer) -->
+<aside class="w-[260px] flex flex-col z-30 bg-surface-container-lowest text-primary border-r border-outline-variant font-ui-sans-reg text-ui-sans-reg">
+<div class="px-4 py-3 flex justify-between items-center border-b border-outline-variant/30">
+<span class="font-headline-panel text-headline-panel uppercase tracking-wider text-on-surface">Navigator</span>
+<span class="text-[10px] bg-secondary-container px-1.5 py-0.5 rounded text-on-secondary-container">Updated</span>
+</div>
+<div class="overflow-y-auto flex-1">
+<!-- EXPLORER -->
+<div class="mt-2">
+<div class="px-4 py-1 flex items-center gap-2 cursor-pointer group hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-[14px]" data-icon="keyboard_arrow_down">keyboard_arrow_down</span>
+<span class="font-ui-sans-bold text-[11px] text-on-surface uppercase">Explorer</span>
+</div>
+<div class="bg-surface-variant/20 py-1">
+<div class="pl-8 pr-4 py-1 flex items-center justify-between cursor-pointer bg-surface-variant text-on-surface">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px]" data-icon="edit_note">edit_note</span>
+<span>Working Copy</span>
+</div>
+<span class="text-[10px] opacity-70 font-mono">8</span>
+</div>
+</div>
+</div>
+<!-- LOCAL FILES (New Section) -->
+<div class="mt-1">
+<div class="px-4 py-1 flex items-center gap-2 cursor-pointer group hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant" data-icon="keyboard_arrow_right">keyboard_arrow_right</span>
+<span class="font-ui-sans-bold text-[11px] text-on-surface-variant uppercase">Local Files</span>
+</div>
+</div>
+<!-- CODE REVIEWS (New Section) -->
+<div class="mt-1">
+<div class="px-4 py-1 flex items-center gap-2 cursor-pointer group hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant" data-icon="keyboard_arrow_right">keyboard_arrow_right</span>
+<span class="font-ui-sans-bold text-[11px] text-on-surface-variant uppercase">Code Reviews</span>
+</div>
+</div>
+<!-- HISTORY (New Section) -->
+<div class="mt-1">
+<div class="px-4 py-1 flex items-center gap-2 cursor-pointer group hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant" data-icon="keyboard_arrow_right">keyboard_arrow_right</span>
+<span class="font-ui-sans-bold text-[11px] text-on-surface-variant uppercase">History</span>
+</div>
+</div>
+<!-- STASHES -->
+<div class="mt-1">
+<div class="px-4 py-1 flex items-center gap-2 cursor-pointer group hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-[14px] text-on-surface-variant" data-icon="keyboard_arrow_right">keyboard_arrow_right</span>
+<span class="font-ui-sans-bold text-[11px] text-on-surface-variant uppercase">Stashes</span>
+</div>
+</div>
+<!-- BRANCHES -->
+<div class="mt-1">
+<div class="px-4 py-1 flex items-center gap-2 cursor-pointer group hover:bg-surface-container-high">
+<span class="material-symbols-outlined text-[14px]" data-icon="keyboard_arrow_down">keyboard_arrow_down</span>
+<span class="font-ui-sans-bold text-[11px] text-on-surface uppercase">Branches</span>
+</div>
+<div class="flex flex-col">
+<div class="pl-8 pr-4 py-1 flex items-center gap-2 cursor-pointer hover:bg-surface-container-high text-on-surface">
+<span class="material-symbols-outlined text-[16px]" data-icon="account_tree">account_tree</span>
+<span>main</span>
+<span class="material-symbols-outlined text-[14px] text-primary ml-auto" data-icon="check" data-weight="fill" style="font-variation-settings: 'FILL' 1;">check</span>
+</div>
+<div class="pl-8 pr-4 py-1 flex items-center gap-2 cursor-pointer hover:bg-surface-container-high text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]" data-icon="account_tree">account_tree</span>
+<span>feature/auth-provider</span>
+</div>
+<div class="pl-8 pr-4 py-1 flex items-center gap-2 cursor-pointer hover:bg-surface-container-high text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]" data-icon="account_tree">account_tree</span>
+<span>bugfix/typo-fix</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Bottom Sidebar Actions -->
+<div class="p-2 border-t border-outline-variant/30">
+<button class="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-surface-variant text-on-surface-variant text-[11px]">
+<span class="material-symbols-outlined text-[16px]" data-icon="settings">settings</span>
+<span>Repository Settings</span>
+</button>
+</div>
+</aside>
+<!-- Main Workspace Area -->
+<main class="flex flex-1 h-full bg-surface">
+<!-- Column 2: File Status View -->
+<section class="w-[300px] border-r border-outline-variant flex flex-col h-full">
+<div class="h-10 border-b border-outline-variant flex items-center px-4 bg-surface-container-low">
+<span class="font-ui-sans-bold text-ui-sans-bold text-on-surface">File Status</span>
+</div>
+<div class="flex-1 overflow-y-auto p-2 space-y-4">
+<!-- Staged Changes -->
+<div>
+<div class="flex items-center justify-between px-2 mb-1">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="keyboard_arrow_down">keyboard_arrow_down</span>
+<span class="font-ui-sans-sm text-ui-sans-sm text-on-surface font-semibold uppercase tracking-tight">Staged Changes</span>
+</div>
+<button class="text-[10px] text-primary hover:underline">Unstage All</button>
+</div>
+<ul class="space-y-[1px]">
+<li class="h-8 flex items-center px-2 gap-2 hover:bg-surface-variant rounded cursor-pointer group">
+<input checked="" class="w-3 h-3 rounded-sm bg-surface border-outline-variant text-primary focus:ring-0 focus:ring-offset-0" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px] text-green-400" data-icon="description">description</span>
+<span class="font-code-base text-code-base text-on-surface truncate">auth.ts</span>
+<span class="ml-auto text-[10px] font-bold text-green-400 bg-green-400/10 px-1 rounded">M</span>
+</li>
+<li class="h-8 flex items-center px-2 gap-2 hover:bg-surface-variant rounded cursor-pointer group">
+<input checked="" class="w-3 h-3 rounded-sm bg-surface border-outline-variant text-primary focus:ring-0 focus:ring-offset-0" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px] text-green-400" data-icon="description">description</span>
+<span class="font-code-base text-code-base text-on-surface truncate">session-manager.ts</span>
+<span class="ml-auto text-[10px] font-bold text-green-400 bg-green-400/10 px-1 rounded">M</span>
+</li>
+<li class="h-8 flex items-center px-2 gap-2 hover:bg-surface-variant rounded cursor-pointer group">
+<input checked="" class="w-3 h-3 rounded-sm bg-surface border-outline-variant text-primary focus:ring-0 focus:ring-offset-0" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px] text-blue-400" data-icon="add_box">add_box</span>
+<span class="font-code-base text-code-base text-on-surface truncate">user-dto.ts</span>
+<span class="ml-auto text-[10px] font-bold text-blue-400 bg-blue-400/10 px-1 rounded">A</span>
+</li>
+</ul>
+</div>
+<!-- Unstaged Changes -->
+<div>
+<div class="flex items-center justify-between px-2 mb-1">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="keyboard_arrow_down">keyboard_arrow_down</span>
+<span class="font-ui-sans-sm text-ui-sans-sm text-on-surface font-semibold uppercase tracking-tight">Unstaged Changes</span>
+</div>
+<button class="text-[10px] text-primary hover:underline">Stage All</button>
+</div>
+<ul class="space-y-[1px]">
+<li class="h-8 flex items-center px-2 gap-2 hover:bg-surface-variant rounded cursor-pointer group">
+<input class="w-3 h-3 rounded-sm bg-surface border-outline-variant text-primary focus:ring-0 focus:ring-offset-0" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px] text-orange-400" data-icon="description">description</span>
+<span class="font-code-base text-code-base text-on-surface truncate">routes.config.json</span>
+<span class="ml-auto text-[10px] font-bold text-orange-400 bg-orange-400/10 px-1 rounded">M</span>
+</li>
+<li class="h-8 flex items-center px-2 gap-2 hover:bg-surface-variant rounded cursor-pointer group">
+<input class="w-3 h-3 rounded-sm bg-surface border-outline-variant text-primary focus:ring-0 focus:ring-offset-0" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px] text-orange-400" data-icon="description">description</span>
+<span class="font-code-base text-code-base text-on-surface truncate">package-lock.json</span>
+<span class="ml-auto text-[10px] font-bold text-orange-400 bg-orange-400/10 px-1 rounded">M</span>
+</li>
+<li class="h-8 flex items-center px-2 gap-2 hover:bg-surface-variant rounded cursor-pointer group">
+<input class="w-3 h-3 rounded-sm bg-surface border-outline-variant text-primary focus:ring-0 focus:ring-offset-0" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px] text-red-400" data-icon="delete">delete</span>
+<span class="font-code-base text-code-base text-on-surface truncate">legacy-auth.js</span>
+<span class="ml-auto text-[10px] font-bold text-red-400 bg-red-400/10 px-1 rounded">D</span>
+</li>
+<li class="h-8 flex items-center px-2 gap-2 hover:bg-surface-variant rounded cursor-pointer group">
+<input class="w-3 h-3 rounded-sm bg-surface border-outline-variant text-primary focus:ring-0 focus:ring-offset-0" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px] text-on-surface-variant" data-icon="question_mark">question_mark</span>
+<span class="font-code-base text-code-base text-on-surface truncate">.env.local</span>
+<span class="ml-auto text-[10px] font-bold text-on-surface-variant bg-surface-variant px-1 rounded">U</span>
+</li>
+<li class="h-8 flex items-center px-2 gap-2 hover:bg-surface-variant rounded cursor-pointer group">
+<input class="w-3 h-3 rounded-sm bg-surface border-outline-variant text-primary focus:ring-0 focus:ring-offset-0" type="checkbox"/>
+<span class="material-symbols-outlined text-[16px] text-orange-400" data-icon="description">description</span>
+<span class="font-code-base text-code-base text-on-surface truncate">readme.md</span>
+<span class="ml-auto text-[10px] font-bold text-orange-400 bg-orange-400/10 px-1 rounded">M</span>
+</li>
+</ul>
+</div>
+</div>
+<!-- Commit Input Area -->
+<div class="p-3 border-t border-outline-variant bg-surface-container-lowest">
+<textarea class="w-full h-20 bg-surface border border-outline-variant rounded p-2 text-ui-sans-reg font-ui-sans-reg focus:border-primary focus:ring-0 resize-none mb-2 placeholder:text-on-surface-variant/40" placeholder="Commit message..."></textarea>
+<button class="w-full bg-primary text-on-primary font-ui-sans-bold py-1.5 rounded hover:bg-primary-container transition-colors">Commit to main</button>
+</div>
+</section>
+<!-- Column 3: Diff View -->
+<section class="flex-1 flex flex-col h-full min-w-0">
+<div class="h-10 border-b border-outline-variant flex items-center justify-between px-4 bg-surface-container-low">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-green-400" data-icon="description">description</span>
+<span class="font-ui-sans-bold text-ui-sans-bold text-on-surface">auth.ts</span>
+<div class="flex gap-2 ml-4">
+<span class="text-[10px] text-green-400">+12</span>
+<span class="text-[10px] text-red-400">-4</span>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<div class="relative">
+<button class="flex items-center gap-2 px-3 py-1 border border-outline-variant rounded text-[11px] bg-surface-variant text-on-surface hover:bg-surface-container-high transition-colors">
+<span>Side-by-Side Diff</span>
+<span class="material-symbols-outlined text-[14px]" data-icon="expand_more">expand_more</span>
+</button>
+</div>
+<button class="p-1 text-on-surface-variant hover:text-on-surface">
+<span class="material-symbols-outlined" data-icon="more_horiz">more_horiz</span>
+</button>
+</div>
+</div>
+<!-- Diff Content Area -->
+<div class="flex-1 overflow-auto bg-surface-container-lowest font-code-base text-code-base flex">
+<!-- Split View: Left (Old) -->
+<div class="flex-1 border-r border-outline-variant overflow-hidden">
+<div class="bg-surface-container px-2 py-1 text-[10px] font-bold text-on-surface-variant border-b border-outline-variant">PREVIOUS VERSION</div>
+<div class="pt-2">
+<div class="flex hover:bg-surface-variant/10">
+<div class="line-number text-on-surface-variant/30">12</div>
+<code class="pl-2">async function validateSession(token: string) {</code>
+</div>
+<div class="flex hover:bg-surface-variant/10">
+<div class="line-number text-on-surface-variant/30">13</div>
+<code class="pl-2">  const user = await db.find(token);</code>
+</div>
+<div class="flex diff-removed border-l-2 border-red-500">
+<div class="line-number text-red-400/50">14</div>
+<code class="pl-2 text-red-200">- return user.isValid;</code>
+</div>
+<div class="flex hover:bg-surface-variant/10">
+<div class="line-number text-on-surface-variant/30">15</div>
+<code class="pl-2">}</code>
+</div>
+</div>
+</div>
+<!-- Split View: Right (New) -->
+<div class="flex-1 overflow-hidden">
+<div class="bg-surface-container px-2 py-1 text-[10px] font-bold text-primary border-b border-outline-variant">NEW VERSION</div>
+<div class="pt-2">
+<div class="flex hover:bg-surface-variant/10">
+<div class="line-number text-on-surface-variant/30">12</div>
+<code class="pl-2">async function validateSession(token: string) {</code>
+</div>
+<div class="flex hover:bg-surface-variant/10">
+<div class="line-number text-on-surface-variant/30">13</div>
+<code class="pl-2">  const user = await db.find(token);</code>
+</div>
+<div class="flex diff-added border-l-2 border-green-500">
+<div class="line-number text-green-400/50">14</div>
+<code class="pl-2 text-green-200">+ if (!user) throw new AuthError('Token expired');</code>
+</div>
+<div class="flex diff-added border-l-2 border-green-500">
+<div class="line-number text-green-400/50">15</div>
+<code class="pl-2 text-green-200">+ return user.isValid &amp;&amp; user.role === 'admin';</code>
+</div>
+<div class="flex hover:bg-surface-variant/10">
+<div class="line-number text-on-surface-variant/30">16</div>
+<code class="pl-2">}</code>
+</div>
+</div>
+</div>
+</div>
+<!-- Subtle Diff Summary Footer -->
+<div class="h-6 bg-surface-container flex items-center px-4 gap-4 text-[10px] text-on-surface-variant border-t border-outline-variant">
+<div class="flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-green-500"></span>
+<span>Line 14: Logic enhanced for admin checks</span>
+</div>
+<div class="flex items-center gap-1">
+<span class="w-2 h-2 rounded-full bg-blue-500"></span>
+<span>TypeScript: strict null checks enabled</span>
+</div>
+</div>
+</section>
+</main>
+</div>
+<!-- Micro-interaction Scripts -->
+<script>
+        document.querySelectorAll('li').forEach(item => {
+            item.addEventListener('click', (e) => {
+                if(e.target.tagName !== 'INPUT') {
+                    const checkbox = item.querySelector('input');
+                    if(checkbox) checkbox.checked = !checkbox.checked;
+                }
+            });
+        });
+    </script>
+</body></html>

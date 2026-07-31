@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>CodeReviewr.App</RootNamespace>
+    <AssemblyName>CodeReviewr.App</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Material.Icons.Avalonia" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Extensions.Logging" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\Fonts\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CodeReviewr.Core\CodeReviewr.Core.csproj" />
+    <ProjectReference Include="..\CodeReviewr.Git\CodeReviewr.Git.csproj" />
+    <ProjectReference Include="..\CodeReviewr.Diff\CodeReviewr.Diff.csproj" />
+  </ItemGroup>
+</Project>

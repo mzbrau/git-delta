@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore CodeReviewr.slnx
+
+      - name: Build
+        run: dotnet build CodeReviewr.slnx -c Release --no-restore
+
+      - name: Test
+        run: >
+          dotnet test CodeReviewr.slnx -c Release --no-build
+          --collect:"XPlat Code Coverage"
+          --results-directory ./TestResults
+          --logger "trx;LogFileName=test-results.trx"
+
+      - name: Publish win-x64
+        run: >
+          dotnet publish src/CodeReviewr.App/CodeReviewr.App.csproj -c Release
+          -r win-x64 --self-contained true -o ./artifacts/win-x64
+
+      - name: Publish win-arm64
+        run: >
+          dotnet publish src/CodeReviewr.App/CodeReviewr.App.csproj -c Release
+          -r win-arm64 --self-contained true -o ./artifacts/win-arm64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-builds
+          path: artifacts/
+
+  macos-nightly:
+    name: macOS Nightly
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - run: dotnet restore CodeReviewr.slnx
+      - run: dotnet build CodeReviewr.slnx -c Release --no-restore
+      - run: dotnet test CodeReviewr.slnx -c Release --no-build
+      - run: >
+          dotnet publish src/CodeReviewr.App/CodeReviewr.App.csproj -c Release
+          -r osx-arm64 --self-contained true -o ./artifacts/osx-arm64
+      - run: >
+          dotnet publish src/CodeReviewr.App/CodeReviewr.App.csproj -c Release
+          -r osx-x64 --self-contained true -o ./artifacts/osx-x64
+      - run: >
+          dotnet run --project tests/CodeReviewr.Benchmarks -c Release
+          -- --filter '*' --job short
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-builds
+          path: artifacts/

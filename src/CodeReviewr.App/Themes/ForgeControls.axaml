@@ -1,0 +1,148 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:icons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia">
+
+  <Style Selector="Window">
+    <Setter Property="Background" Value="{DynamicResource ForgeBackgroundBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
+    <Setter Property="FontFamily" Value="{DynamicResource ForgeUiFont}" />
+    <Setter Property="FontSize" Value="{DynamicResource ForgeUiFontSize}" />
+  </Style>
+
+  <Style Selector="TextBlock.PanelHeader">
+    <Setter Property="FontSize" Value="{DynamicResource ForgeUiSmFontSize}" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.SectionLabel">
+    <Setter Property="FontSize" Value="{DynamicResource ForgeUiSmFontSize}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.MonoPath">
+    <Setter Property="FontFamily" Value="{DynamicResource ForgeCodeFont}" />
+    <Setter Property="FontSize" Value="{DynamicResource ForgeCodeFontSize}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <Style Selector="Button.Ghost">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource ForgeUiFontSize}" />
+  </Style>
+  <Style Selector="Button.Ghost:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+  </Style>
+
+  <Style Selector="Button.Primary">
+    <Setter Property="Background" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnPrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="12,6" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.Primary:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgePrimaryContainerBrush}" />
+  </Style>
+
+  <Style Selector="Button.Link">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="4,2" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource ForgeBadgeFontSize}" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <Style Selector="Button.IconOnly">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="6" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+  </Style>
+  <Style Selector="Button.IconOnly:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+  </Style>
+
+  <Style Selector="TextBox.Forge">
+    <Setter Property="Background" Value="{DynamicResource ForgeBackgroundBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgeOutlineVariantBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="8" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
+    <Setter Property="CaretBrush" Value="{DynamicResource ForgePrimaryBrush}" />
+  </Style>
+  <Style Selector="TextBox.Forge:focus">
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgePrimaryBrush}" />
+  </Style>
+
+  <Style Selector="ListBox">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <Style Selector="ListBoxItem.FileRow">
+    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Margin" Value="0,0,0,1" />
+  </Style>
+  <Style Selector="ListBoxItem.FileRow:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+  </Style>
+  <Style Selector="ListBoxItem.FileRow:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+  </Style>
+
+  <Style Selector="ListBoxItem.NavItem">
+    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="CornerRadius" Value="0" />
+  </Style>
+  <Style Selector="ListBoxItem.NavItem:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceContainerHighBrush}" />
+  </Style>
+  <Style Selector="ListBoxItem.NavItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+  </Style>
+
+  <Style Selector="Border.Chip">
+    <Setter Property="Background" Value="{DynamicResource ForgeSecondaryContainerBrush}" />
+    <Setter Property="CornerRadius" Value="2" />
+    <Setter Property="Padding" Value="6,2" />
+  </Style>
+
+  <Style Selector="CheckBox">
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
+  </Style>
+
+  <Style Selector="ComboBox">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgeOutlineVariantBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource ForgeUiSmFontSize}" />
+    <Setter Property="Padding" Value="8,4" />
+  </Style>
+
+  <Style Selector="ScrollBar">
+    <Setter Property="Width" Value="6" />
+  </Style>
+
+  <Style Selector="icons|MaterialIcon">
+    <Setter Property="Width" Value="18" />
+    <Setter Property="Height" Value="18" />
+  </Style>
+</Styles>

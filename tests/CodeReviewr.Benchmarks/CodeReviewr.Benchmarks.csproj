@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CodeReviewr.Core\CodeReviewr.Core.csproj" />
+    <ProjectReference Include="..\..\src\CodeReviewr.Git\CodeReviewr.Git.csproj" />
+    <ProjectReference Include="..\..\src\CodeReviewr.Diff\CodeReviewr.Diff.csproj" />
+    <ProjectReference Include="..\CodeReviewr.TestSupport\CodeReviewr.TestSupport.csproj" />
+  </ItemGroup>
+</Project>

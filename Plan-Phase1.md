@@ -1,8 +1,8 @@
-# CodeSift - Phase 1 Implementation Plan
+# CodeReviewr - Phase 1 Implementation Plan
 
 > **Vision:** Build the fastest, most responsive cross-platform Git client focused on code review.
 >
-> Long term, CodeSift will evolve into an AI-first code review platform built on GitHub Copilot SDK, but Phase 1 is intentionally focused on being an exceptional local Git client with a world-class diff experience.
+> Long term, CodeReviewr will evolve into an AI-first code review platform built on GitHub Copilot SDK, but Phase 1 is intentionally focused on being an exceptional local Git client with a world-class diff experience.
 
 ---
 
@@ -136,7 +136,7 @@ Known gap: a user with neither a credential helper nor an SSH agent gets a clear
 
 ## Git Prerequisite
 
-CodeSift requires Git to be installed and on the PATH. Git is not bundled.
+CodeReviewr requires Git to be installed and on the PATH. Git is not bundled.
 
 Minimum supported version: 2.30.
 
@@ -231,21 +231,21 @@ MinVer, driven by git tags.
 # Solution Structure
 
 ```
-CodeSift.sln
+CodeReviewr.sln
 
 src/
-    CodeSift.Core          domain model, settings, abstractions
-    CodeSift.Git           CliWrap invocation, porcelain parsing, the gate, cancellation classes
-    CodeSift.Diff          patch parsing, FileDiff, row projection, intra-line differ, token mapping
-    CodeSift.App           Avalonia views, viewmodels, the diff control, DI wiring, entry point
+    CodeReviewr.Core          domain model, settings, abstractions
+    CodeReviewr.Git           CliWrap invocation, porcelain parsing, the gate, cancellation classes
+    CodeReviewr.Diff          patch parsing, FileDiff, row projection, intra-line differ, token mapping
+    CodeReviewr.App           Avalonia views, viewmodels, the diff control, DI wiring, entry point
 
 tests/
-    CodeSift.TestSupport   builders; not a test project
-    CodeSift.Core.Tests
-    CodeSift.Git.Tests
-    CodeSift.Diff.Tests
-    CodeSift.IntegrationTests
-    CodeSift.Benchmarks    BenchmarkDotNet, nightly
+    CodeReviewr.TestSupport   builders; not a test project
+    CodeReviewr.Core.Tests
+    CodeReviewr.Git.Tests
+    CodeReviewr.Diff.Tests
+    CodeReviewr.IntegrationTests
+    CodeReviewr.Benchmarks    BenchmarkDotNet, nightly
 ```
 
 Core must contain no UI dependencies. This is enforced by an architecture test asserting that `Core`, `Git`, and `Diff` reference no Avalonia assembly, rather than by convention.
@@ -1169,7 +1169,7 @@ Row projection is pure, which is exactly what makes it worth pinning.
 Create a reusable testing library.
 
 ```
-CodeSift.TestSupport
+CodeReviewr.TestSupport
 
 RepositoryBuilder
 
@@ -1349,7 +1349,7 @@ Supported workflow:
 
 ## Phase 2 — GitHub Code Reviews
 
-Transform CodeSift into a complete GitHub review client.
+Transform CodeReviewr into a complete GitHub review client.
 
 ### Features
 
@@ -1447,7 +1447,7 @@ Become a collaborative review platform.
 
 # Long-Term Vision
 
-CodeSift is **not another Git client**.
+CodeReviewr is **not another Git client**.
 
 It is an **AI-first code review platform** where:
 

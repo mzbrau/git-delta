@@ -1,0 +1,10 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <FontFamily x:Key="ForgeUiFont">Inter, sans-serif</FontFamily>
+  <FontFamily x:Key="ForgeCodeFont">avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono</FontFamily>
+
+  <x:Double x:Key="ForgeUiFontSize">13</x:Double>
+  <x:Double x:Key="ForgeUiSmFontSize">11</x:Double>
+  <x:Double x:Key="ForgeCodeFontSize">12</x:Double>
+  <x:Double x:Key="ForgeBadgeFontSize">10</x:Double>
+</ResourceDictionary>
