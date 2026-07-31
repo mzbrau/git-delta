@@ -56,19 +56,47 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGate ga
             token => runner.RunAsync(repositoryPath, ["stash", "pop"], options: null, token),
             ct);
 
+    public Task DropStashAsync(string repositoryPath, int index, CancellationToken ct = default) =>
+        gate.RunWorktreeWriteAsync(
+            token => runner.RunAsync(
+                repositoryPath,
+                ["stash", "drop", $"stash@{{{index}}}"],
+                options: null,
+                token),
+            ct);
+
     public Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetStashFilesAsync(
         string repositoryPath,
         int index,
         CancellationToken ct = default) =>
         gate.RunReadAsync(async token =>
         {
+            var stashRef = $"stash@{{{index}}}";
             var result = await runner.RunAsync(
                 repositoryPath,
-                ["stash", "show", "--name-status", "--format=", $"stash@{{{index}}}"],
+                ["stash", "show", "--name-status", "--format=", stashRef],
                 options: null,
                 token).ConfigureAwait(false);
 
-            return (IReadOnlyList<(FilePath Path, ChangeKind Kind)>)ParseNameStatus(result.Stdout);
+            var files = ParseNameStatus(result.Stdout);
+
+            // Untracked files live on the third parent when the stash was created with -u.
+            var untracked = await runner.RunAsync(
+                repositoryPath,
+                ["show", "--name-status", "--format=", "--pretty=format:", $"{stashRef}^3"],
+                new GitProcessOptions { AllowNonZeroExitCode = true },
+                token).ConfigureAwait(false);
+            if (untracked.Succeeded)
+            {
+                // Files on ^3 are untracked content captured with -u.
+                MergeNameStatus(
+                    files,
+                    ParseNameStatus(untracked.Stdout)
+                        .Select(f => (f.Path, Kind: ChangeKind.Untracked))
+                        .ToList());
+            }
+
+            return (IReadOnlyList<(FilePath Path, ChangeKind Kind)>)files;
         }, ct);
 
     public Task<string> GetStashPatchAsync(
@@ -81,30 +109,56 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGate ga
         {
             // stash show does not reliably accept pathspecs; diff the WIP commit against its base.
             var stashRef = $"stash@{{{index}}}";
-            var args = new List<string>
-            {
-                "diff",
-                $"--diff-algorithm={options.Algorithm}",
-                $"-U{options.ContextLines}",
-                "--no-color",
-                "--no-ext-diff",
-            };
-
-            if (options.IgnoreAllSpace)
-                args.Add("-w");
-            if (options.IgnoreSpaceChange)
-                args.Add("--ignore-space-change");
-            if (options.IgnoreBlankLines)
-                args.Add("--ignore-blank-lines");
-
+            var args = BuildDiffArgs(options);
             args.Add($"{stashRef}^1");
             args.Add(stashRef);
             args.Add("--");
             args.Add(path.Value);
 
             var result = await runner.RunAsync(repositoryPath, args, options: null, token).ConfigureAwait(false);
-            return result.Stdout;
+            if (!string.IsNullOrWhiteSpace(result.Stdout))
+                return result.Stdout;
+
+            // Untracked files are stored on the third parent.
+            var untracked = await runner.RunAsync(
+                repositoryPath,
+                [
+                    "show",
+                    "--pretty=format:",
+                    "--patch",
+                    $"--diff-algorithm={options.Algorithm}",
+                    $"-U{options.ContextLines}",
+                    "--no-color",
+                    "--no-ext-diff",
+                    $"{stashRef}^3",
+                    "--",
+                    path.Value,
+                ],
+                new GitProcessOptions { AllowNonZeroExitCode = true },
+                token).ConfigureAwait(false);
+            return untracked.Succeeded ? untracked.Stdout : "";
         }, ct);
+
+    private static List<string> BuildDiffArgs(DiffOptions options)
+    {
+        var args = new List<string>
+        {
+            "diff",
+            $"--diff-algorithm={options.Algorithm}",
+            $"-U{options.ContextLines}",
+            "--no-color",
+            "--no-ext-diff",
+        };
+
+        if (options.IgnoreAllSpace)
+            args.Add("-w");
+        if (options.IgnoreSpaceChange)
+            args.Add("--ignore-space-change");
+        if (options.IgnoreBlankLines)
+            args.Add("--ignore-blank-lines");
+
+        return args;
+    }
 
     public static List<StashInfo> ParseStashList(string stdout)
     {
@@ -155,6 +209,18 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGate ga
         }
 
         return files;
+    }
+
+    private static void MergeNameStatus(
+        List<(FilePath Path, ChangeKind Kind)> target,
+        IEnumerable<(FilePath Path, ChangeKind Kind)> extra)
+    {
+        var seen = new HashSet<string>(target.Select(f => f.Path.Value), StringComparer.Ordinal);
+        foreach (var entry in extra)
+        {
+            if (seen.Add(entry.Path.Value))
+                target.Add(entry);
+        }
     }
 
     private static ChangeKind StatusToKind(string status)

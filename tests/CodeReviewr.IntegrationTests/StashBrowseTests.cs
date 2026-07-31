@@ -50,9 +50,13 @@ public sealed class StashBrowseTests
 
         var files = await stash.GetStashFilesAsync(path, list[0].Index);
         Assert.That(files.Any(f => f.Path.Value == "a.txt"), Is.True);
+        Assert.That(files.Any(f => f.Path.Value == "new.txt"), Is.True);
 
         var patch = await stash.GetStashPatchAsync(path, list[0].Index, FilePath.From("a.txt"), DiffOptions.Default);
         Assert.That(patch, Does.Contain("changed").Or.Contain("a.txt"));
+
+        var untrackedPatch = await stash.GetStashPatchAsync(path, list[0].Index, FilePath.From("new.txt"), DiffOptions.Default);
+        Assert.That(untrackedPatch, Does.Contain("fresh").Or.Contain("new.txt"));
 
         await stash.ApplyStashAsync(path, list[0].Index);
 
@@ -60,6 +64,51 @@ public sealed class StashBrowseTests
         // apply keeps the stash
         var stillListed = await stash.ListStashesAsync(path);
         Assert.That(stillListed, Is.Not.Empty);
+    }
+
+    [Test]
+    public async Task Stash_Pop_Restores_Latest_And_Removes_It()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "original\n")
+            .WithInitialCommit("init")
+            .WithFile("a.txt", "changed\n");
+        var path = repo.Build();
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var stash = sp.GetRequiredService<IGitStashService>();
+
+        await stash.StashPushAsync(path, "to pop", includeUntracked: false);
+        Assert.That(await stash.ListStashesAsync(path), Is.Not.Empty);
+
+        await stash.StashPopAsync(path);
+
+        Assert.That(await File.ReadAllTextAsync(Path.Combine(path, "a.txt")), Is.EqualTo("changed\n"));
+        Assert.That(await stash.ListStashesAsync(path), Is.Empty);
+    }
+
+    [Test]
+    public async Task Stash_Drop_Removes_Entry_Without_Restoring()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "original\n")
+            .WithInitialCommit("init")
+            .WithFile("a.txt", "changed\n");
+        var path = repo.Build();
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var stash = sp.GetRequiredService<IGitStashService>();
+
+        await stash.StashPushAsync(path, "to drop", includeUntracked: false);
+        var list = await stash.ListStashesAsync(path);
+        Assert.That(list, Is.Not.Empty);
+
+        await stash.DropStashAsync(path, list[0].Index);
+
+        Assert.That(await stash.ListStashesAsync(path), Is.Empty);
+        Assert.That(await File.ReadAllTextAsync(Path.Combine(path, "a.txt")), Is.EqualTo("original\n"));
     }
 
     [Test]

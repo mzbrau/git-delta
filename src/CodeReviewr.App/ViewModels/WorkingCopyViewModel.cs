@@ -31,6 +31,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly ISettingsStore _settings;
     private readonly NotificationService _notifications;
     private readonly IConfirmDialog _confirm;
+    private readonly IStashDialog _stashDialog;
     private readonly IIntraLineDiffer _intraLine;
     private readonly IGitProcessRunner _runner;
     private readonly GitRepositoryWatcher _watcher;
@@ -74,6 +75,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         ISettingsStore settings,
         NotificationService notifications,
         IConfirmDialog confirm,
+        IStashDialog stashDialog,
         IIntraLineDiffer intraLine,
         IGitProcessRunner runner,
         GitRepositoryWatcher watcher)
@@ -92,6 +94,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         _settings = settings;
         _notifications = notifications;
         _confirm = confirm;
+        _stashDialog = stashDialog;
         _intraLine = intraLine;
         _runner = runner;
         _watcher = watcher;
@@ -241,6 +244,12 @@ public partial class WorkingCopyViewModel : ObservableObject
     public bool HasStagedFiles => StagedFiles.Count > 0;
     public bool ShowCommitDock => IsFileStatusMode && HasStagedFiles;
     public bool ShowCommitDetailsDock => IsHistoryMode && SelectedCommit is not null;
+    public bool ShowStashDetailsDock => IsStashMode && SelectedStash is not null;
+
+    public string? SelectedStashMessage => SelectedStash?.DisplayTitle;
+    public string? SelectedStashRef => SelectedStash?.Ref;
+    public string? SelectedStashBranch => SelectedStash?.BranchHint;
+    public bool HasSelectedStashBranch => !string.IsNullOrWhiteSpace(SelectedStashBranch);
 
     public string? SelectedCommitSubject => SelectedCommit?.Subject;
     public string? SelectedCommitBody =>
@@ -349,10 +358,18 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(IsHistoryNavSelected));
         OnPropertyChanged(nameof(ShowCommitDock));
         OnPropertyChanged(nameof(ShowCommitDetailsDock));
+        OnPropertyChanged(nameof(ShowStashDetailsDock));
     }
 
-    partial void OnSelectedStashChanged(StashInfo? value) =>
+    partial void OnSelectedStashChanged(StashInfo? value)
+    {
         OnPropertyChanged(nameof(FileListHeader));
+        OnPropertyChanged(nameof(ShowStashDetailsDock));
+        OnPropertyChanged(nameof(SelectedStashMessage));
+        OnPropertyChanged(nameof(SelectedStashRef));
+        OnPropertyChanged(nameof(SelectedStashBranch));
+        OnPropertyChanged(nameof(HasSelectedStashBranch));
+    }
 
     partial void OnSelectedCommitChanged(CommitInfo? value)
     {
@@ -1004,9 +1021,78 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task DeleteStashAsync(StashInfo? stash)
+    {
+        stash ??= SelectedStash;
+        if (_repoPath is null || stash is null) return;
+
+        var confirmed = await _confirm.ConfirmAsync(
+            "Delete stash",
+            $"Permanently delete {stash.Ref}?\n\n{stash.DisplayTitle}",
+            "Delete");
+        if (!confirmed) return;
+
+        try
+        {
+            var deletingSelected = SelectedStash?.Index == stash.Index;
+            await _stash.DropStashAsync(_repoPath, stash.Index);
+            _notifications.Info($"Deleted {stash.Ref}");
+            if (deletingSelected)
+            {
+                SelectedStash = null;
+                StashFiles.Clear();
+                DiffRows.Clear();
+                _currentDiff = null;
+                ClearImagePreview();
+                SelectFileStatus();
+            }
+
+            await LoadStashesAsync();
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Delete stash failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
     private async Task StashAllChangesAsync()
     {
         if (_repoPath is null) return;
+
+        var choice = await _stashDialog.ShowAsync();
+        if (choice is null) return;
+
+        if (choice.Action == StashDialogAction.Pop)
+        {
+            if (Stashes.Count == 0)
+            {
+                _notifications.Info("No stashes to pop.");
+                return;
+            }
+
+            IsStashing = true;
+            try
+            {
+                await _stash.StashPopAsync(_repoPath);
+                SelectFileStatus();
+                await RefreshAsync();
+                await LoadStashesAsync();
+                _notifications.Info("Stash popped.");
+            }
+            catch (Exception ex)
+            {
+                _notifications.Error($"Stash pop failed: {ex.Message}");
+            }
+            finally
+            {
+                IsStashing = false;
+            }
+
+            return;
+        }
+
         if (WorkingCopyChangeCount == 0)
         {
             _notifications.Info("No local changes to stash.");
@@ -1016,7 +1102,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         IsStashing = true;
         try
         {
-            await _stash.StashPushAsync(_repoPath, message: null, includeUntracked: true);
+            await _stash.StashPushAsync(_repoPath, choice.Message, choice.IncludeUntracked);
             SelectFileStatus();
             await RefreshAsync();
             await LoadStashesAsync();

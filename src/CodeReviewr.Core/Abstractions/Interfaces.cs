@@ -140,6 +140,7 @@ public interface IGitStashService
     Task StashPushAsync(string repositoryPath, string? message, bool includeUntracked = false, CancellationToken ct = default);
     Task ApplyStashAsync(string repositoryPath, int index, CancellationToken ct = default);
     Task StashPopAsync(string repositoryPath, CancellationToken ct = default);
+    Task DropStashAsync(string repositoryPath, int index, CancellationToken ct = default);
     Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetStashFilesAsync(
         string repositoryPath, int index, CancellationToken ct = default);
     Task<string> GetStashPatchAsync(

@@ -20,6 +20,16 @@ public sealed class AlwaysConfirmDialog(bool result = true) : IConfirmDialog
     }
 }
 
+public sealed class FakeStashDialog(StashDialogResult? result) : IStashDialog
+{
+    public int CallCount { get; private set; }
+    public Task<StashDialogResult?> ShowAsync()
+    {
+        CallCount++;
+        return Task.FromResult(result);
+    }
+}
+
 public sealed class WorkingCopyViewModelDiscardTests
 {
     private IGitStatusService _status = null!;
@@ -36,6 +46,7 @@ public sealed class WorkingCopyViewModelDiscardTests
     private IGitProcessRunner _runner = null!;
     private NotificationService _notifications = null!;
     private AlwaysConfirmDialog _confirm = null!;
+    private FakeStashDialog _stashDialog = null!;
     private GitRepositoryWatcher _watcher = null!;
 
     [SetUp]
@@ -55,6 +66,8 @@ public sealed class WorkingCopyViewModelDiscardTests
         _runner = Substitute.For<IGitProcessRunner>();
         _notifications = new NotificationService();
         _confirm = new AlwaysConfirmDialog();
+        _stashDialog = new FakeStashDialog(
+            new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true));
         _watcher = new GitRepositoryWatcher();
 
         _settings.Current.Returns(new AppSettings());
@@ -70,9 +83,9 @@ public sealed class WorkingCopyViewModelDiscardTests
     [TearDown]
     public void TearDown() => _watcher.Dispose();
 
-    private WorkingCopyViewModel CreateVm() =>
+    private WorkingCopyViewModel CreateVm(IConfirmDialog? confirm = null, IStashDialog? stashDialog = null) =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
-            _settings, _notifications, _confirm, new IntraLineDiffer(), _runner, _watcher);
+            _settings, _notifications, confirm ?? _confirm, stashDialog ?? _stashDialog, new IntraLineDiffer(), _runner, _watcher);
 
     private static StatusEntry Unstaged(string path, ChangeKind kind = ChangeKind.Modified) =>
         new(FilePath.From(path), null, kind, IsStaged: false, IsUnstaged: true, IsConflicted: false);
@@ -159,7 +172,7 @@ public sealed class WorkingCopyViewModelDiscardTests
 
             var vm = new WorkingCopyViewModel(
                 _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
-                _settings, _notifications, confirm, new IntraLineDiffer(), _runner, _watcher);
+                _settings, _notifications, confirm, _stashDialog, new IntraLineDiffer(), _runner, _watcher);
             await vm.OpenAsync(repo);
             vm.SetFileSelection([vm.UnstagedFiles[0]]);
 

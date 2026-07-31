@@ -38,6 +38,8 @@ public static class ServiceConfiguration
         services.AddSingleton<NotificationService>();
         services.AddSingleton<AvaloniaConfirmDialog>();
         services.AddSingleton<IConfirmDialog>(sp => sp.GetRequiredService<AvaloniaConfirmDialog>());
+        services.AddSingleton<AvaloniaStashDialog>();
+        services.AddSingleton<IStashDialog>(sp => sp.GetRequiredService<AvaloniaStashDialog>());
         services.AddSingleton<DiagnosticsOverlayViewModel>();
         services.AddSingleton<GitConsoleViewModel>();
 
