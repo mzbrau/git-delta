@@ -31,6 +31,7 @@ public partial class MainWindowViewModel : ObservableObject
         _notifications = notifications;
         RecentRepositories = new(_settings.Current.RecentRepositories);
         DefaultDiffMode = _settings.Current.DefaultDiffMode;
+        _theme = string.IsNullOrWhiteSpace(_settings.Current.Theme) ? "System" : _settings.Current.Theme;
 
         _expandedNavigatorWidth = Math.Max(MinNavigatorWidth, _settings.Current.NavigatorWidth);
         _navigatorWidth = _settings.Current.NavigatorCollapsed
@@ -51,6 +52,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _statusText = "Ready";
     [ObservableProperty] private bool _showSettings;
     [ObservableProperty] private DiffViewMode _defaultDiffMode;
+    [ObservableProperty] private string _theme = "System";
     [ObservableProperty] private double _navigatorWidth;
     [ObservableProperty] private double _fileListWidth;
     [ObservableProperty] private bool _isNavigatorCollapsed;
@@ -191,5 +193,12 @@ public partial class MainWindowViewModel : ObservableObject
         _settings.Update(s => s.DefaultDiffMode = value);
         _ = _settings.SaveAsync();
         WorkingCopy.ViewMode = value;
+    }
+
+    partial void OnThemeChanged(string value)
+    {
+        _settings.Update(s => s.Theme = value);
+        _ = _settings.SaveAsync();
+        global::CodeReviewr.App.App.ApplyTheme(value);
     }
 }

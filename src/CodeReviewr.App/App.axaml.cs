@@ -31,8 +31,8 @@ public partial class App : Application
         else
             settings.LoadAsync().ConfigureAwait(false).GetAwaiter().GetResult();
 
-        // Forge Control UI is dark-only; keep settings Theme for future light variant.
-        ApplyTheme("Dark");
+        // Apply persisted theme (Light / Dark / System).
+        ApplyTheme(settings.Current.Theme);
 
         var env = Services.GetRequiredService<IGitEnvironment>();
         GitExecutableInfo? gitInfo = null;

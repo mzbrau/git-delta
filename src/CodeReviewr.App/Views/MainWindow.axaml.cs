@@ -13,20 +13,25 @@ public partial class MainWindow : Window
 {
     private bool _suppressSelectionSync;
     private bool _multiSelectModifiers;
+    private bool _selectionSyncSubscribed;
 
-    
-    
-    
     public MainWindow()
     {
-           //hello
-           InitializeComponent();
+        InitializeComponent();
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Opened += OnOpened;
         Closing += OnClosing;
+        DataContextChanged += OnDataContextChanged;
     }
 
     private MainWindowViewModel Vm => (MainWindowViewModel)DataContext!;
+
+    private void OnDataContextChanged(object? sender, EventArgs e)
+    {
+        if (_selectionSyncSubscribed || DataContext is not MainWindowViewModel vm) return;
+        vm.WorkingCopy.SelectionSyncRequested += ApplySelectionToListBoxes;
+        _selectionSyncSubscribed = true;
+    }
 
     private void OnOpened(object? sender, EventArgs e)
     {
@@ -149,6 +154,29 @@ public partial class MainWindow : Window
         CollectSelected(UnstagedFileList, selected);
         CollectSelected(ConflictedFileList, selected);
         Vm.WorkingCopy.SetFileSelection(selected);
+    }
+
+    private void ApplySelectionToListBoxes()
+    {
+        _suppressSelectionSync = true;
+        try
+        {
+            StagedFileList.SelectedItems?.Clear();
+            UnstagedFileList.SelectedItems?.Clear();
+            ConflictedFileList.SelectedItems?.Clear();
+
+            foreach (var file in Vm.WorkingCopy.SelectedFilesSnapshot)
+            {
+                var list = file.IsConflicted ? ConflictedFileList
+                    : file.IsStagedList ? StagedFileList
+                    : UnstagedFileList;
+                list.SelectedItems?.Add(file);
+            }
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
     }
 
     private static void CollectSelected(ListBox? list, List<FileItemViewModel> into)

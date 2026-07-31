@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
+using Avalonia.Styling;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Diff;
@@ -41,31 +42,17 @@ public sealed class DiffViewer : Control
     private const double GutterWidth = 40;
     private const double HunkButtonWidth = 64;
     private const double HunkButtonGap = 6;
+    private const double MinimapWidth = 12;
 
     private int _selectionStart = -1;
     private int _selectionEnd = -1;
     private double _scrollY;
     private double _scrollX;
+    private bool _draggingMinimap;
     private INotifyCollectionChanged? _rowsNotify;
     private readonly List<HunkButtonHit> _hunkButtons = [];
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
-
-    private static readonly IBrush AddedFill = new SolidColorBrush(Color.FromArgb(0x26, 0x22, 0xc5, 0x5e));
-    private static readonly IBrush RemovedFill = new SolidColorBrush(Color.FromArgb(0x26, 0xef, 0x44, 0x44));
-    private static readonly IBrush SelectionFill = new SolidColorBrush(Color.FromArgb(0x40, 0x33, 0x48, 0x66));
-    private static readonly IBrush HeaderFill = new SolidColorBrush(Color.FromArgb(0x28, 0x2d, 0x34, 0x49));
-    private static readonly IBrush CollapsedFill = new SolidColorBrush(Color.FromArgb(0x14, 0x8c, 0x90, 0x9f));
-    private static readonly IBrush AddedAccent = new SolidColorBrush(Color.FromRgb(0x22, 0xc5, 0x5e));
-    private static readonly IBrush RemovedAccent = new SolidColorBrush(Color.FromRgb(0xef, 0x44, 0x44));
-    private static readonly IBrush AddedText = new SolidColorBrush(Color.FromRgb(0xbb, 0xf7, 0xd0));
-    private static readonly IBrush RemovedText = new SolidColorBrush(Color.FromRgb(0xfe, 0xca, 0xca));
-    private static readonly IBrush ContextText = new SolidColorBrush(Color.FromRgb(0xda, 0xe2, 0xfd));
-    private static readonly IBrush GutterText = new SolidColorBrush(Color.FromArgb(0x4D, 0xc2, 0xc6, 0xd6));
-    private static readonly IBrush MutedText = new SolidColorBrush(Color.FromRgb(0x8c, 0x90, 0x9f));
-    private static readonly IBrush ColumnDivider = new SolidColorBrush(Color.FromRgb(0x42, 0x47, 0x54));
-    private static readonly IBrush ButtonFill = new SolidColorBrush(Color.FromRgb(0x2d, 0x34, 0x49));
-    private static readonly IBrush ButtonText = new SolidColorBrush(Color.FromRgb(0xc2, 0xc6, 0xd6));
 
     private readonly record struct HunkButtonHit(Rect Bounds, int HunkIndex, bool Stage);
 
@@ -129,6 +116,20 @@ public sealed class DiffViewer : Control
         FocusableProperty.OverrideDefaultValue<DiffViewer>(true);
     }
 
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        ActualThemeVariantChanged += OnActualThemeVariantChanged;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        ActualThemeVariantChanged -= OnActualThemeVariantChanged;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e) => InvalidateVisual();
+
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
@@ -166,6 +167,7 @@ public sealed class DiffViewer : Control
 
     private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        ClampScroll();
         InvalidateVisual();
         InvalidateMeasure();
     }
@@ -197,21 +199,35 @@ public sealed class DiffViewer : Control
         _hunkButtons.Clear();
         var rows = Rows;
         var bounds = Bounds;
-        context.FillRectangle(new SolidColorBrush(Color.FromRgb(0x06, 0x0e, 0x20)), new Rect(bounds.Size));
+        var bg = Brush("ForgeSurfaceContainerLowestBrush", Brushes.Black);
+        context.FillRectangle(bg, new Rect(bounds.Size));
 
         if (rows is null || rows.Count == 0)
         {
-            DrawText(context, EmptyMessage, 16, 16, MutedText);
+            DrawText(context, EmptyMessage, MinimapWidth + 16, 16, Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray));
             return;
         }
 
+        var contentLeft = MinimapWidth;
+        var contentWidth = Math.Max(0, bounds.Width - contentLeft);
         var rowH = RowHeight;
         var first = Math.Max(0, (int)(_scrollY / rowH));
         var last = Math.Min(rows.Count - 1, (int)((_scrollY + bounds.Height) / rowH) + 1);
-        var midX = ViewMode == DiffViewMode.SideBySide ? bounds.Width / 2 : bounds.Width;
+        var midX = ViewMode == DiffViewMode.SideBySide
+            ? contentLeft + contentWidth / 2
+            : contentLeft + contentWidth;
+
+        DrawMinimap(context, rows, bounds);
 
         if (ViewMode == DiffViewMode.SideBySide)
-            context.FillRectangle(ColumnDivider, new Rect(midX - 0.5, 0, 1, bounds.Height));
+            context.FillRectangle(
+                Brush("ForgeOutlineVariantBrush", Brushes.Gray),
+                new Rect(midX - 0.5, 0, 1, bounds.Height));
+
+        var muted = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
+        var contextText = Brush("ForgeOnSurfaceBrush", Brushes.White);
+        var addedAccent = Brush("ForgeStatusAddedBrush", Brushes.LimeGreen);
+        var removedAccent = Brush("ForgeStatusDeletedBrush", Brushes.OrangeRed);
 
         for (var i = first; i <= last; i++)
         {
@@ -223,67 +239,69 @@ public sealed class DiffViewer : Control
 
             if (ViewMode == DiffViewMode.SideBySide)
             {
-                using (context.PushClip(new Rect(0, y, midX, rowH)))
-                    context.FillRectangle(RowBrush(row.Kind, selected), new Rect(0, y, midX, rowH));
+                using (context.PushClip(new Rect(contentLeft, y, midX - contentLeft, rowH)))
+                    context.FillRectangle(RowBrush(row.Kind, selected), new Rect(contentLeft, y, midX - contentLeft, rowH));
                 using (context.PushClip(new Rect(midX, y, bounds.Width - midX, rowH)))
                     context.FillRectangle(RowBrush(row.Kind, selected), new Rect(midX, y, bounds.Width - midX, rowH));
             }
             else
             {
-                context.FillRectangle(RowBrush(row.Kind, selected), new Rect(0, y, bounds.Width, rowH));
+                context.FillRectangle(RowBrush(row.Kind, selected), new Rect(contentLeft, y, contentWidth, rowH));
             }
 
             if (row.Kind is DiffRowKind.Added or DiffRowKind.Removed)
             {
-                var accent = row.Kind == DiffRowKind.Added ? AddedAccent : RemovedAccent;
+                var accent = row.Kind == DiffRowKind.Added ? addedAccent : removedAccent;
                 if (ViewMode == DiffViewMode.SideBySide)
                 {
                     if (row.Kind == DiffRowKind.Removed || !row.LeftText.IsEmpty)
-                        context.FillRectangle(accent, new Rect(0, y, 2, rowH));
+                        context.FillRectangle(accent, new Rect(contentLeft, y, 2, rowH));
                     if (row.Kind == DiffRowKind.Added || !row.RightText.IsEmpty)
                         context.FillRectangle(accent, new Rect(midX, y, 2, rowH));
                 }
                 else
                 {
-                    context.FillRectangle(accent, new Rect(0, y, 2, rowH));
+                    context.FillRectangle(accent, new Rect(contentLeft, y, 2, rowH));
                 }
             }
 
             if (ViewMode == DiffViewMode.SideBySide)
             {
-                using (context.PushClip(new Rect(0, 0, midX, bounds.Height)))
+                using (context.PushClip(new Rect(contentLeft, 0, midX - contentLeft, bounds.Height)))
                 {
-                    DrawGutter(context, row.OldLineNumber, 0, y);
+                    DrawGutter(context, row.OldLineNumber, contentLeft, y);
                     if (row.Kind == DiffRowKind.HunkHeader)
-                        DrawText(context, row.LeftText.ToString(), GutterWidth + 8 - _scrollX, y, MutedText);
+                        DrawText(context, row.LeftText.ToString(), contentLeft + GutterWidth + 8 - _scrollX, y, muted);
                     else if (row.Kind == DiffRowKind.Collapsed)
-                        DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines ⋯", GutterWidth + 8, y, MutedText);
+                        DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines — click to expand",
+                            contentLeft + GutterWidth + 8, y, muted);
                     else if (!row.LeftText.IsEmpty)
-                        DrawText(context, FormatText(row.LeftText), GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind));
+                        DrawText(context, FormatText(row.LeftText), contentLeft + GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind, contextText));
                 }
 
                 using (context.PushClip(new Rect(midX, 0, bounds.Width - midX, bounds.Height)))
                 {
                     DrawGutter(context, row.NewLineNumber, midX, y);
                     if (row.Kind is not DiffRowKind.HunkHeader and not DiffRowKind.Collapsed && !row.RightText.IsEmpty)
-                        DrawText(context, FormatText(row.RightText), midX + GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind));
+                        DrawText(context, FormatText(row.RightText), midX + GutterWidth + 8 - _scrollX, y, TextBrush(row.Kind, contextText));
                 }
             }
             else
             {
-                DrawGutter(context, row.OldLineNumber, 0, y);
-                DrawGutter(context, row.NewLineNumber, GutterWidth, y);
+                DrawGutter(context, row.OldLineNumber, contentLeft, y);
+                DrawGutter(context, row.NewLineNumber, contentLeft + GutterWidth, y);
 
                 if (row.Kind == DiffRowKind.HunkHeader)
                 {
-                    DrawText(context, row.LeftText.ToString(), GutterWidth * 2 + 8 - _scrollX, y, MutedText);
+                    DrawText(context, row.LeftText.ToString(), contentLeft + GutterWidth * 2 + 8 - _scrollX, y, muted);
                     DrawUnifiedHunkButtons(context, row.HunkIndex, y, rowH, bounds.Width);
                     continue;
                 }
 
                 if (row.Kind == DiffRowKind.Collapsed)
                 {
-                    DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines ⋯", GutterWidth * 2 + 8, y, MutedText);
+                    DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines — click to expand",
+                        contentLeft + GutterWidth * 2 + 8, y, muted);
                     continue;
                 }
 
@@ -295,9 +313,44 @@ public sealed class DiffViewer : Control
                     DiffRowKind.Removed => "-",
                     _ => " ",
                 };
-                DrawText(context, prefix + FormatText(text), GutterWidth * 2 + 8 - _scrollX, y, TextBrush(row.Kind));
+                DrawText(context, prefix + FormatText(text), contentLeft + GutterWidth * 2 + 8 - _scrollX, y, TextBrush(row.Kind, contextText));
             }
         }
+    }
+
+    private void DrawMinimap(DrawingContext context, IReadOnlyList<DiffRow> rows, Rect bounds)
+    {
+        var track = Brush("ForgeMinimapTrackBrush", Brushes.Transparent);
+        context.FillRectangle(track, new Rect(0, 0, MinimapWidth, bounds.Height));
+
+        var total = Math.Max(1, rows.Count);
+        var added = Brush("ForgeStatusAddedBrush", Brushes.LimeGreen);
+        var removed = Brush("ForgeStatusDeletedBrush", Brushes.OrangeRed);
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var kind = rows[i].Kind;
+            if (kind is not (DiffRowKind.Added or DiffRowKind.Removed)) continue;
+            var y = i / (double)total * bounds.Height;
+            var h = Math.Max(2, bounds.Height / total);
+            context.FillRectangle(
+                kind == DiffRowKind.Added ? added : removed,
+                new Rect(2, y, MinimapWidth - 4, h));
+        }
+
+        var contentHeight = total * RowHeight;
+        if (contentHeight <= 0) return;
+        var viewportRatio = Math.Clamp(bounds.Height / contentHeight, 0, 1);
+        var viewportH = Math.Max(8, viewportRatio * bounds.Height);
+        var scrollRatio = contentHeight <= bounds.Height
+            ? 0
+            : _scrollY / (contentHeight - bounds.Height);
+        var viewportY = scrollRatio * (bounds.Height - viewportH);
+        context.DrawRectangle(
+            Brush("ForgeMinimapViewportBrush", Brushes.Gray),
+            new Pen(Brush("ForgeOutlineBrush", Brushes.Gray), 1),
+            new Rect(1, viewportY, MinimapWidth - 2, viewportH),
+            1, 1);
     }
 
     private void DrawUnifiedHunkButtons(DrawingContext context, int hunkIndex, double y, double rowH, double width)
@@ -323,14 +376,14 @@ public sealed class DiffViewer : Control
 
     private void DrawHunkButton(DrawingContext context, Rect rect, string label)
     {
-        context.FillRectangle(ButtonFill, rect, 3);
+        context.FillRectangle(Brush("ForgeSurfaceContainerHighestBrush", Brushes.DimGray), rect, 3);
         var ft = new FormattedText(
             label,
             System.Globalization.CultureInfo.CurrentCulture,
             FlowDirection.LeftToRight,
             _typeface,
             11,
-            ButtonText);
+            Brush("ForgeOnSurfaceVariantBrush", Brushes.LightGray));
         context.DrawText(ft, new Point(
             rect.X + (rect.Width - ft.Width) / 2,
             rect.Y + (rect.Height - ft.Height) / 2));
@@ -346,7 +399,7 @@ public sealed class DiffViewer : Control
     private void DrawGutter(DrawingContext ctx, int? line, double x, double y)
     {
         if (line is null) return;
-        var brush = GutterText;
+        var brush = Brush("ForgeDiffGutterTextBrush", Brushes.Gray);
         var ft = new FormattedText(
             line.Value.ToString(),
             System.Globalization.CultureInfo.CurrentCulture,
@@ -369,24 +422,50 @@ public sealed class DiffViewer : Control
         ctx.DrawText(ft, new Point(x, y + (RowHeight - ft.Height) / 2));
     }
 
-    private static IBrush RowBrush(DiffRowKind kind, bool selected) =>
-        selected ? SelectionFill
+    private IBrush RowBrush(DiffRowKind kind, bool selected) =>
+        selected ? Brush("ForgeDiffSelectionFillBrush", Brushes.SlateBlue)
         : kind switch
         {
-            DiffRowKind.Added => AddedFill,
-            DiffRowKind.Removed => RemovedFill,
-            DiffRowKind.HunkHeader => HeaderFill,
-            DiffRowKind.Collapsed => CollapsedFill,
+            DiffRowKind.Added => Brush("ForgeDiffAddedFillBrush", Brushes.DarkGreen),
+            DiffRowKind.Removed => Brush("ForgeDiffRemovedFillBrush", Brushes.DarkRed),
+            DiffRowKind.HunkHeader => Brush("ForgeDiffHeaderFillBrush", Brushes.DimGray),
+            DiffRowKind.Collapsed => Brush("ForgeDiffCollapsedFillBrush", Brushes.Transparent),
             _ => Brushes.Transparent,
         };
 
-    private static IBrush TextBrush(DiffRowKind kind) =>
+    private IBrush TextBrush(DiffRowKind kind, IBrush fallback) =>
         kind switch
         {
-            DiffRowKind.Added => AddedText,
-            DiffRowKind.Removed => RemovedText,
-            _ => ContextText,
+            DiffRowKind.Added => Brush("ForgeDiffAddedTextBrush", fallback),
+            DiffRowKind.Removed => Brush("ForgeDiffRemovedTextBrush", fallback),
+            _ => fallback,
         };
+
+    private IBrush Brush(string key, IBrush fallback)
+    {
+        if (Application.Current?.TryGetResource(key, ActualThemeVariant, out var res) == true
+            && res is IBrush brush)
+            return brush;
+        return fallback;
+    }
+
+    private void ClampScroll()
+    {
+        var rows = Rows;
+        if (rows is null) { _scrollY = 0; return; }
+        var max = Math.Max(0, rows.Count * RowHeight - Bounds.Height);
+        _scrollY = Math.Clamp(_scrollY, 0, max);
+    }
+
+    private void ScrollFromMinimapY(double y)
+    {
+        var rows = Rows;
+        if (rows is null || rows.Count == 0) return;
+        var contentHeight = rows.Count * RowHeight;
+        var ratio = Math.Clamp(y / Math.Max(1, Bounds.Height), 0, 1);
+        _scrollY = Math.Clamp(ratio * Math.Max(0, contentHeight - Bounds.Height), 0, Math.Max(0, contentHeight - Bounds.Height));
+        InvalidateVisual();
+    }
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
@@ -408,6 +487,15 @@ public sealed class DiffViewer : Control
         Focus();
         var point = e.GetCurrentPoint(this);
         var pos = point.Position;
+
+        if (pos.X < MinimapWidth && Rows is { Count: > 0 })
+        {
+            _draggingMinimap = true;
+            ScrollFromMinimapY(pos.Y);
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return;
+        }
 
         if (point.Properties.IsRightButtonPressed)
         {
@@ -434,6 +522,14 @@ public sealed class DiffViewer : Control
         var y = pos.Y + _scrollY;
         var index = (int)(y / RowHeight);
         if (Rows is null || index < 0 || index >= Rows.Count) return;
+
+        if (Rows[index].Kind == DiffRowKind.Collapsed)
+        {
+            GetWorkingCopy()?.ExpandCollapsedSection(Rows[index].HunkIndex, Rows[index].LineIndexInHunk);
+            e.Handled = true;
+            return;
+        }
+
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift) && _selectionStart >= 0)
             _selectionEnd = index;
         else
@@ -443,6 +539,21 @@ public sealed class DiffViewer : Control
             workingCopy.SelectedHunkIndex = hunk;
 
         InvalidateVisual();
+        e.Handled = true;
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        if (!_draggingMinimap) return;
+        ScrollFromMinimapY(e.GetPosition(this).Y);
+        e.Handled = true;
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        if (!_draggingMinimap) return;
+        _draggingMinimap = false;
+        e.Pointer.Capture(null);
         e.Handled = true;
     }
 

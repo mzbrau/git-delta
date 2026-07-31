@@ -25,7 +25,11 @@ public static class UnifiedRowProjector
     /// <see cref="IntraLineEnricher"/>). Passing the same enriched <paramref name="diff"/> on every
     /// call and leaving this <see langword="null"/> is what makes mode switching free of recomputation.
     /// </param>
-    public static IReadOnlyList<DiffRow> Project(FileDiff diff, int collapseThreshold = 0, IIntraLineDiffer? intraLineDiffer = null)
+    public static IReadOnlyList<DiffRow> Project(
+        FileDiff diff,
+        int collapseThreshold = 0,
+        IIntraLineDiffer? intraLineDiffer = null,
+        ISet<(int HunkIndex, int LineIndexInHunk)>? expandedCollapses = null)
     {
         ArgumentNullException.ThrowIfNull(diff);
 
@@ -37,14 +41,19 @@ public static class UnifiedRowProjector
         {
             var hunk = diff.Hunks[h];
             rows.Add(RowFactory.HunkHeaderRow(hunk, h));
-            AppendHunkRows(hunk.Lines, h, rows, collapseThreshold, intraLineDiffer);
+            AppendHunkRows(hunk.Lines, h, rows, collapseThreshold, intraLineDiffer, expandedCollapses);
         }
 
         return rows;
     }
 
     private static void AppendHunkRows(
-        IReadOnlyList<DiffLine> lines, int hunkIndex, List<DiffRow> rows, int collapseThreshold, IIntraLineDiffer? differ)
+        IReadOnlyList<DiffLine> lines,
+        int hunkIndex,
+        List<DiffRow> rows,
+        int collapseThreshold,
+        IIntraLineDiffer? differ,
+        ISet<(int HunkIndex, int LineIndexInHunk)>? expandedCollapses)
     {
         var i = 0;
         while (i < lines.Count)
@@ -64,7 +73,8 @@ public static class UnifiedRowProjector
                         j++;
                     var runLength = j - start;
 
-                    if (collapseThreshold > 0 && runLength > collapseThreshold)
+                    var expanded = expandedCollapses?.Contains((hunkIndex, start)) == true;
+                    if (collapseThreshold > 0 && runLength > collapseThreshold && !expanded)
                     {
                         rows.Add(RowFactory.CollapsedRow(lines[start], hunkIndex, start, runLength));
                     }

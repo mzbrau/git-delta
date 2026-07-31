@@ -41,6 +41,10 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly List<FileItemViewModel> _allConflicted = [];
     private readonly List<FileItemViewModel> _selectedFiles = [];
     private bool _suppressSelectionSync;
+    private bool _skipNextSelectedFileLoad;
+    private readonly HashSet<(int HunkIndex, int LineIndexInHunk)> _expandedCollapses = [];
+    private const int DefaultCollapseThreshold = 8;
+    private const int FullFileContextLines = 100_000;
 
     public WorkingCopyViewModel(
         IGitStatusService statusService,
@@ -73,6 +77,8 @@ public partial class WorkingCopyViewModel : ObservableObject
         _runner = runner;
         _watcher = watcher;
         ViewMode = settings.Current.DefaultDiffMode;
+        _ignoreWhitespace = settings.Current.IgnoreWhitespace;
+        _contextLines = settings.Current.ContextLines > 0 ? settings.Current.ContextLines : 3;
         // Watcher callbacks arrive on thread-pool / FileSystemWatcher threads.
         _watcher.RefreshRequested += () =>
             Dispatcher.UIThread.Post(() => _ = RefreshAsync());
@@ -122,6 +128,16 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private bool _hasUnstagedSelection;
     [ObservableProperty] private string _diffEmptyMessage = "Select a file to view its diff";
     [ObservableProperty] private string? _diffOverlayMessage;
+    [ObservableProperty] private bool _ignoreWhitespace;
+    [ObservableProperty] private int _contextLines = 3;
+    [ObservableProperty] private bool _showFullFile;
+
+    /// <summary>Raised after the VM restores selection following a list rebuild so the view can rebind ListBoxes.</summary>
+    public event Action? SelectionSyncRequested;
+
+    public int[] ContextLineOptions { get; } = [1, 3, 5, 10, 25];
+
+    public IReadOnlyList<FileItemViewModel> SelectedFilesSnapshot => _selectedFiles;
 
     public bool HasRepository => _repoPath is not null;
 
@@ -156,6 +172,28 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnIsPullingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsFetchingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnSelectedFileCountChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
+
+    partial void OnIgnoreWhitespaceChanged(bool value)
+    {
+        _settings.Update(s => s.IgnoreWhitespace = value);
+        _ = _settings.SaveAsync();
+        _ = LoadDiffForSelectionAsync(SelectedFile);
+    }
+
+    partial void OnContextLinesChanged(int value)
+    {
+        if (value <= 0) return;
+        _settings.Update(s => s.ContextLines = value);
+        _ = _settings.SaveAsync();
+        if (!ShowFullFile)
+            _ = LoadDiffForSelectionAsync(SelectedFile);
+    }
+
+    partial void OnShowFullFileChanged(bool value)
+    {
+        _expandedCollapses.Clear();
+        _ = LoadDiffForSelectionAsync(SelectedFile);
+    }
 
     public async Task OpenAsync(string path)
     {
@@ -258,9 +296,9 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     private void ApplyFileFilter()
     {
-        var previousPaths = _selectedFiles
-            .Select(f => f.Path.Value)
-            .ToHashSet(StringComparer.Ordinal);
+        var previousKeys = _selectedFiles
+            .Select(f => (Path: f.Path.Value, f.IsStagedList))
+            .ToList();
 
         _suppressSelectionSync = true;
         try
@@ -284,14 +322,27 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(HasConflictedFiles));
         OnPropertyChanged(nameof(HasStagedFiles));
 
-        if (previousPaths.Count == 0) return;
+        if (previousKeys.Count == 0) return;
 
-        var restored = StagedFiles
-            .Concat(UnstagedFiles)
-            .Concat(ConflictedFiles)
-            .Where(f => previousPaths.Contains(f.Path.Value))
-            .ToList();
-        ApplySelectionState(restored);
+        var all = StagedFiles.Concat(UnstagedFiles).Concat(ConflictedFiles).ToList();
+        var restored = new List<FileItemViewModel>();
+        foreach (var key in previousKeys)
+        {
+            var match = all.FirstOrDefault(f =>
+                string.Equals(f.Path.Value, key.Path, StringComparison.Ordinal)
+                && f.IsStagedList == key.IsStagedList);
+            if (match is null)
+            {
+                // Preferred list side disappeared (fully moved); fall back to same path other side.
+                match = all.FirstOrDefault(f =>
+                    string.Equals(f.Path.Value, key.Path, StringComparison.Ordinal));
+            }
+
+            if (match is not null && restored.All(r => !ReferenceEquals(r, match)))
+                restored.Add(match);
+        }
+
+        ApplySelectionState(restored, requestViewSync: true);
     }
 
     private bool MatchesFilter(FileItemViewModel file)
@@ -307,10 +358,10 @@ public partial class WorkingCopyViewModel : ObservableObject
     public void SetFileSelection(IReadOnlyList<FileItemViewModel> selected)
     {
         if (_suppressSelectionSync) return;
-        ApplySelectionState(selected);
+        ApplySelectionState(selected, requestViewSync: false);
     }
 
-    private void ApplySelectionState(IReadOnlyList<FileItemViewModel> selected)
+    private void ApplySelectionState(IReadOnlyList<FileItemViewModel> selected, bool requestViewSync)
     {
         _selectedFiles.Clear();
         _selectedFiles.AddRange(selected);
@@ -323,10 +374,22 @@ public partial class WorkingCopyViewModel : ObservableObject
             var file = _selectedFiles[0];
             DiffEmptyMessage = "Select a file to view its diff";
             DiffOverlayMessage = null;
-            if (!ReferenceEquals(SelectedFile, file))
+            if (SameSelectionIdentity(SelectedFile, file))
+            {
+                if (!ReferenceEquals(SelectedFile, file))
+                {
+                    _skipNextSelectedFileLoad = true;
+                    SelectedFile = file;
+                }
+            }
+            else if (!ReferenceEquals(SelectedFile, file))
+            {
                 SelectedFile = file;
+            }
             else
+            {
                 _ = LoadDiffForSelectionAsync(file);
+            }
         }
         else if (_selectedFiles.Count > 1)
         {
@@ -352,7 +415,16 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
 
         UpdateDiffOverlay();
+
+        if (requestViewSync)
+            SelectionSyncRequested?.Invoke();
     }
+
+    private static bool SameSelectionIdentity(FileItemViewModel? a, FileItemViewModel? b) =>
+        a is not null
+        && b is not null
+        && string.Equals(a.Path.Value, b.Path.Value, StringComparison.Ordinal)
+        && a.IsStagedList == b.IsStagedList;
 
     private void UpdateDiffOverlay()
     {
@@ -370,6 +442,12 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     partial void OnSelectedFileChanged(FileItemViewModel? value)
     {
+        if (_skipNextSelectedFileLoad)
+        {
+            _skipNextSelectedFileLoad = false;
+            return;
+        }
+
         if (SelectedFileCount <= 1)
             _ = LoadDiffForSelectionAsync(value);
     }
@@ -386,6 +464,16 @@ public partial class WorkingCopyViewModel : ObservableObject
     [RelayCommand]
     private void ToggleCombinedReview() => IsCombinedReviewMode = !IsCombinedReviewMode;
 
+    [RelayCommand]
+    private void ToggleShowFullFile() => ShowFullFile = !ShowFullFile;
+
+    public void ExpandCollapsedSection(int hunkIndex, int lineIndexInHunk)
+    {
+        if (!_expandedCollapses.Add((hunkIndex, lineIndexInHunk))) return;
+        if (_currentDiff is not null)
+            ProjectRows(_currentDiff);
+    }
+
     private async Task LoadDiffForSelectionAsync(FileItemViewModel? file)
     {
         _diffCts?.Cancel();
@@ -394,6 +482,7 @@ public partial class WorkingCopyViewModel : ObservableObject
 
         DiffRows.Clear();
         _currentDiff = null;
+        _expandedCollapses.Clear();
         SelectedAddedLines = 0;
         SelectedRemovedLines = 0;
         if (file is null || _repoPath is null)
@@ -418,7 +507,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         try
         {
             var sw = Stopwatch.StartNew();
-            var options = _settings.Current.ToDiffOptions();
+            var options = BuildDiffOptions();
             var diff = await _diffService.GetDiffAsync(_repoPath, file.Path, target, options, ct);
             ct.ThrowIfCancellationRequested();
             _currentDiff = ApplyIntraLine(diff);
@@ -440,6 +529,16 @@ public partial class WorkingCopyViewModel : ObservableObject
             IsLoadingDiff = false;
             OnPropertyChanged(nameof(DiffFooterText));
         }
+    }
+
+    private DiffOptions BuildDiffOptions()
+    {
+        var baseOptions = _settings.Current.ToDiffOptions() with
+        {
+            IgnoreAllSpace = IgnoreWhitespace,
+            ContextLines = ShowFullFile ? FullFileContextLines : Math.Max(1, ContextLines),
+        };
+        return baseOptions;
     }
 
     private void UpdateDiffStats(FileDiff? diff)
@@ -486,11 +585,22 @@ public partial class WorkingCopyViewModel : ObservableObject
     private void ProjectRows(FileDiff diff)
     {
         DiffRows.Clear();
+        var threshold = ShowFullFile ? 0 : DefaultCollapseThreshold;
         IReadOnlyList<DiffRow> rows = ViewMode == DiffViewMode.SideBySide
-            ? SideBySideRowProjector.Project(diff, collapseThreshold: 8, intraLineDiffer: _intraLine)
-            : UnifiedRowProjector.Project(diff, collapseThreshold: 8, intraLineDiffer: _intraLine);
+            ? SideBySideRowProjector.Project(diff, threshold, _intraLine, _expandedCollapses)
+            : UnifiedRowProjector.Project(diff, threshold, _intraLine, _expandedCollapses);
         foreach (var r in rows)
             DiffRows.Add(r);
+    }
+
+    /// <summary>Refresh status, then reload the open diff only if a mutated path is the selection.</summary>
+    private async Task RefreshAndMaybeReloadDiffAsync(IReadOnlyList<FilePath> mutatedPaths)
+    {
+        await RefreshAsync();
+        if (SelectedFile is null || mutatedPaths.Count == 0) return;
+        var selectedPath = SelectedFile.Path.Value;
+        if (mutatedPaths.Any(p => string.Equals(p.Value, selectedPath, StringComparison.Ordinal)))
+            await LoadDiffForSelectionAsync(SelectedFile);
     }
 
     [RelayCommand]
@@ -513,8 +623,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         finally
         {
             _pending.Remove(pending);
-            await RefreshAsync();
-            await LoadDiffForSelectionAsync(SelectedFile);
+            await RefreshAndMaybeReloadDiffAsync([file.Path]);
         }
     }
 
@@ -536,8 +645,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         finally
         {
             _pending.Remove(pending);
-            await RefreshAsync();
-            await LoadDiffForSelectionAsync(SelectedFile);
+            await RefreshAndMaybeReloadDiffAsync([file.Path]);
         }
     }
 
@@ -561,11 +669,12 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         if (_repoPath is null || files.Count == 0) return;
         var pendings = files.Select(f => new PendingMutation(f.Path, WasUnstage: false)).ToList();
+        var paths = files.Select(f => f.Path).ToList();
         _pending.AddRange(pendings);
         await RefreshAsync();
         try
         {
-            await _staging.StageFilesAsync(_repoPath, files.Select(f => f.Path).ToList());
+            await _staging.StageFilesAsync(_repoPath, paths);
         }
         catch (Exception ex)
         {
@@ -575,8 +684,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             foreach (var pending in pendings)
                 _pending.Remove(pending);
-            await RefreshAsync();
-            await LoadDiffForSelectionAsync(SelectedFile);
+            await RefreshAndMaybeReloadDiffAsync(paths);
         }
     }
 
@@ -584,11 +692,12 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         if (_repoPath is null || files.Count == 0) return;
         var pendings = files.Select(f => new PendingMutation(f.Path, WasUnstage: true)).ToList();
+        var paths = files.Select(f => f.Path).ToList();
         _pending.AddRange(pendings);
         await RefreshAsync();
         try
         {
-            await _staging.UnstageFilesAsync(_repoPath, files.Select(f => f.Path).ToList());
+            await _staging.UnstageFilesAsync(_repoPath, paths);
         }
         catch (Exception ex)
         {
@@ -598,8 +707,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             foreach (var pending in pendings)
                 _pending.Remove(pending);
-            await RefreshAsync();
-            await LoadDiffForSelectionAsync(SelectedFile);
+            await RefreshAndMaybeReloadDiffAsync(paths);
         }
     }
 
@@ -687,8 +795,11 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             if (pending is not null)
                 _pending.Remove(pending);
-            await RefreshAsync();
-            await LoadDiffForSelectionAsync(SelectedFile);
+            var path = _currentDiff?.NewPath ?? SelectedFile?.Path;
+            if (path is { } p)
+                await RefreshAndMaybeReloadDiffAsync([p]);
+            else
+                await RefreshAsync();
         }
     }
 
@@ -697,10 +808,11 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         if (lines is null || lines.Count == 0 || _currentDiff is null || _repoPath is null) return;
         if (_currentDiff.Target != DiffTarget.IndexToWorktree) return;
+        var path = _currentDiff.NewPath;
         try
         {
             var patch = PatchSynthesizer.SynthesizeLines(_currentDiff, lines);
-            var pending = new PendingMutation(_currentDiff.NewPath, WasUnstage: false);
+            var pending = new PendingMutation(path, WasUnstage: false);
             _pending.Add(pending);
             try
             {
@@ -717,8 +829,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         finally
         {
-            await RefreshAsync();
-            await LoadDiffForSelectionAsync(SelectedFile);
+            await RefreshAndMaybeReloadDiffAsync([path]);
         }
     }
 
@@ -727,6 +838,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         if (lines is null || lines.Count == 0 || _currentDiff is null || _repoPath is null) return;
         if (_currentDiff.Target != DiffTarget.HeadToIndex) return;
+        var path = _currentDiff.NewPath;
         try
         {
             var patch = PatchSynthesizer.SynthesizeLines(_currentDiff, lines);
@@ -738,8 +850,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         finally
         {
-            await RefreshAsync();
-            await LoadDiffForSelectionAsync(SelectedFile);
+            await RefreshAndMaybeReloadDiffAsync([path]);
         }
     }
 
