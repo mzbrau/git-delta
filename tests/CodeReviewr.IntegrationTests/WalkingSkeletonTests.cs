@@ -111,7 +111,12 @@ public sealed class WalkingSkeletonTests
         File.WriteAllText(Path.Combine(path, "c.txt"), "main\n");
         repo.RunGit("add", "c.txt");
         repo.RunGit("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "main");
-        try { repo.RunGit("merge", "feature"); } catch { /* expected */ }
+        try { repo.RunGit("merge", "--no-edit", "feature"); } catch { /* expected conflict */ }
+
+        Assert.That(
+            File.Exists(Path.Combine(path, ".git", "MERGE_HEAD")),
+            Is.True,
+            "Merge must leave MERGE_HEAD so the conflict setup is valid before status parsing");
 
         await using var sp = BuildServices();
         await sp.GetRequiredService<IGitEnvironment>().DetectAsync();

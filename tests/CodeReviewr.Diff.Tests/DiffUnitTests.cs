@@ -40,6 +40,17 @@ public sealed class PatchParserTests
         // Slice must refer into the same string instance backing
         Assert.That(removed.Text.Length, Is.EqualTo(3));
     }
+
+    [Test]
+    public void Parse_Strips_Trailing_CR_From_Crlf_Patches()
+    {
+        var crlfPatch = SamplePatch.Replace("\n", "\r\n", StringComparison.Ordinal);
+        var diff = PatchParser.Parse(crlfPatch, DiffTarget.IndexToWorktree);
+        var removed = diff.Hunks[0].Lines.First(l => l.Kind == DiffLineKind.Removed);
+        var added = diff.Hunks[0].Lines.First(l => l.Kind == DiffLineKind.Added);
+        Assert.That(removed.Text.ToString(), Is.EqualTo("old"));
+        Assert.That(added.Text.ToString(), Is.EqualTo("new"));
+    }
 }
 
 public sealed class RowProjectionTests

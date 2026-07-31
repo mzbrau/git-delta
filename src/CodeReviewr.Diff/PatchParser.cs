@@ -289,6 +289,9 @@ public static class PatchParser
                 var lEnd = nlIdx == -1 ? rawPatch.Length : nlIdx;
                 var contentStart = pos + 1;
                 var contentLen = Math.Max(0, lEnd - contentStart);
+                // CRLF patches (and Windows-checked-out test fixtures) leave a CR before \n.
+                if (contentLen > 0 && rawPatch[contentStart + contentLen - 1] == '\r')
+                    contentLen--;
                 var text = contentLen > 0 ? memory.Slice(contentStart, contentLen) : ReadOnlyMemory<char>.Empty;
 
                 switch (marker)

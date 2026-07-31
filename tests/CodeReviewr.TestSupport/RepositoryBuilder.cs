@@ -73,6 +73,12 @@ public sealed class RepositoryBuilder : IAsyncDisposable, IDisposable
     {
         if (_built) return _root;
         RunGit("init", "-b", "main");
+        // Pin identity and EOL so CI (especially Windows runners without global git config
+        // and with core.autocrlf=true) behaves the same as local macOS/Linux.
+        RunGit("config", "user.email", "test@example.com");
+        RunGit("config", "user.name", "Test");
+        RunGit("config", "core.autocrlf", "false");
+        RunGit("config", "core.eol", "lf");
         foreach (var action in _actions)
             action();
         _built = true;
