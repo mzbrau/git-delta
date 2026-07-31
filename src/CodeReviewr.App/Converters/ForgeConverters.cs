@@ -50,6 +50,13 @@ public static class ForgeConverters
         new FuncValueConverter<bool, MaterialIconKind>(expanded =>
             expanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight);
 
+    public static readonly IValueConverter IsPositive =
+        new FuncValueConverter<int, bool>(v => v > 0);
+
+    public static readonly IValueConverter SelectedFontWeight =
+        new FuncValueConverter<bool, FontWeight>(selected =>
+            selected ? FontWeight.SemiBold : FontWeight.Normal);
+
     public static readonly IValueConverter IsSideBySide =
         new FuncValueConverter<DiffViewMode, bool>(mode => mode == DiffViewMode.SideBySide);
 

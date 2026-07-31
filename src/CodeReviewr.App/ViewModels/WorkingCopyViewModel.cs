@@ -103,8 +103,10 @@ public partial class WorkingCopyViewModel : ObservableObject
     public ObservableCollection<FileItemViewModel> StagedFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> UnstagedFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> ConflictedFiles { get; } = [];
+    public ObservableCollection<FileItemViewModel> StashFiles { get; } = [];
     public ObservableCollection<DiffRow> DiffRows { get; } = [];
     public ObservableCollection<BranchInfo> Branches { get; } = [];
+    public ObservableCollection<StashInfo> Stashes { get; } = [];
 
     [ObservableProperty] private string? _repositoryPath;
     [ObservableProperty] private string? _currentBranch;
@@ -129,8 +131,15 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private int _selectedRemovedLines;
     [ObservableProperty] private bool _stagedExpanded = true;
     [ObservableProperty] private bool _unstagedExpanded = true;
-    [ObservableProperty] private bool _branchesExpanded = true;
-    [ObservableProperty] private bool _explorerExpanded = true;
+    [ObservableProperty] private bool _workspaceExpanded = true;
+    [ObservableProperty] private bool _branchesExpanded;
+    [ObservableProperty] private bool _stashesExpanded = true;
+    [ObservableProperty] private bool _pullRequestsExpanded = true;
+    [ObservableProperty] private bool _prRequestedExpanded = true;
+    [ObservableProperty] private bool _prRaisedExpanded = true;
+    [ObservableProperty] private WorkspaceMode _workspaceMode = WorkspaceMode.FileStatus;
+    [ObservableProperty] private StashInfo? _selectedStash;
+    [ObservableProperty] private bool _isStashing;
     [ObservableProperty] private string _fileFilter = "";
     [ObservableProperty] private bool _hasFileFilter;
     [ObservableProperty] private bool _isPushing;
@@ -183,7 +192,22 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     public bool HasRepository => _repoPath is not null;
 
-    public bool IsRemoteBusy => IsPushing || IsPulling || IsFetching;
+    public bool IsRemoteBusy => IsPushing || IsPulling || IsFetching || IsStashing;
+
+    public bool IsFileStatusMode => WorkspaceMode == WorkspaceMode.FileStatus;
+    public bool IsHistoryMode => WorkspaceMode == WorkspaceMode.History;
+    public bool IsStashMode => WorkspaceMode == WorkspaceMode.Stash;
+
+    public string FileListHeader => WorkspaceMode switch
+    {
+        WorkspaceMode.History => "History",
+        WorkspaceMode.Stash when SelectedStash is { } s => s.DisplayTitle,
+        WorkspaceMode.Stash => "Stash",
+        _ => "File Status",
+    };
+
+    public bool IsFileStatusNavSelected => WorkspaceMode == WorkspaceMode.FileStatus;
+    public bool IsHistoryNavSelected => WorkspaceMode == WorkspaceMode.History;
 
     public string CommitButtonLabel =>
         string.IsNullOrEmpty(CurrentBranch) ? "Commit" : $"Commit to {CurrentBranch}";
@@ -199,6 +223,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     public bool HasConflictedFiles => ConflictedFiles.Count > 0;
 
     public bool HasStagedFiles => StagedFiles.Count > 0;
+    public bool ShowCommitDock => IsFileStatusMode && HasStagedFiles;
 
     partial void OnCurrentBranchChanged(string? value) => OnPropertyChanged(nameof(CommitButtonLabel));
     partial void OnStagingDisabledReasonChanged(string? value) => OnPropertyChanged(nameof(DiffFooterText));
@@ -212,7 +237,10 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnFileFilterChanged(string value)
     {
         HasFileFilter = !string.IsNullOrWhiteSpace(value);
-        ApplyFileFilter();
+        if (IsStashMode && SelectedStash is not null)
+            _ = SelectStashAsync(SelectedStash);
+        else
+            ApplyFileFilter();
     }
 
     [RelayCommand]
@@ -220,6 +248,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnIsPushingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsPullingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsFetchingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
+    partial void OnIsStashingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnSelectedFileCountChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
     partial void OnHasUnstagedSelectionChanged(bool value) => OnPropertyChanged(nameof(CanDiscardSelection));
     partial void OnHasStagedSelectionChanged(bool value) => OnPropertyChanged(nameof(CanDiscardSelection));
@@ -254,10 +283,27 @@ public partial class WorkingCopyViewModel : ObservableObject
         RepositoryPath = path;
         OnPropertyChanged(nameof(HasRepository));
         OnPropertyChanged(nameof(SelectedFileAbsolutePath));
+        WorkspaceMode = WorkspaceMode.FileStatus;
+        SelectedStash = null;
         _watcher.WatchRepository(path);
         await RefreshAsync();
         await LoadBranchesAsync();
+        await LoadStashesAsync();
     }
+
+    partial void OnWorkspaceModeChanged(WorkspaceMode value)
+    {
+        OnPropertyChanged(nameof(IsFileStatusMode));
+        OnPropertyChanged(nameof(IsHistoryMode));
+        OnPropertyChanged(nameof(IsStashMode));
+        OnPropertyChanged(nameof(FileListHeader));
+        OnPropertyChanged(nameof(IsFileStatusNavSelected));
+        OnPropertyChanged(nameof(IsHistoryNavSelected));
+        OnPropertyChanged(nameof(ShowCommitDock));
+    }
+
+    partial void OnSelectedStashChanged(StashInfo? value) =>
+        OnPropertyChanged(nameof(FileListHeader));
 
     private async Task EnableFsmonitorAsync()
     {
@@ -297,6 +343,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             }
 
             await InvokeOnUiAsync(ApplyStatus);
+            await LoadStashesAsync().ConfigureAwait(true);
 
             CodeReviewrMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
             CodeReviewrMeters.RepositoryOpenMs.Record(sw.Elapsed.TotalMilliseconds);
@@ -372,6 +419,7 @@ public partial class WorkingCopyViewModel : ObservableObject
 
         OnPropertyChanged(nameof(HasConflictedFiles));
         OnPropertyChanged(nameof(HasStagedFiles));
+        OnPropertyChanged(nameof(ShowCommitDock));
 
         if (previousKeys.Count == 0) return;
 
@@ -516,6 +564,163 @@ public partial class WorkingCopyViewModel : ObservableObject
         FileManagerReveal.Reveal(AbsolutePathFor(file));
     }
 
+    [RelayCommand]
+    private void RevealRepositoryInFileManager()
+    {
+        if (_repoPath is null) return;
+        FileManagerReveal.Reveal(_repoPath);
+    }
+
+    [RelayCommand]
+    private async Task ViewRemoteAsync()
+    {
+        if (_repoPath is null) return;
+        try
+        {
+            var remoteUrl = await _remotes.GetRemoteUrlAsync(_repoPath);
+            var browse = RemoteWebUrl.ToBrowseUrl(remoteUrl);
+            if (browse is null)
+            {
+                _notifications.Error(remoteUrl is null
+                    ? "No remote named 'origin' is configured."
+                    : $"Could not open remote URL in a browser: {remoteUrl}");
+                return;
+            }
+
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = browse,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"View Remote failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void SelectFileStatus()
+    {
+        WorkspaceMode = WorkspaceMode.FileStatus;
+        SelectedStash = null;
+        StashFiles.Clear();
+        DiffEmptyMessage = "Select a file to view its diff";
+        if (_selectedFiles.Count == 1)
+            _ = LoadDiffForSelectionAsync(_selectedFiles[0]);
+        else
+        {
+            DiffRows.Clear();
+            SelectedFile = null;
+        }
+        OnPropertyChanged(nameof(FileListHeader));
+    }
+
+    [RelayCommand]
+    private void SelectHistory()
+    {
+        WorkspaceMode = WorkspaceMode.History;
+        SelectedStash = null;
+        StashFiles.Clear();
+        SelectedFile = null;
+        _selectedFiles.Clear();
+        SelectedFileCount = 0;
+        DiffRows.Clear();
+        _currentDiff = null;
+        ClearImagePreview();
+        DiffEmptyMessage = "History is not available yet";
+        DiffOverlayMessage = "History coming soon";
+        OnPropertyChanged(nameof(FileListHeader));
+        OnPropertyChanged(nameof(DiffFooterText));
+    }
+
+    [RelayCommand]
+    private async Task SelectStashAsync(StashInfo? stash)
+    {
+        if (stash is null || _repoPath is null) return;
+        WorkspaceMode = WorkspaceMode.Stash;
+        SelectedStash = stash;
+        SelectedFile = null;
+        _selectedFiles.Clear();
+        SelectedFileCount = 0;
+        DiffRows.Clear();
+        _currentDiff = null;
+        ClearImagePreview();
+        DiffEmptyMessage = "Select a file to view its diff";
+        DiffOverlayMessage = null;
+        CanStageFromDiff = false;
+        StagingDisabledReason = "Stash diffs are read-only.";
+        OnPropertyChanged(nameof(CanStageLines));
+        OnPropertyChanged(nameof(CanUnstageLines));
+        OnPropertyChanged(nameof(CanDiscardLines));
+        OnPropertyChanged(nameof(FileListHeader));
+
+        try
+        {
+            var files = await _stash.GetStashFilesAsync(_repoPath, stash.Index);
+            StashFiles.Clear();
+            foreach (var (path, kind) in files.Where(f =>
+                         string.IsNullOrWhiteSpace(FileFilter)
+                         || f.Path.Value.Contains(FileFilter, StringComparison.OrdinalIgnoreCase)
+                         || f.Path.Name.Contains(FileFilter, StringComparison.OrdinalIgnoreCase)))
+            {
+                StashFiles.Add(new FileItemViewModel(path, kind, isStagedList: false));
+            }
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to load stash: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private async Task ApplyStashAsync(StashInfo? stash)
+    {
+        stash ??= SelectedStash;
+        if (_repoPath is null || stash is null) return;
+        try
+        {
+            await _stash.ApplyStashAsync(_repoPath, stash.Index);
+            _notifications.Info($"Applied {stash.Ref}");
+            SelectFileStatus();
+            await RefreshAsync();
+            await LoadStashesAsync();
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Apply stash failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private async Task StashAllChangesAsync()
+    {
+        if (_repoPath is null) return;
+        if (WorkingCopyChangeCount == 0)
+        {
+            _notifications.Info("No local changes to stash.");
+            return;
+        }
+
+        IsStashing = true;
+        try
+        {
+            await _stash.StashPushAsync(_repoPath, message: null, includeUntracked: true);
+            SelectFileStatus();
+            await RefreshAsync();
+            await LoadStashesAsync();
+            _notifications.Info("Changes stashed.");
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Stash failed: {ex.Message}");
+        }
+        finally
+        {
+            IsStashing = false;
+        }
+    }
+
     private string AbsolutePathFor(FileItemViewModel file) =>
         Path.GetFullPath(Path.Combine(_repoPath!, file.Path.Value.Replace('/', Path.DirectorySeparatorChar)));
 
@@ -555,8 +760,16 @@ public partial class WorkingCopyViewModel : ObservableObject
         ClearImagePreview();
         if (file is null || _repoPath is null)
         {
-            DiffEmptyMessage = "Select a file to view its diff";
+            DiffEmptyMessage = IsHistoryMode
+                ? "History is not available yet"
+                : "Select a file to view its diff";
             OnPropertyChanged(nameof(DiffFooterText));
+            return;
+        }
+
+        if (IsStashMode)
+        {
+            await LoadStashDiffAsync(file, ct);
             return;
         }
 
@@ -1361,9 +1574,101 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task LoadBranchesAsync()
     {
         if (_repoPath is null) return;
-        Branches.Clear();
-        foreach (var b in await _branches.ListBranchesAsync(_repoPath))
-            Branches.Add(b);
+        var listed = await _branches.ListBranchesAsync(_repoPath);
+        await InvokeOnUiAsync(() =>
+        {
+            Branches.Clear();
+            foreach (var b in listed.Where(b => !b.IsRemote))
+                Branches.Add(b);
+        });
+    }
+
+    private async Task LoadStashesAsync()
+    {
+        if (_repoPath is null) return;
+        try
+        {
+            var listed = await _stash.ListStashesAsync(_repoPath);
+            await InvokeOnUiAsync(() =>
+            {
+                var selectedIndex = SelectedStash?.Index;
+                Stashes.Clear();
+                foreach (var s in listed)
+                    Stashes.Add(s);
+                if (selectedIndex is int idx)
+                    SelectedStash = Stashes.FirstOrDefault(s => s.Index == idx);
+            });
+        }
+        catch
+        {
+            // Stash list failure should not block status refresh.
+        }
+    }
+
+    private async Task LoadStashDiffAsync(FileItemViewModel file, CancellationToken ct)
+    {
+        if (_repoPath is null || SelectedStash is null) return;
+
+        CanStageFromDiff = false;
+        StagingDisabledReason = "Stash diffs are read-only.";
+        OnPropertyChanged(nameof(CanStageLines));
+        OnPropertyChanged(nameof(CanUnstageLines));
+        OnPropertyChanged(nameof(CanDiscardLines));
+
+        IsLoadingDiff = true;
+        try
+        {
+            var options = BuildDiffOptions();
+            var rawPatch = await _stash.GetStashPatchAsync(_repoPath, SelectedStash.Index, file.Path, options, ct);
+            ct.ThrowIfCancellationRequested();
+
+            FileDiff diff;
+            if (string.IsNullOrWhiteSpace(rawPatch) && file.Kind is ChangeKind.Added or ChangeKind.Untracked)
+            {
+                // Untracked files in a stash may only appear via the untracked commit; fall back to empty.
+                diff = UntrackedFileDiff.Create(file.Path, string.Empty, DiffTarget.HeadToWorktree);
+            }
+            else
+            {
+                diff = PatchParser.Parse(rawPatch, DiffTarget.HeadToWorktree);
+            }
+
+            _currentDiff = ApplyIntraLine(diff);
+            UpdateDiffStats(_currentDiff);
+
+            if (IsImagePath(file.Path.Value))
+            {
+                // Stash image preview: show after-side only when we cannot resolve both blobs easily.
+                ClearImagePreview();
+                IsImagePreview = false;
+                DiffEmptyMessage = "Image preview is not available for stash entries yet";
+            }
+            else if (_currentDiff.IsBinary)
+            {
+                DiffEmptyMessage = "Binary file";
+            }
+            else
+            {
+                ProjectRows(_currentDiff);
+                DiffEmptyMessage = DiffRows.Count == 0 ? "No differences" : "Select a file to view its diff";
+            }
+
+            OnPropertyChanged(nameof(DiffFooterText));
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored
+        }
+        catch (Exception ex)
+        {
+            DiffEmptyMessage = $"Failed to load stash diff: {ex.Message}";
+            OnPropertyChanged(nameof(DiffFooterText));
+        }
+        finally
+        {
+            IsLoadingDiff = false;
+            UpdateDiffOverlay();
+        }
     }
 
     private static async Task InvokeOnUiAsync(Action action)

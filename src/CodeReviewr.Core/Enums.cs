@@ -61,3 +61,11 @@ public enum CancellationClass
     /// <summary>checkout, pull, merge — request abort, then run defined recovery.</summary>
     AbortableNotCancellable,
 }
+
+/// <summary>Which middle/right pane content the sidebar currently drives.</summary>
+public enum WorkspaceMode
+{
+    FileStatus,
+    History,
+    Stash,
+}

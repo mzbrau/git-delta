@@ -108,17 +108,38 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnToggleExplorer(object? sender, RoutedEventArgs e) =>
-        Vm.WorkingCopy.ExplorerExpanded = !Vm.WorkingCopy.ExplorerExpanded;
+    private void OnToggleWorkspace(object? sender, RoutedEventArgs e) =>
+        Vm.WorkingCopy.WorkspaceExpanded = !Vm.WorkingCopy.WorkspaceExpanded;
 
     private void OnToggleBranches(object? sender, RoutedEventArgs e) =>
         Vm.WorkingCopy.BranchesExpanded = !Vm.WorkingCopy.BranchesExpanded;
+
+    private void OnToggleStashes(object? sender, RoutedEventArgs e) =>
+        Vm.WorkingCopy.StashesExpanded = !Vm.WorkingCopy.StashesExpanded;
+
+    private void OnTogglePullRequests(object? sender, RoutedEventArgs e) =>
+        Vm.WorkingCopy.PullRequestsExpanded = !Vm.WorkingCopy.PullRequestsExpanded;
+
+    private void OnTogglePrRequested(object? sender, RoutedEventArgs e) =>
+        Vm.WorkingCopy.PrRequestedExpanded = !Vm.WorkingCopy.PrRequestedExpanded;
+
+    private void OnTogglePrRaised(object? sender, RoutedEventArgs e) =>
+        Vm.WorkingCopy.PrRaisedExpanded = !Vm.WorkingCopy.PrRaisedExpanded;
 
     private void OnToggleStaged(object? sender, RoutedEventArgs e) =>
         Vm.WorkingCopy.StagedExpanded = !Vm.WorkingCopy.StagedExpanded;
 
     private void OnToggleUnstaged(object? sender, RoutedEventArgs e) =>
         Vm.WorkingCopy.UnstagedExpanded = !Vm.WorkingCopy.UnstagedExpanded;
+
+    private void OnStashFileSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ListBox list) return;
+        if (list.SelectedItem is FileItemViewModel file)
+            Vm.WorkingCopy.SetFileSelection([file]);
+        else
+            Vm.WorkingCopy.SetFileSelection([]);
+    }
 
     private void OnToggleNavigatorCollapsed(object? sender, RoutedEventArgs e)
     {

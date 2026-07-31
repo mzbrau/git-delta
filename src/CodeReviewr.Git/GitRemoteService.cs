@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
 using CodeReviewr.Core.Diagnostics;
 using CodeReviewr.Git.Internal;
@@ -50,5 +51,27 @@ public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGate g
             };
             await runner.RunAsync(repositoryPath, args, options, token).ConfigureAwait(false);
             CodeReviewrMeters.PullMs.Record(sw.Elapsed.TotalMilliseconds);
+        }, ct);
+
+    public Task<string?> GetRemoteUrlAsync(
+        string repositoryPath,
+        string remoteName = "origin",
+        CancellationToken ct = default) =>
+        gate.RunReadAsync(async token =>
+        {
+            try
+            {
+                var result = await runner.RunAsync(
+                    repositoryPath,
+                    ["remote", "get-url", remoteName],
+                    options: null,
+                    token).ConfigureAwait(false);
+                var url = result.Stdout.Trim();
+                return string.IsNullOrEmpty(url) ? null : url;
+            }
+            catch (GitException)
+            {
+                return null;
+            }
         }, ct);
 }

@@ -26,6 +26,15 @@ public sealed record BranchInfo(
     string? Upstream,
     string TipOid);
 
+public sealed record StashInfo(
+    int Index,
+    string Message,
+    string? BranchHint)
+{
+    public string Ref => $"stash@{{{Index}}}";
+    public string DisplayTitle => string.IsNullOrWhiteSpace(Message) ? Ref : Message;
+}
+
 public sealed record DiscardedEntry(
     FilePath Path,
     ContentId ObjectId,

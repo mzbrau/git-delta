@@ -88,6 +88,32 @@
               </StackPanel>
             </Button>
             <Border Width="1" Height="16" Background="{DynamicResource ForgeOutlineVariantBrush}" Margin="8,0" />
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.StashAllChangesCommand}"
+                    IsEnabled="{Binding WorkingCopy.IsRemoteBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}"
+                    ToolTip.Tip="Stash all changes including untracked files">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <ProgressBar Width="16" Height="16" IsIndeterminate="True"
+                             IsVisible="{Binding WorkingCopy.IsStashing}" />
+                <icons:MaterialIcon Kind="Archive" Width="16" Height="16"
+                                    IsVisible="{Binding WorkingCopy.IsStashing, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                <TextBlock Text="Stash" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.ViewRemoteCommand}"
+                    ToolTip.Tip="Open remote in browser">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <icons:MaterialIcon Kind="Web" Width="16" Height="16" />
+                <TextBlock Text="View Remote" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.RevealRepositoryInFileManagerCommand}"
+                    ToolTip.Tip="{Binding WorkingCopy.RevealInFileManagerLabel}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <icons:MaterialIcon Kind="FolderOpen" Width="16" Height="16" />
+                <TextBlock Text="{Binding WorkingCopy.RevealInFileManagerLabel}" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Border Width="1" Height="16" Background="{DynamicResource ForgeOutlineVariantBrush}" Margin="8,0" />
             <Button Classes="Ghost">
               <StackPanel Orientation="Horizontal" Spacing="4">
                 <icons:MaterialIcon Kind="SourceBranch" Width="16" Height="16" />
@@ -188,30 +214,22 @@
                 IsVisible="{Binding IsNavigatorCollapsed}">
           <Button Classes="Ghost" HorizontalAlignment="Stretch" VerticalAlignment="Top"
                   Margin="0,8,0,0" Padding="4" Click="OnToggleNavigatorCollapsed"
-                  ToolTip.Tip="Expand navigator">
+                  ToolTip.Tip="Expand sidebar">
             <icons:MaterialIcon Kind="ChevronRight" Width="18" Height="18" />
           </Button>
         </Border>
 
-        <!-- Navigator -->
+        <!-- Sidebar -->
         <Border Grid.Column="0" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
                 BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0"
                 IsVisible="{Binding IsNavigatorCollapsed, Converter={x:Static conv:ForgeConverters.InvertBool}}">
           <DockPanel>
-            <Border DockPanel.Dock="Top" Padding="12,12"
+            <Border DockPanel.Dock="Top" Padding="8,8"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-              <DockPanel>
-                <Button DockPanel.Dock="Right" Classes="Ghost" Padding="4"
-                        Click="OnToggleNavigatorCollapsed" ToolTip.Tip="Collapse navigator">
-                  <icons:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" />
-                </Button>
-                <Border DockPanel.Dock="Right" Classes="Chip" Margin="0,0,4,0"
-                        IsVisible="{Binding WorkingCopy.StatusUpdated}">
-                  <TextBlock Text="Updated" FontSize="10"
-                             Foreground="{DynamicResource ForgeOnSecondaryContainerBrush}" />
-                </Border>
-                <TextBlock Text="NAVIGATOR" Classes="PanelHeader" VerticalAlignment="Center" />
-              </DockPanel>
+              <Button Classes="Ghost" HorizontalAlignment="Right" Padding="4"
+                      Click="OnToggleNavigatorCollapsed" ToolTip.Tip="Collapse sidebar">
+                <icons:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" />
+              </Button>
             </Border>
 
             <Border DockPanel.Dock="Bottom" Padding="8"
@@ -226,75 +244,79 @@
             </Border>
 
             <ScrollViewer>
-              <StackPanel Margin="0,8,0,8">
-                <!-- Explorer -->
+              <StackPanel Margin="0,8,0,8" Spacing="2">
+                <!-- WORKSPACE -->
                 <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                        Padding="16,4" Click="OnToggleExplorer">
+                        Padding="12,4" Click="OnToggleWorkspace">
                   <StackPanel Orientation="Horizontal" Spacing="8">
-                    <icons:MaterialIcon Kind="{Binding WorkingCopy.ExplorerExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                    <icons:MaterialIcon Kind="{Binding WorkingCopy.WorkspaceExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                         Width="14" Height="14" />
-                    <TextBlock Text="EXPLORER" FontWeight="SemiBold" FontSize="11" />
+                    <icons:MaterialIcon Kind="Monitor" Width="14" Height="14" Opacity="0.7" />
+                    <TextBlock Text="WORKSPACE" FontWeight="SemiBold" FontSize="11"
+                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
                   </StackPanel>
                 </Button>
-                <Border IsVisible="{Binding WorkingCopy.ExplorerExpanded}"
-                        Background="#332d3449" Padding="0,4">
-                  <Border Background="{DynamicResource ForgeSurfaceVariantBrush}" Margin="0" Padding="32,6,16,6">
+                <StackPanel IsVisible="{Binding WorkingCopy.WorkspaceExpanded}" Spacing="1">
+                  <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Padding="28,6,12,6" Command="{Binding WorkingCopy.SelectFileStatusCommand}">
+                    <Button.Styles>
+                      <Style Selector="Button">
+                        <Setter Property="Background" Value="Transparent" />
+                      </Style>
+                      <Style Selector="Button:pointerover /template/ ContentPresenter">
+                        <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+                      </Style>
+                    </Button.Styles>
                     <DockPanel>
                       <TextBlock DockPanel.Dock="Right" Text="{Binding WorkingCopy.WorkingCopyChangeCount}"
                                  FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.7"
-                                 VerticalAlignment="Center" />
+                                 VerticalAlignment="Center"
+                                 IsVisible="{Binding WorkingCopy.WorkingCopyChangeCount, Converter={x:Static conv:ForgeConverters.IsPositive}}" />
                       <StackPanel Orientation="Horizontal" Spacing="8">
-                        <icons:MaterialIcon Kind="NoteEdit" Width="16" Height="16" />
-                        <TextBlock Text="Working Copy" VerticalAlignment="Center" />
+                        <icons:MaterialIcon Kind="FileDocumentOutline" Width="16" Height="16" />
+                        <TextBlock Text="File Status" VerticalAlignment="Center"
+                                   FontWeight="{Binding WorkingCopy.IsFileStatusNavSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
                       </StackPanel>
                     </DockPanel>
-                  </Border>
-                </Border>
+                  </Button>
+                  <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Padding="28,6,12,6" Command="{Binding WorkingCopy.SelectHistoryCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <icons:MaterialIcon Kind="History" Width="16" Height="16" />
+                      <TextBlock Text="History" VerticalAlignment="Center"
+                                 FontWeight="{Binding WorkingCopy.IsHistoryNavSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                    </StackPanel>
+                  </Button>
+                </StackPanel>
 
-                <!-- Stubs -->
-                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="16,4" IsEnabled="False">
-                  <StackPanel Orientation="Horizontal" Spacing="8" Opacity="0.55">
-                    <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
-                    <TextBlock Text="LOCAL FILES" FontWeight="SemiBold" FontSize="11" />
-                  </StackPanel>
-                </Button>
-                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="16,4" IsEnabled="False">
-                  <StackPanel Orientation="Horizontal" Spacing="8" Opacity="0.55">
-                    <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
-                    <TextBlock Text="CODE REVIEWS" FontWeight="SemiBold" FontSize="11" />
-                  </StackPanel>
-                </Button>
-                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="16,4" IsEnabled="False">
-                  <StackPanel Orientation="Horizontal" Spacing="8" Opacity="0.55">
-                    <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
-                    <TextBlock Text="HISTORY" FontWeight="SemiBold" FontSize="11" />
-                  </StackPanel>
-                </Button>
-                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="16,4" IsEnabled="False">
-                  <StackPanel Orientation="Horizontal" Spacing="8" Opacity="0.55">
-                    <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
-                    <TextBlock Text="STASHES" FontWeight="SemiBold" FontSize="11" />
-                  </StackPanel>
-                </Button>
-
-                <!-- Branches -->
+                <!-- BRANCHES -->
                 <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                        Padding="16,4" Click="OnToggleBranches">
+                        Padding="12,4" Click="OnToggleBranches" Margin="0,8,0,0">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <icons:MaterialIcon Kind="{Binding WorkingCopy.BranchesExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                         Width="14" Height="14" />
-                    <TextBlock Text="BRANCHES" FontWeight="SemiBold" FontSize="11" />
+                    <icons:MaterialIcon Kind="SourceBranch" Width="14" Height="14" Opacity="0.7" />
+                    <TextBlock Text="BRANCHES" FontWeight="SemiBold" FontSize="11"
+                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
                   </StackPanel>
                 </Button>
                 <ItemsControl ItemsSource="{Binding WorkingCopy.Branches}"
                               IsVisible="{Binding WorkingCopy.BranchesExpanded}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="core:BranchInfo">
-                      <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                              Padding="32,4,16,4"
-                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.CheckoutBranchCommand}"
-                              CommandParameter="{Binding}">
+                      <Border Padding="28,4,12,4">
+                        <Border.ContextMenu>
+                          <ContextMenu>
+                            <MenuItem Header="Check Out"
+                                      Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.CheckoutBranchCommand}"
+                                      CommandParameter="{Binding}" />
+                          </ContextMenu>
+                        </Border.ContextMenu>
                         <DockPanel>
+                          <icons:MaterialIcon DockPanel.Dock="Left" Kind="Circle" Width="8" Height="8"
+                                              Margin="0,0,8,0" VerticalAlignment="Center"
+                                              Foreground="{DynamicResource ForgePrimaryBrush}"
+                                              IsVisible="{Binding IsCurrent}" />
                           <icons:MaterialIcon DockPanel.Dock="Right" Kind="Check" Width="14" Height="14"
                                               Foreground="{DynamicResource ForgePrimaryBrush}"
                                               IsVisible="{Binding IsCurrent}" />
@@ -304,10 +326,80 @@
                                        Foreground="{DynamicResource ForgeOnSurfaceBrush}" />
                           </StackPanel>
                         </DockPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- STASHES -->
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="12,4" Click="OnToggleStashes" Margin="0,8,0,0">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <icons:MaterialIcon Kind="{Binding WorkingCopy.StashesExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                        Width="14" Height="14" />
+                    <icons:MaterialIcon Kind="Archive" Width="14" Height="14" Opacity="0.7" />
+                    <TextBlock Text="STASHES" FontWeight="SemiBold" FontSize="11"
+                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                  </StackPanel>
+                </Button>
+                <ItemsControl ItemsSource="{Binding WorkingCopy.Stashes}"
+                              IsVisible="{Binding WorkingCopy.StashesExpanded}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="core:StashInfo">
+                      <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                              Padding="28,4,12,4"
+                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.SelectStashCommand}"
+                              CommandParameter="{Binding}">
+                        <Button.ContextMenu>
+                          <ContextMenu>
+                            <MenuItem Header="Apply"
+                                      Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.ApplyStashCommand}"
+                                      CommandParameter="{Binding}" />
+                          </ContextMenu>
+                        </Button.ContextMenu>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <icons:MaterialIcon Kind="Archive" Width="16" Height="16" />
+                          <TextBlock Text="{Binding DisplayTitle}" VerticalAlignment="Center"
+                                     TextTrimming="CharacterEllipsis" MaxWidth="180" />
+                        </StackPanel>
                       </Button>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
+
+                <!-- PULL REQUESTS -->
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="12,4" Click="OnTogglePullRequests" Margin="0,8,0,0">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <icons:MaterialIcon Kind="{Binding WorkingCopy.PullRequestsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                        Width="14" Height="14" />
+                    <icons:MaterialIcon Kind="SourcePull" Width="14" Height="14" Opacity="0.7" />
+                    <TextBlock Text="PULL REQUESTS" FontWeight="SemiBold" FontSize="11"
+                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                  </StackPanel>
+                </Button>
+                <StackPanel IsVisible="{Binding WorkingCopy.PullRequestsExpanded}" Spacing="1">
+                  <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Padding="28,4,12,4" Click="OnTogglePrRequested">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <icons:MaterialIcon Kind="{Binding WorkingCopy.PrRequestedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                          Width="12" Height="12" />
+                      <TextBlock Text="Requested" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
+                    </StackPanel>
+                  </Button>
+                  <TextBlock Text="No pull requests" FontSize="11" Opacity="0.45" Margin="48,2,12,6"
+                             IsVisible="{Binding WorkingCopy.PrRequestedExpanded}" />
+                  <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Padding="28,4,12,4" Click="OnTogglePrRaised">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <icons:MaterialIcon Kind="{Binding WorkingCopy.PrRaisedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                          Width="12" Height="12" />
+                      <TextBlock Text="Raised" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
+                    </StackPanel>
+                  </Button>
+                  <TextBlock Text="No pull requests" FontSize="11" Opacity="0.45" Margin="48,2,12,6"
+                             IsVisible="{Binding WorkingCopy.PrRaisedExpanded}" />
+                </StackPanel>
               </StackPanel>
             </ScrollViewer>
           </DockPanel>
@@ -325,11 +417,12 @@
             <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
                     Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-              <TextBlock Text="File Status" FontWeight="SemiBold" VerticalAlignment="Center" />
+              <TextBlock Text="{Binding WorkingCopy.FileListHeader}" FontWeight="SemiBold" VerticalAlignment="Center" />
             </Border>
 
             <Border DockPanel.Dock="Top" Padding="8,6"
-                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1"
+                    IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <Grid>
                 <TextBox Classes="Forge" Text="{Binding WorkingCopy.FileFilter}"
                          PlaceholderText="Filter files…" Padding="8,6,28,6" />
@@ -347,7 +440,7 @@
             <Border DockPanel.Dock="Bottom" Padding="12"
                     Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
-                    IsVisible="{Binding WorkingCopy.HasStagedFiles}">
+                    IsVisible="{Binding WorkingCopy.ShowCommitDock}">
               <StackPanel Spacing="8">
                 <TextBox Classes="Forge" AcceptsReturn="True" Height="80"
                          Text="{Binding WorkingCopy.CommitMessage}"
@@ -364,10 +457,61 @@
               </StackPanel>
             </Border>
 
-            <ScrollViewer>
+            <!-- History placeholder -->
+            <Border IsVisible="{Binding WorkingCopy.IsHistoryMode}"
+                    VerticalAlignment="Center" HorizontalAlignment="Center" Margin="24">
+              <StackPanel Spacing="8" HorizontalAlignment="Center">
+                <icons:MaterialIcon Kind="History" Width="32" Height="32" Opacity="0.4"
+                                    HorizontalAlignment="Center" />
+                <TextBlock Text="History coming soon" Opacity="0.55" HorizontalAlignment="Center" />
+              </StackPanel>
+            </Border>
+
+            <ScrollViewer IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <StackPanel Spacing="16" Margin="8,8,8,12">
+                <!-- Stash files -->
+                <StackPanel IsVisible="{Binding WorkingCopy.IsStashMode}">
+                  <TextBlock Text="STASHED FILES" Classes="SectionLabel" Margin="8,0,8,4" />
+                  <ListBox x:Name="StashFileList"
+                           ItemsSource="{Binding WorkingCopy.StashFiles}"
+                           SelectionMode="Single"
+                           SelectionChanged="OnStashFileSelectionChanged"
+                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel />
+                      </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:FileItemViewModel">
+                        <Border Padding="8,4" CornerRadius="4">
+                          <DockPanel>
+                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                    Background="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                              <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold"
+                                         Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                            </Border>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
+                                                  Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                              <TextBlock Text="{Binding Name}" Classes="MonoPath" VerticalAlignment="Center" />
+                            </StackPanel>
+                          </DockPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.Styles>
+                      <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="32" />
+                      </Style>
+                    </ListBox.Styles>
+                  </ListBox>
+                </StackPanel>
+
                 <!-- Staged -->
-                <StackPanel>
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
                       <Button Classes="Link" Content="Discard"
@@ -441,7 +585,7 @@
                 </StackPanel>
 
                 <!-- Unstaged -->
-                <StackPanel>
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
                       <Button Classes="Link" Content="Discard"
@@ -515,7 +659,8 @@
                 </StackPanel>
 
                 <!-- Conflicted -->
-                <StackPanel IsVisible="{Binding WorkingCopy.HasConflictedFiles}">
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
+                  <StackPanel IsVisible="{Binding WorkingCopy.HasConflictedFiles}">
                   <TextBlock Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
                              Foreground="{DynamicResource ForgeErrorBrush}" />
                   <ListBox x:Name="ConflictedFileList"
@@ -552,6 +697,7 @@
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                   </ListBox>
+                  </StackPanel>
                 </StackPanel>
               </StackPanel>
             </ScrollViewer>

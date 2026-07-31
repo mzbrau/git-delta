@@ -110,6 +110,7 @@ public interface IGitRemoteService
 {
     Task PushAsync(string repositoryPath, IProgress<string>? progress, CancellationToken ct = default);
     Task PullAsync(string repositoryPath, PullMode mode, IProgress<string>? progress, CancellationToken ct = default);
+    Task<string?> GetRemoteUrlAsync(string repositoryPath, string remoteName = "origin", CancellationToken ct = default);
 }
 
 public enum PullMode
@@ -135,8 +136,18 @@ public interface IGitConflictService
 
 public interface IGitStashService
 {
-    Task StashPushAsync(string repositoryPath, string? message, CancellationToken ct = default);
+    Task<IReadOnlyList<StashInfo>> ListStashesAsync(string repositoryPath, CancellationToken ct = default);
+    Task StashPushAsync(string repositoryPath, string? message, bool includeUntracked = false, CancellationToken ct = default);
+    Task ApplyStashAsync(string repositoryPath, int index, CancellationToken ct = default);
     Task StashPopAsync(string repositoryPath, CancellationToken ct = default);
+    Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetStashFilesAsync(
+        string repositoryPath, int index, CancellationToken ct = default);
+    Task<string> GetStashPatchAsync(
+        string repositoryPath,
+        int index,
+        FilePath path,
+        DiffOptions options,
+        CancellationToken ct = default);
 }
 
 public interface IDiffCache

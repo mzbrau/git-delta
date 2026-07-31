@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="CodeReviewr.App/CodeReviewr.App.csproj" />
+    <Project Path="CodeReviewr.Core/CodeReviewr.Core.csproj" />
+    <Project Path="CodeReviewr.Diff/CodeReviewr.Diff.csproj" />
+    <Project Path="CodeReviewr.Git/CodeReviewr.Git.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="../tests/CodeReviewr.App.Tests/CodeReviewr.App.Tests.csproj" />
+    <Project Path="../tests/CodeReviewr.Benchmarks/CodeReviewr.Benchmarks.csproj" />
+    <Project Path="../tests/CodeReviewr.Core.Tests/CodeReviewr.Core.Tests.csproj" />
+    <Project Path="../tests/CodeReviewr.Diff.Tests/CodeReviewr.Diff.Tests.csproj" />
+    <Project Path="../tests/CodeReviewr.Git.Tests/CodeReviewr.Git.Tests.csproj" />
+    <Project Path="../tests/CodeReviewr.IntegrationTests/CodeReviewr.IntegrationTests.csproj" />
+    <Project Path="../tests/CodeReviewr.TestSupport/CodeReviewr.TestSupport.csproj" />
+  </Folder>
+</Solution>

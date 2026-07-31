@@ -25,9 +25,9 @@ git --version
 ## Development
 
 ```bash
-dotnet restore CodeReviewr.slnx
-dotnet build CodeReviewr.slnx
-dotnet test CodeReviewr.slnx
+dotnet restore src/CodeReviewr.slnx
+dotnet build src/CodeReviewr.slnx
+dotnet test src/CodeReviewr.slnx
 dotnet run --project src/CodeReviewr.App
 ```
 
