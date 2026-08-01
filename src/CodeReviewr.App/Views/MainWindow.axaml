@@ -927,7 +927,14 @@
             <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
                     Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-              <TextBlock Text="History" FontWeight="SemiBold" VerticalAlignment="Center" />
+              <DockPanel>
+                <TextBlock Text="Refreshing…"
+                           DockPanel.Dock="Right"
+                           FontSize="10" VerticalAlignment="Center"
+                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                           IsVisible="{Binding WorkingCopy.IsHistoryRefreshing}" />
+                <TextBlock Text="History" FontWeight="SemiBold" VerticalAlignment="Center" />
+              </DockPanel>
             </Border>
 
             <Border DockPanel.Dock="Top" Padding="8,6"
@@ -951,7 +958,7 @@
               <Button Classes="Ghost" Content="Load more"
                       Command="{Binding WorkingCopy.LoadMoreHistoryCommand}"
                       HorizontalAlignment="Center"
-                      IsEnabled="{Binding WorkingCopy.IsHistoryLoading, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                      IsEnabled="{Binding WorkingCopy.CanLoadMoreHistory}" />
             </Border>
 
             <Border DockPanel.Dock="Bottom" Padding="8"

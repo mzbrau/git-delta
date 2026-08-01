@@ -284,13 +284,33 @@ public partial class MainWindow : Window
                 var list = file.IsConflicted ? ConflictedFileList
                     : file.IsStagedList ? StagedFileList
                     : UnstagedFileList;
-                list.SelectedItems?.Add(file);
+                // Only select items that exist in the list — prevents phantom SelectedItems
+                // when a stale History FileItemViewModel leaks into File Status sync.
+                var match = FindInList(list, file);
+                if (match is not null)
+                    list.SelectedItems?.Add(match);
             }
         }
         finally
         {
             _suppressSelectionSync = false;
         }
+    }
+
+    private static FileItemViewModel? FindInList(ListBox? list, FileItemViewModel file)
+    {
+        if (list?.Items is null) return null;
+        foreach (var item in list.Items)
+        {
+            if (item is FileItemViewModel candidate
+                && string.Equals(candidate.Path.Value, file.Path.Value, StringComparison.Ordinal)
+                && candidate.IsStagedList == file.IsStagedList)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private static void CollectSelected(ListBox? list, List<FileItemViewModel> into)

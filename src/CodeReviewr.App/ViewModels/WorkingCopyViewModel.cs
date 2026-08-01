@@ -40,6 +40,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     private CancellationTokenSource? _diffCts;
     private CancellationTokenSource? _prefetchCts;
     private CancellationTokenSource? _historyCts;
+    private CancellationTokenSource? _commitFilesCts;
+    private string? _cachedHistorySelectedPath;
     private string? _repoPath;
     private RepositoryStatus? _lastStatus;
     private readonly DiffWarmStore _warmStore;
@@ -116,7 +118,12 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
 
     /// <summary>Called when the main window is activated so the watcher can debounce a soft refresh.</summary>
-    public void NotifyWindowActivated() => _watcher.NotifyWindowActivated();
+    public void NotifyWindowActivated()
+    {
+        _watcher.NotifyWindowActivated();
+        if (IsHistoryMode && _allHistoryCommits.Count > 0)
+            _ = SoftRefreshHistoryAsync();
+    }
 
     /// <summary>Updates the warm-store prefetch concurrency cap (clamped 1–8).</summary>
     public void SetDiffPrefetchConcurrency(int value) =>
@@ -175,6 +182,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private string _historySearchText = "";
     [ObservableProperty] private bool _hasHistorySearch;
     [ObservableProperty] private bool _isHistoryLoading;
+    [ObservableProperty] private bool _isHistoryRefreshing;
     [ObservableProperty] private bool _hasMoreHistory;
     [ObservableProperty] private bool _isPushing;
     [ObservableProperty] private bool _isPulling;
@@ -231,6 +239,9 @@ public partial class WorkingCopyViewModel : ObservableObject
     public bool IsFileStatusMode => WorkspaceMode == WorkspaceMode.FileStatus;
     public bool IsHistoryMode => WorkspaceMode == WorkspaceMode.History;
     public bool IsStashMode => WorkspaceMode == WorkspaceMode.Stash;
+
+    public bool CanLoadMoreHistory =>
+        HasMoreHistory && !IsHistoryLoading && !IsHistoryRefreshing;
 
     public string FileListHeader => WorkspaceMode switch
     {
@@ -321,6 +332,10 @@ public partial class WorkingCopyViewModel : ObservableObject
         HasHistorySearch = !string.IsNullOrWhiteSpace(value);
         ApplyHistoryFilter();
     }
+
+    partial void OnIsHistoryLoadingChanged(bool value) => OnPropertyChanged(nameof(CanLoadMoreHistory));
+    partial void OnIsHistoryRefreshingChanged(bool value) => OnPropertyChanged(nameof(CanLoadMoreHistory));
+    partial void OnHasMoreHistoryChanged(bool value) => OnPropertyChanged(nameof(CanLoadMoreHistory));
 
     [RelayCommand]
     private void ClearFileFilter() => FileFilter = "";
@@ -726,23 +741,29 @@ public partial class WorkingCopyViewModel : ObservableObject
     [RelayCommand]
     private void SelectFileStatus()
     {
+        if (IsHistoryMode)
+        {
+            _cachedHistorySelectedPath = SelectedFile?.Path.Value
+                                         ?? _selectedFiles.FirstOrDefault()?.Path.Value;
+            CancelCommitFilesLoad();
+        }
+
         WorkspaceMode = WorkspaceMode.FileStatus;
         SelectedStash = null;
-        SelectedCommit = null;
-        _allHistoryFiles.Clear();
-        HistoryFiles.Clear();
+        // Keep history commits / SelectedCommit / HistoryFiles cached for instant revisit.
+        _selectedFiles.Clear();
+        SelectedFileCount = 0;
+        SelectedFile = null;
+        DiffRows.Clear();
+        _currentDiff = null;
+        ClearImagePreview();
         DiffEmptyMessage = "Select a file to view its diff";
         DiffOverlayMessage = null;
-        if (_selectedFiles.Count == 1)
-            _ = LoadDiffForSelectionAsync(_selectedFiles[0]);
-        else
-        {
-            DiffRows.Clear();
-            SelectedFile = null;
-        }
         ScheduleFileStatusPrefetch();
         OnPropertyChanged(nameof(FileListHeader));
         OnPropertyChanged(nameof(ShowCommitDetailsDock));
+        OnPropertyChanged(nameof(DiffFooterText));
+        SelectionSyncRequested?.Invoke();
     }
 
     [RelayCommand]
@@ -751,6 +772,23 @@ public partial class WorkingCopyViewModel : ObservableObject
         WorkspaceMode = WorkspaceMode.History;
         SelectedStash = null;
         StashFiles.Clear();
+        CanStageFromDiff = false;
+        StagingDisabledReason = "History diffs are read-only.";
+        OnPropertyChanged(nameof(CanStageLines));
+        OnPropertyChanged(nameof(CanUnstageLines));
+        OnPropertyChanged(nameof(CanDiscardLines));
+        OnPropertyChanged(nameof(FileListHeader));
+        OnPropertyChanged(nameof(DiffFooterText));
+        OnPropertyChanged(nameof(ShowCommitDetailsDock));
+
+        if (_allHistoryCommits.Count > 0)
+        {
+            ApplyHistoryFilter(preserveSelection: true);
+            RestoreHistoryPresentationFromCache();
+            _ = SoftRefreshHistoryAsync();
+            return;
+        }
+
         SelectedFile = null;
         _selectedFiles.Clear();
         SelectedFileCount = 0;
@@ -762,22 +800,93 @@ public partial class WorkingCopyViewModel : ObservableObject
         HistoryFiles.Clear();
         DiffEmptyMessage = "Select a commit";
         DiffOverlayMessage = null;
-        CanStageFromDiff = false;
-        StagingDisabledReason = "History diffs are read-only.";
-        OnPropertyChanged(nameof(CanStageLines));
-        OnPropertyChanged(nameof(CanUnstageLines));
-        OnPropertyChanged(nameof(CanDiscardLines));
-        OnPropertyChanged(nameof(FileListHeader));
-        OnPropertyChanged(nameof(DiffFooterText));
-        OnPropertyChanged(nameof(ShowCommitDetailsDock));
         _ = LoadHistoryAsync(reset: true);
     }
 
     [RelayCommand]
     private async Task LoadMoreHistoryAsync()
     {
-        if (!HasMoreHistory || IsHistoryLoading) return;
+        if (!HasMoreHistory || IsHistoryLoading || IsHistoryRefreshing) return;
         await LoadHistoryAsync(reset: false);
+    }
+
+    /// <summary>
+    /// Re-shows the cached commit list / last selection without clearing, then loads the
+    /// selected history diff from the warm store when possible.
+    /// </summary>
+    private void RestoreHistoryPresentationFromCache()
+    {
+        if (SelectedCommit is null)
+        {
+            SelectedFile = null;
+            _selectedFiles.Clear();
+            SelectedFileCount = 0;
+            DiffRows.Clear();
+            _currentDiff = null;
+            ClearImagePreview();
+            DiffEmptyMessage = "Select a commit";
+            DiffOverlayMessage = null;
+            OnPropertyChanged(nameof(DiffFooterText));
+            SelectionSyncRequested?.Invoke();
+            return;
+        }
+
+        DiffEmptyMessage = _allHistoryFiles.Count == 0
+            ? "Select a file to view its diff"
+            : DiffEmptyMessage;
+        DiffOverlayMessage = null;
+
+        if (_allHistoryFiles.Count == 0)
+        {
+            SelectedFile = null;
+            _selectedFiles.Clear();
+            SelectedFileCount = 0;
+            DiffRows.Clear();
+            _currentDiff = null;
+            ClearImagePreview();
+            OnPropertyChanged(nameof(DiffFooterText));
+            SelectionSyncRequested?.Invoke();
+            // Files were not cached (e.g. only commits loaded); fetch for the selected commit.
+            _ = SelectCommitAsync(SelectedCommit);
+            return;
+        }
+
+        var previousPath = _cachedHistorySelectedPath;
+        _cachedHistorySelectedPath = null;
+
+        _suppressSelectionSync = true;
+        try
+        {
+            HistoryFiles.Clear();
+            foreach (var f in _allHistoryFiles.Where(MatchesHistoryFileFilter))
+                HistoryFiles.Add(f);
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
+
+        if (HistoryFiles.Count == 0)
+        {
+            SelectedFile = null;
+            _selectedFiles.Clear();
+            SelectedFileCount = 0;
+            DiffRows.Clear();
+            _currentDiff = null;
+            ClearImagePreview();
+            DiffEmptyMessage = "Select a file to view its diff";
+            OnPropertyChanged(nameof(DiffFooterText));
+            SelectionSyncRequested?.Invoke();
+            return;
+        }
+
+        var match = previousPath is not null
+            ? HistoryFiles.FirstOrDefault(f =>
+                string.Equals(f.Path.Value, previousPath, StringComparison.Ordinal))
+            : null;
+        match ??= HistoryFiles[0];
+        SetFileSelection([match]);
+        SelectionSyncRequested?.Invoke();
     }
 
     public void SelectCommit(CommitInfo? commit) => _ = SelectCommitAsync(commit);
@@ -785,6 +894,10 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task SelectCommitAsync(CommitInfo? commit)
     {
         if (!IsHistoryMode) return;
+
+        _commitFilesCts?.Cancel();
+        _commitFilesCts = new CancellationTokenSource();
+        var ct = _commitFilesCts.Token;
 
         SelectedCommit = commit;
         SelectedFile = null;
@@ -815,7 +928,15 @@ public partial class WorkingCopyViewModel : ObservableObject
 
         try
         {
-            var files = await _history.GetCommitFilesAsync(_repoPath, commit.Oid);
+            var files = await _history.GetCommitFilesAsync(_repoPath, commit.Oid, ct);
+            ct.ThrowIfCancellationRequested();
+            if (!IsHistoryMode
+                || SelectedCommit is null
+                || !string.Equals(SelectedCommit.Oid, commit.Oid, StringComparison.Ordinal))
+            {
+                return;
+            }
+
             _allHistoryFiles.Clear();
             foreach (var (path, kind) in files)
                 _allHistoryFiles.Add(new FileItemViewModel(path, kind, isStagedList: false));
@@ -823,6 +944,10 @@ public partial class WorkingCopyViewModel : ObservableObject
             ApplyHistoryFileFilter(autoSelectFirst: true);
             if (_allHistoryFiles.Count > 0)
                 ScheduleHistoryPrefetch(commit.Oid, _allHistoryFiles.ToList());
+        }
+        catch (OperationCanceledException)
+        {
+            // Leaving History or selecting another commit cancelled this load.
         }
         catch (Exception ex)
         {
@@ -832,6 +957,8 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     private void ApplyHistoryFileFilter(bool autoSelectFirst = false)
     {
+        if (!IsHistoryMode) return;
+
         var previousPath = _selectedFiles.FirstOrDefault()?.Path.Value
                            ?? SelectedFile?.Path.Value;
 
@@ -897,6 +1024,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         var ct = _historyCts.Token;
 
         IsHistoryLoading = true;
+        IsHistoryRefreshing = false;
         try
         {
             if (reset)
@@ -927,6 +1055,61 @@ public partial class WorkingCopyViewModel : ObservableObject
         finally
         {
             IsHistoryLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// Background refresh of the first history page without clearing the painted list.
+    /// Extra "Load more" pages are dropped when the new first page arrives.
+    /// </summary>
+    private async Task SoftRefreshHistoryAsync()
+    {
+        if (_repoPath is null || _allHistoryCommits.Count == 0) return;
+
+        _historyCts?.Cancel();
+        _historyCts = new CancellationTokenSource();
+        var ct = _historyCts.Token;
+
+        IsHistoryRefreshing = true;
+        try
+        {
+            var page = await _history.ListCommitsAsync(_repoPath, skip: 0, HistoryPageSize, ct);
+            ct.ThrowIfCancellationRequested();
+
+            _allHistoryCommits.Clear();
+            foreach (var c in page)
+                _allHistoryCommits.Add(c);
+
+            HasMoreHistory = page.Count >= HistoryPageSize;
+            ApplyHistoryFilter(preserveSelection: true);
+
+            if (SelectedCommit is null && IsHistoryMode)
+            {
+                _allHistoryFiles.Clear();
+                HistoryFiles.Clear();
+                SelectedFile = null;
+                _selectedFiles.Clear();
+                SelectedFileCount = 0;
+                DiffRows.Clear();
+                _currentDiff = null;
+                ClearImagePreview();
+                DiffEmptyMessage = "Select a commit";
+                DiffOverlayMessage = null;
+                OnPropertyChanged(nameof(DiffFooterText));
+                SelectionSyncRequested?.Invoke();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored — keep painted cache
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to refresh history: {ex.Message}");
+        }
+        finally
+        {
+            IsHistoryRefreshing = false;
         }
     }
 
@@ -979,15 +1162,24 @@ public partial class WorkingCopyViewModel : ObservableObject
     private void ClearHistoryState()
     {
         _historyCts?.Cancel();
+        CancelCommitFilesLoad();
         _allHistoryCommits.Clear();
         HistoryCommits.Clear();
         _allHistoryFiles.Clear();
         HistoryFiles.Clear();
         SelectedCommit = null;
+        _cachedHistorySelectedPath = null;
         HistorySearchText = "";
         HistoryFileFilter = "";
         HasMoreHistory = false;
         IsHistoryLoading = false;
+        IsHistoryRefreshing = false;
+    }
+
+    private void CancelCommitFilesLoad()
+    {
+        _commitFilesCts?.Cancel();
+        _commitFilesCts = null;
     }
 
     public static string FormatCommitDate(DateTimeOffset date)
@@ -1007,11 +1199,16 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task SelectStashAsync(StashInfo? stash)
     {
         if (stash is null || _repoPath is null) return;
+        if (IsHistoryMode)
+        {
+            _cachedHistorySelectedPath = SelectedFile?.Path.Value
+                                         ?? _selectedFiles.FirstOrDefault()?.Path.Value;
+            CancelCommitFilesLoad();
+        }
+
         WorkspaceMode = WorkspaceMode.Stash;
         SelectedStash = stash;
-        SelectedCommit = null;
-        _allHistoryFiles.Clear();
-        HistoryFiles.Clear();
+        // Keep history commits / SelectedCommit / HistoryFiles cached for instant revisit.
         SelectedFile = null;
         _selectedFiles.Clear();
         SelectedFileCount = 0;
@@ -2498,6 +2695,8 @@ public partial class WorkingCopyViewModel : ObservableObject
             CommitMessage = "";
             AmendCommit = false;
             await RefreshAsync();
+            if (_allHistoryCommits.Count > 0)
+                _ = SoftRefreshHistoryAsync();
             if (PushAfterCommit)
                 await ExecutePushAsync();
         }
