@@ -31,6 +31,17 @@ public sealed record AppSettings
     public double FileListWidth { get; set; } = 300;
     public bool NavigatorCollapsed { get; set; }
 
+    /// <summary>
+    /// Temporary diagnostics toggle: when true, every git subprocess is delayed by a random 1–5s
+    /// before starting. Used to test UI responsiveness under slow AV / disk environments.
+    /// </summary>
+    public bool SimulateSlowGit { get; set; }
+
+    /// <summary>
+    /// Max parallel background diff prefetch operations (clamped 1–8). Default 4.
+    /// </summary>
+    public int DiffPrefetchConcurrency { get; set; } = 4;
+
     public DiffOptions ToDiffOptions() => new(
         Algorithm: DiffAlgorithm,
         ContextLines: ContextLines,

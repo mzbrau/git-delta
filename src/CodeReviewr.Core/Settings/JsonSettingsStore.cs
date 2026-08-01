@@ -101,5 +101,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         NavigatorWidth = s.NavigatorWidth,
         FileListWidth = s.FileListWidth,
         NavigatorCollapsed = s.NavigatorCollapsed,
+        SimulateSlowGit = s.SimulateSlowGit,
+        DiffPrefetchConcurrency = s.DiffPrefetchConcurrency,
     };
 }

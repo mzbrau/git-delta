@@ -32,6 +32,12 @@ public partial class MainWindowViewModel : ObservableObject
         RecentRepositories = new(_settings.Current.RecentRepositories);
         DefaultDiffMode = _settings.Current.DefaultDiffMode;
         _theme = string.IsNullOrWhiteSpace(_settings.Current.Theme) ? "System" : _settings.Current.Theme;
+        _simulateSlowGit = _settings.Current.SimulateSlowGit;
+        _diffPrefetchConcurrency = DiffWarmStore.ClampConcurrency(
+            _settings.Current.DiffPrefetchConcurrency <= 0
+                ? DiffWarmStore.DefaultConcurrency
+                : _settings.Current.DiffPrefetchConcurrency);
+        WorkingCopy.SetDiffPrefetchConcurrency(_diffPrefetchConcurrency);
 
         _expandedNavigatorWidth = Math.Max(MinNavigatorWidth, _settings.Current.NavigatorWidth);
         _navigatorWidth = _settings.Current.NavigatorCollapsed
@@ -53,6 +59,8 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool _showSettings;
     [ObservableProperty] private DiffViewMode _defaultDiffMode;
     [ObservableProperty] private string _theme = "System";
+    [ObservableProperty] private bool _simulateSlowGit;
+    [ObservableProperty] private int _diffPrefetchConcurrency = DiffWarmStore.DefaultConcurrency;
     [ObservableProperty] private double _navigatorWidth;
     [ObservableProperty] private double _fileListWidth;
     [ObservableProperty] private bool _isNavigatorCollapsed;
@@ -200,5 +208,42 @@ public partial class MainWindowViewModel : ObservableObject
         _settings.Update(s => s.Theme = value);
         _ = _settings.SaveAsync();
         global::CodeReviewr.App.App.ApplyTheme(value);
+    }
+
+    public int[] DiffPrefetchConcurrencyOptions { get; } = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    public int DiffPrefetchConcurrencyIndex
+    {
+        get
+        {
+            var idx = Array.IndexOf(DiffPrefetchConcurrencyOptions, DiffPrefetchConcurrency);
+            return idx >= 0 ? idx : 3;
+        }
+        set
+        {
+            if (value < 0 || value >= DiffPrefetchConcurrencyOptions.Length) return;
+            DiffPrefetchConcurrency = DiffPrefetchConcurrencyOptions[value];
+        }
+    }
+
+    partial void OnSimulateSlowGitChanged(bool value)
+    {
+        _settings.Update(s => s.SimulateSlowGit = value);
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnDiffPrefetchConcurrencyChanged(int value)
+    {
+        var clamped = DiffWarmStore.ClampConcurrency(value);
+        if (clamped != value)
+        {
+            DiffPrefetchConcurrency = clamped;
+            return;
+        }
+
+        OnPropertyChanged(nameof(DiffPrefetchConcurrencyIndex));
+        _settings.Update(s => s.DiffPrefetchConcurrency = clamped);
+        _ = _settings.SaveAsync();
+        WorkingCopy.SetDiffPrefetchConcurrency(clamped);
     }
 }

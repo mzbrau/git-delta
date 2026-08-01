@@ -38,12 +38,16 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     private CancellationTokenSource? _diffCts;
+    private CancellationTokenSource? _prefetchCts;
     private CancellationTokenSource? _historyCts;
     private string? _repoPath;
+    private RepositoryStatus? _lastStatus;
+    private readonly DiffWarmStore _warmStore;
     private readonly List<CommitInfo> _allHistoryCommits = [];
     private readonly List<FileItemViewModel> _allHistoryFiles = [];
     private const int HistoryPageSize = 300;
     private FileDiff? _currentDiff;
+    private DateTimeOffset? _diffCacheCompletedAt;
     private readonly List<PendingMutation> _pending = [];
     private long _statusEpoch;
     private readonly List<FileItemViewModel> _allStaged = [];
@@ -98,6 +102,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         _intraLine = intraLine;
         _runner = runner;
         _watcher = watcher;
+        _warmStore = new DiffWarmStore(DiffWarmStore.ClampConcurrency(settings.Current.DiffPrefetchConcurrency));
         ViewMode = settings.Current.DefaultDiffMode;
         _ignoreWhitespace = settings.Current.IgnoreWhitespace;
         _contextLines = settings.Current.ContextLines > 0 ? settings.Current.ContextLines : 3;
@@ -109,6 +114,13 @@ public partial class WorkingCopyViewModel : ObservableObject
                 _notifications.Info("Status is slow. Enable Git fsmonitor for this repository?",
                     () => _ = EnableFsmonitorAsync(), "Enable"));
     }
+
+    /// <summary>Called when the main window is activated so the watcher can debounce a soft refresh.</summary>
+    public void NotifyWindowActivated() => _watcher.NotifyWindowActivated();
+
+    /// <summary>Updates the warm-store prefetch concurrency cap (clamped 1–8).</summary>
+    public void SetDiffPrefetchConcurrency(int value) =>
+        _warmStore.SetMaxConcurrency(value);
 
     public ObservableCollection<FileItemViewModel> StagedFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> UnstagedFiles { get; } = [];
@@ -125,6 +137,9 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private FileItemViewModel? _selectedFile;
     [ObservableProperty] private DiffViewMode _viewMode;
     [ObservableProperty] private bool _isLoadingDiff;
+    [ObservableProperty] private bool _isDiffRefreshing;
+    [ObservableProperty] private bool _hasDiffCache;
+    [ObservableProperty] private string? _diffCacheAgeText;
     [ObservableProperty] private bool _isCombinedReviewMode;
     [ObservableProperty] private string? _inProgressBanner;
     [ObservableProperty] private InProgressOperation _inProgress;
@@ -236,8 +251,14 @@ public partial class WorkingCopyViewModel : ObservableObject
         ?? (SelectedFileCount > 1 ? $"{SelectedFileCount} files selected"
             : SelectedFile is null ? "Select a file to view its diff"
             : IsLoadingDiff ? "Loading diff…"
+            : IsDiffRefreshing ? "Refreshing diff…"
             : SelectedAddedLines + SelectedRemovedLines == 0 ? "No line changes"
             : $"{SelectedAddedLines} additions, {SelectedRemovedLines} deletions");
+
+    public string? DiffFreshnessText =>
+        IsDiffRefreshing
+            ? (DiffCacheAgeText is { } age ? $"Refreshing… · {age}" : "Refreshing…")
+            : DiffCacheAgeText;
 
     public bool HasConflictedFiles => ConflictedFiles.Count > 0;
 
@@ -267,8 +288,17 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnIsLoadingDiffChanged(bool value)
     {
         OnPropertyChanged(nameof(DiffFooterText));
+        OnPropertyChanged(nameof(DiffFreshnessText));
         UpdateDiffOverlay();
     }
+
+    partial void OnIsDiffRefreshingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(DiffFooterText));
+        OnPropertyChanged(nameof(DiffFreshnessText));
+    }
+
+    partial void OnDiffCacheAgeTextChanged(string? value) => OnPropertyChanged(nameof(DiffFreshnessText));
     partial void OnSelectedAddedLinesChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
     partial void OnSelectedRemovedLinesChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
     partial void OnFileFilterChanged(string value)
@@ -312,7 +342,9 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         _settings.Update(s => s.IgnoreWhitespace = value);
         _ = _settings.SaveAsync();
+        _warmStore.InvalidateAll();
         _ = LoadDiffForSelectionAsync(SelectedFile);
+        ScheduleFileStatusPrefetch();
     }
 
     partial void OnContextLinesChanged(int value)
@@ -322,14 +354,20 @@ public partial class WorkingCopyViewModel : ObservableObject
         _settings.Update(s => s.ContextLines = value);
         _ = _settings.SaveAsync();
         if (!ShowFullFile)
+        {
+            _warmStore.InvalidateAll();
             _ = LoadDiffForSelectionAsync(SelectedFile);
+            ScheduleFileStatusPrefetch();
+        }
     }
 
     partial void OnShowFullFileChanged(bool value)
     {
         OnPropertyChanged(nameof(FullFileToggleLabel));
         _expandedCollapses.Clear();
+        _warmStore.InvalidateAll();
         _ = LoadDiffForSelectionAsync(SelectedFile);
+        ScheduleFileStatusPrefetch();
     }
 
     public async Task OpenAsync(string path)
@@ -401,6 +439,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             var status = await _statusService.GetStatusAsync(_repoPath).ConfigureAwait(true);
             if (status.Epoch < _statusEpoch) return;
             _statusEpoch = status.Epoch;
+            _lastStatus = status;
 
             void ApplyStatus()
             {
@@ -420,7 +459,10 @@ public partial class WorkingCopyViewModel : ObservableObject
             }
 
             await InvokeOnUiAsync(ApplyStatus);
-            await LoadStashesAsync().ConfigureAwait(true);
+            _warmStore.SoftInvalidateScope("fs");
+            UpdateFileCacheIndicators();
+            await RevalidateSelectedDiffAfterStatusAsync();
+            ScheduleFileStatusPrefetch();
 
             CodeReviewrMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
             CodeReviewrMeters.RepositoryOpenMs.Record(sw.Elapsed.TotalMilliseconds);
@@ -698,6 +740,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             DiffRows.Clear();
             SelectedFile = null;
         }
+        ScheduleFileStatusPrefetch();
         OnPropertyChanged(nameof(FileListHeader));
         OnPropertyChanged(nameof(ShowCommitDetailsDock));
     }
@@ -778,6 +821,8 @@ public partial class WorkingCopyViewModel : ObservableObject
                 _allHistoryFiles.Add(new FileItemViewModel(path, kind, isStagedList: false));
 
             ApplyHistoryFileFilter(autoSelectFirst: true);
+            if (_allHistoryFiles.Count > 0)
+                ScheduleHistoryPrefetch(commit.Oid, _allHistoryFiles.ToList());
         }
         catch (Exception ex)
         {
@@ -994,6 +1039,9 @@ public partial class WorkingCopyViewModel : ObservableObject
             {
                 StashFiles.Add(new FileItemViewModel(path, kind, isStagedList: false));
             }
+
+            if (StashFiles.Count > 0)
+                ScheduleStashPrefetch(stash.Index, StashFiles.ToList());
         }
         catch (Exception ex)
         {
@@ -1128,7 +1176,12 @@ public partial class WorkingCopyViewModel : ObservableObject
         ProjectRows(_currentDiff);
     }
 
-    partial void OnIsCombinedReviewModeChanged(bool value) => _ = LoadDiffForSelectionAsync(SelectedFile);
+    partial void OnIsCombinedReviewModeChanged(bool value)
+    {
+        _warmStore.InvalidateAll();
+        _ = LoadDiffForSelectionAsync(SelectedFile);
+        ScheduleFileStatusPrefetch();
+    }
 
     [RelayCommand]
     private void ToggleCombinedReview() => IsCombinedReviewMode = !IsCombinedReviewMode;
@@ -1149,14 +1202,15 @@ public partial class WorkingCopyViewModel : ObservableObject
         _diffCts = new CancellationTokenSource();
         var ct = _diffCts.Token;
 
-        DiffRows.Clear();
-        _currentDiff = null;
         _expandedCollapses.Clear();
         SelectedAddedLines = 0;
         SelectedRemovedLines = 0;
         ClearImagePreview();
         if (file is null || _repoPath is null)
         {
+            DiffRows.Clear();
+            _currentDiff = null;
+            ClearDiffCacheState();
             DiffEmptyMessage = IsHistoryMode
                 ? SelectedCommit is null ? "Select a commit" : "Select a file to view its diff"
                 : "Select a file to view its diff";
@@ -1189,13 +1243,20 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(CanUnstageLines));
         OnPropertyChanged(nameof(CanDiscardLines));
 
-        IsLoadingDiff = true;
+        var options = BuildDiffOptions();
+        var key = FileStatusWarmKey(file.Path, target, options);
+
         try
         {
             var sw = Stopwatch.StartNew();
             FileDiff diff;
             if (file.Kind == ChangeKind.Untracked)
             {
+                DiffRows.Clear();
+                _currentDiff = null;
+                ClearDiffCacheState();
+                IsLoadingDiff = true;
+                IsDiffRefreshing = false;
                 var fullPath = System.IO.Path.Combine(
                     _repoPath,
                     file.Path.Value.Replace('/', System.IO.Path.DirectorySeparatorChar));
@@ -1209,38 +1270,21 @@ public partial class WorkingCopyViewModel : ObservableObject
                     ct.ThrowIfCancellationRequested();
                     diff = UntrackedFileDiff.Create(file.Path, bytes, target);
                 }
-            }
-            else
-            {
-                var options = BuildDiffOptions();
-                diff = await _diffService.GetDiffAsync(_repoPath, file.Path, target, options, ct);
+
                 ct.ThrowIfCancellationRequested();
-            }
-
-            _currentDiff = ApplyIntraLine(diff);
-            UpdateDiffStats(_currentDiff);
-
-            if (IsImagePath(file.Path.Value))
-            {
-                await LoadImagePreviewAsync(file, _currentDiff, target, ct);
-                DiffRows.Clear();
-                DiffEmptyMessage = "";
-            }
-            else if (_currentDiff.IsBinary)
-            {
-                DiffRows.Clear();
-                DiffEmptyMessage = "Binary file";
-                IsImagePreview = false;
+                await PresentDiffAsync(file, diff, target, ct);
             }
             else
             {
-                DiffEmptyMessage = "Select a file to view its diff";
-                ProjectRows(_currentDiff);
+                await LoadTrackedDiffWithSwrAsync(
+                    file,
+                    key,
+                    target,
+                    force: false,
+                    factory: token => _diffService.GetDiffAsync(_repoPath, file.Path, target, options, token),
+                    ct);
             }
 
-            OnPropertyChanged(nameof(CanStageLines));
-            OnPropertyChanged(nameof(CanUnstageLines));
-            OnPropertyChanged(nameof(CanDiscardLines));
             CodeReviewrMeters.DiffGenerationMs.Record(sw.Elapsed.TotalMilliseconds);
         }
         catch (OperationCanceledException) { }
@@ -1249,13 +1293,618 @@ public partial class WorkingCopyViewModel : ObservableObject
             SelectedAddedLines = 0;
             SelectedRemovedLines = 0;
             ClearImagePreview();
+            DiffRows.Clear();
+            _currentDiff = null;
+            ClearDiffCacheState();
             _notifications.Error($"Diff failed: {ex.Message}", () => _ = LoadDiffForSelectionAsync(file));
         }
         finally
         {
             IsLoadingDiff = false;
+            IsDiffRefreshing = false;
+            UpdateDiffCacheState(key);
+            UpdateFileCacheIndicators();
             OnPropertyChanged(nameof(DiffFooterText));
         }
+    }
+
+    /// <summary>
+    /// Stale-while-revalidate load: paint a warm (possibly stale) hit immediately, then refresh in
+    /// the background when needed. Only clears the viewer when there is no usable cache — including
+    /// keeping a same-path painted (or alternate-target warm) diff across stage/unstage target flips.
+    /// </summary>
+    private async Task LoadTrackedDiffWithSwrAsync(
+        FileItemViewModel file,
+        DiffWarmKey key,
+        DiffTarget target,
+        bool force,
+        Func<CancellationToken, Task<FileDiff>> factory,
+        CancellationToken ct)
+    {
+        DiffWarmEntry? entry = null;
+        var hasWarmHit = _warmStore.TryGetCompleted(key, out entry) && entry is not null;
+        var needsRefresh = force || !hasWarmHit || entry!.IsStale;
+
+        if (hasWarmHit)
+        {
+            IsLoadingDiff = false;
+            ApplyDiffCacheState(entry!);
+            await PresentDiffAsync(file, entry!.Diff, target, ct);
+            if (!needsRefresh)
+                return;
+
+            IsDiffRefreshing = true;
+        }
+        else if (TryGetAlternateTargetWarmEntry(key, out var altEntry) && altEntry is not null)
+        {
+            // Stage/unstage flips DiffTarget; reuse the previous target's cached diff as a stand-in.
+            IsLoadingDiff = false;
+            IsDiffRefreshing = true;
+            ApplyDiffCacheState(altEntry with { IsStale = true });
+            await PresentDiffAsync(file, altEntry.Diff with { Target = target }, target, ct);
+        }
+        else if (HasPaintedDiffForPath(file.Path.Value))
+        {
+            // Keep whatever is already on screen for this path until the new target arrives.
+            IsLoadingDiff = false;
+            IsDiffRefreshing = true;
+            if (_currentDiff is not null && _currentDiff.Target != target)
+            {
+                _currentDiff = _currentDiff with { Target = target };
+                OnPropertyChanged(nameof(CanStageLines));
+                OnPropertyChanged(nameof(CanUnstageLines));
+                OnPropertyChanged(nameof(CanDiscardLines));
+            }
+
+            if (_diffCacheCompletedAt is { } at)
+                DiffCacheAgeText = FormatCacheAge(at);
+            HasDiffCache = DiffRows.Count > 0;
+        }
+        else
+        {
+            DiffRows.Clear();
+            _currentDiff = null;
+            ClearDiffCacheState();
+            IsLoadingDiff = true;
+            IsDiffRefreshing = false;
+        }
+
+        var loadTask = _warmStore.GetOrStart(key, factory, force);
+        var diff = await loadTask.WaitAsync(ct);
+        ct.ThrowIfCancellationRequested();
+        await PresentDiffAsync(file, diff, target, ct);
+        UpdateDiffCacheState(key);
+    }
+
+    private bool HasPaintedDiffForPath(string path)
+    {
+        if (DiffRows.Count == 0 || _currentDiff is null)
+            return false;
+
+        return string.Equals(_currentDiff.NewPath.Value, path, StringComparison.Ordinal)
+               || string.Equals(_currentDiff.OldPath.Value, path, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Looks up a completed warm entry for the same path/scope/options under an alternate
+    /// <see cref="DiffTarget"/> (used when stage/unstage flips IndexToWorktree ↔ HeadToIndex).
+    /// </summary>
+    private bool TryGetAlternateTargetWarmEntry(DiffWarmKey key, out DiffWarmEntry? entry)
+    {
+        foreach (var alt in AlternateDiffTargets(key.Target))
+        {
+            var altKey = new DiffWarmKey(key.Scope, key.Path, alt, key.Options);
+            if (_warmStore.TryGetCompleted(altKey, out entry) && entry is not null)
+                return true;
+        }
+
+        entry = null;
+        return false;
+    }
+
+    private static IEnumerable<DiffTarget> AlternateDiffTargets(DiffTarget target) =>
+        target switch
+        {
+            DiffTarget.IndexToWorktree => [DiffTarget.HeadToIndex, DiffTarget.HeadToWorktree],
+            DiffTarget.HeadToIndex => [DiffTarget.IndexToWorktree, DiffTarget.HeadToWorktree],
+            DiffTarget.HeadToWorktree => [DiffTarget.IndexToWorktree, DiffTarget.HeadToIndex],
+            _ => [],
+        };
+
+    [RelayCommand]
+    private async Task ForceRefreshDiffAsync()
+    {
+        if (SelectedFile is null || _repoPath is null) return;
+        if (SelectedFile.Kind == ChangeKind.Untracked)
+        {
+            await LoadDiffForSelectionAsync(SelectedFile);
+            return;
+        }
+
+        _diffCts?.Cancel();
+        _diffCts = new CancellationTokenSource();
+        var ct = _diffCts.Token;
+        var file = SelectedFile;
+
+        try
+        {
+            if (IsStashMode && SelectedStash is { } stash)
+            {
+                var options = BuildDiffOptions();
+                var key = StashWarmKey(stash.Index, file.Path, options);
+                await LoadTrackedDiffWithSwrAsync(
+                    file,
+                    key,
+                    DiffTarget.HeadToWorktree,
+                    force: true,
+                    factory: token => LoadStashFileDiffAsync(
+                        _repoPath, stash.Index, file.Path, file.Kind, options, token),
+                    ct);
+                return;
+            }
+
+            if (IsHistoryMode && SelectedCommit is { } commit)
+            {
+                var options = BuildDiffOptions();
+                var key = HistoryWarmKey(commit.Oid, file.Path, options);
+                await LoadTrackedDiffWithSwrAsync(
+                    file,
+                    key,
+                    DiffTarget.HeadToWorktree,
+                    force: true,
+                    factory: token => LoadHistoryFileDiffAsync(
+                        _repoPath, commit.Oid, file.Path, file.Kind, options, token),
+                    ct);
+                return;
+            }
+
+            var target = IsCombinedReviewMode
+                ? DiffTarget.HeadToWorktree
+                : file.IsStagedList ? DiffTarget.HeadToIndex : DiffTarget.IndexToWorktree;
+            var fsOptions = BuildDiffOptions();
+            var fsKey = FileStatusWarmKey(file.Path, target, fsOptions);
+            await LoadTrackedDiffWithSwrAsync(
+                file,
+                fsKey,
+                target,
+                force: true,
+                factory: token => _diffService.GetDiffAsync(_repoPath, file.Path, target, fsOptions, token),
+                ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Diff refresh failed: {ex.Message}", () => _ = ForceRefreshDiffAsync());
+        }
+        finally
+        {
+            IsLoadingDiff = false;
+            IsDiffRefreshing = false;
+            UpdateFileCacheIndicators();
+            OnPropertyChanged(nameof(DiffFooterText));
+        }
+    }
+
+    private async Task RevalidateSelectedDiffAfterStatusAsync()
+    {
+        if (!IsFileStatusMode || SelectedFile is null)
+            return;
+
+        if (!IsPathInWorkingLists(SelectedFile.Path.Value, SelectedFile.IsStagedList))
+        {
+            _warmStore.InvalidatePath(SelectedFile.Path.Value);
+            DiffRows.Clear();
+            _currentDiff = null;
+            ClearDiffCacheState();
+            ClearImagePreview();
+            DiffEmptyMessage = "Select a file to view its diff";
+            SelectedAddedLines = 0;
+            SelectedRemovedLines = 0;
+            IsLoadingDiff = false;
+            IsDiffRefreshing = false;
+            OnPropertyChanged(nameof(DiffFooterText));
+            return;
+        }
+
+        await LoadDiffForSelectionAsync(SelectedFile);
+    }
+
+    private bool IsPathInWorkingLists(string path, bool preferStaged)
+    {
+        bool Match(FileItemViewModel f) =>
+            string.Equals(f.Path.Value, path, StringComparison.Ordinal);
+
+        if (preferStaged && _allStaged.Any(Match)) return true;
+        if (!preferStaged && _allUnstaged.Any(Match)) return true;
+        if (_allStaged.Any(Match) || _allUnstaged.Any(Match) || _allConflicted.Any(Match))
+            return true;
+        return false;
+    }
+
+    private void ClearDiffCacheState()
+    {
+        _diffCacheCompletedAt = null;
+        HasDiffCache = false;
+        DiffCacheAgeText = null;
+    }
+
+    private void ApplyDiffCacheState(DiffWarmEntry entry)
+    {
+        _diffCacheCompletedAt = entry.CompletedAt;
+        HasDiffCache = true;
+        DiffCacheAgeText = FormatCacheAge(entry.CompletedAt);
+    }
+
+    private void UpdateDiffCacheState(DiffWarmKey key)
+    {
+        if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry) && entry is not null)
+            ApplyDiffCacheState(entry);
+        else
+            ClearDiffCacheState();
+    }
+
+    private static string FormatCacheAge(DateTimeOffset completedAt)
+    {
+        var ago = DateTimeOffset.UtcNow - completedAt;
+        if (ago.TotalSeconds < 5) return "Cached just now";
+        if (ago.TotalMinutes < 1) return $"Cached {(int)ago.TotalSeconds}s ago";
+        if (ago.TotalHours < 1) return $"Cached {(int)ago.TotalMinutes}m ago";
+        if (ago.TotalDays < 1) return $"Cached {(int)ago.TotalHours}h ago";
+        return $"Cached {(int)ago.TotalDays}d ago";
+    }
+
+    private void UpdateFileCacheIndicators()
+    {
+        var options = BuildDiffOptions();
+
+        void UpdateFs(FileItemViewModel file)
+        {
+            if (file.Kind == ChangeKind.Untracked)
+            {
+                file.HasCachedDiff = false;
+                file.IsDiffStale = false;
+                return;
+            }
+
+            var target = IsCombinedReviewMode
+                ? DiffTarget.HeadToWorktree
+                : file.IsStagedList ? DiffTarget.HeadToIndex : DiffTarget.IndexToWorktree;
+            var key = FileStatusWarmKey(file.Path, target, options);
+            if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry) && entry is not null)
+            {
+                file.HasCachedDiff = true;
+                file.IsDiffStale = entry.IsStale;
+            }
+            else
+            {
+                file.HasCachedDiff = false;
+                file.IsDiffStale = false;
+            }
+        }
+
+        foreach (var f in _allStaged) UpdateFs(f);
+        foreach (var f in _allUnstaged) UpdateFs(f);
+        foreach (var f in _allConflicted) UpdateFs(f);
+
+        if (SelectedStash is { } stash)
+        {
+            foreach (var file in StashFiles)
+            {
+                var key = StashWarmKey(stash.Index, file.Path, options);
+                if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry) && entry is not null)
+                {
+                    file.HasCachedDiff = true;
+                    file.IsDiffStale = entry.IsStale;
+                }
+                else
+                {
+                    file.HasCachedDiff = false;
+                    file.IsDiffStale = false;
+                }
+            }
+        }
+
+        if (SelectedCommit is { } commit)
+        {
+            foreach (var file in _allHistoryFiles)
+            {
+                var key = HistoryWarmKey(commit.Oid, file.Path, options);
+                if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry) && entry is not null)
+                {
+                    file.HasCachedDiff = true;
+                    file.IsDiffStale = entry.IsStale;
+                }
+                else
+                {
+                    file.HasCachedDiff = false;
+                    file.IsDiffStale = false;
+                }
+            }
+        }
+    }
+
+    private async Task PresentDiffAsync(
+        FileItemViewModel file,
+        FileDiff diff,
+        DiffTarget target,
+        CancellationToken ct)
+    {
+        _currentDiff = ApplyIntraLine(diff);
+        UpdateDiffStats(_currentDiff);
+
+        if (IsImagePath(file.Path.Value))
+        {
+            await LoadImagePreviewAsync(file, _currentDiff, target, ct);
+            DiffRows.Clear();
+            DiffEmptyMessage = "";
+        }
+        else if (_currentDiff.IsBinary)
+        {
+            DiffRows.Clear();
+            DiffEmptyMessage = "Binary file";
+            IsImagePreview = false;
+        }
+        else
+        {
+            DiffEmptyMessage = "Select a file to view its diff";
+            ProjectRows(_currentDiff);
+        }
+
+        OnPropertyChanged(nameof(CanStageLines));
+        OnPropertyChanged(nameof(CanUnstageLines));
+        OnPropertyChanged(nameof(CanDiscardLines));
+    }
+
+    private static DiffWarmKey FileStatusWarmKey(FilePath path, DiffTarget target, DiffOptions options) =>
+        new("fs", path.Value, target, options);
+
+    private static DiffWarmKey HistoryWarmKey(string oid, FilePath path, DiffOptions options) =>
+        new($"hist:{oid}", path.Value, DiffTarget.HeadToWorktree, options);
+
+    private static DiffWarmKey StashWarmKey(int index, FilePath path, DiffOptions options) =>
+        new($"stash:{index}", path.Value, DiffTarget.HeadToWorktree, options);
+
+    private void ScheduleFileStatusPrefetch()
+    {
+        if (_repoPath is null || !IsFileStatusMode) return;
+        _prefetchCts?.Cancel();
+        _prefetchCts = new CancellationTokenSource();
+        var ct = _prefetchCts.Token;
+        _ = PrefetchFileStatusDiffsAsync(ct);
+    }
+
+    private async Task PrefetchFileStatusDiffsAsync(CancellationToken ct)
+    {
+        if (_repoPath is null) return;
+
+        try
+        {
+            var options = BuildDiffOptions();
+            var work = BuildFileStatusPrefetchOrder();
+            var pending = new List<Task>();
+            foreach (var (path, target, kind) in work)
+            {
+                if (ct.IsCancellationRequested) break;
+                if (kind == ChangeKind.Untracked) continue;
+
+                var key = FileStatusWarmKey(path, target, options);
+                if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry)
+                    && entry is { IsStale: false })
+                    continue;
+
+                var repoPath = _repoPath;
+                var filePath = path;
+                var diffTarget = target;
+                pending.Add(_warmStore.GetOrStart(
+                    key,
+                    token => _diffService.GetDiffAsync(repoPath, filePath, diffTarget, options, token)));
+            }
+
+            if (pending.Count > 0)
+            {
+                try { await Task.WhenAll(pending).WaitAsync(ct); }
+                catch (OperationCanceledException) { throw; }
+                catch { /* individual failures are fine */ }
+            }
+
+            await InvokeOnUiAsync(UpdateFileCacheIndicators);
+        }
+        catch (OperationCanceledException)
+        {
+            // Prefetch superseded.
+        }
+    }
+
+    private List<(FilePath Path, DiffTarget Target, ChangeKind Kind)> BuildFileStatusPrefetchOrder()
+    {
+        var result = new List<(FilePath, DiffTarget, ChangeKind)>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        void Add(FileItemViewModel file)
+        {
+            var target = IsCombinedReviewMode
+                ? DiffTarget.HeadToWorktree
+                : file.IsStagedList ? DiffTarget.HeadToIndex : DiffTarget.IndexToWorktree;
+            var key = $"{file.Path.Value}|{(int)target}|{file.IsStagedList}";
+            if (!seen.Add(key)) return;
+            result.Add((file.Path, target, file.Kind));
+        }
+
+        // Selected first, then ±1 neighbors in the visible list, then the rest.
+        var visible = IsCombinedReviewMode
+            ? UnstagedFiles.Concat(StagedFiles).Concat(ConflictedFiles).ToList()
+            : UnstagedFiles.Concat(StagedFiles).Concat(ConflictedFiles).ToList();
+
+        if (SelectedFile is { } selected)
+        {
+            Add(selected);
+            var idx = visible.FindIndex(f =>
+                string.Equals(f.Path.Value, selected.Path.Value, StringComparison.Ordinal)
+                && f.IsStagedList == selected.IsStagedList);
+            if (idx >= 0)
+            {
+                if (idx > 0) Add(visible[idx - 1]);
+                if (idx + 1 < visible.Count) Add(visible[idx + 1]);
+            }
+        }
+
+        foreach (var f in visible)
+            Add(f);
+
+        return result;
+    }
+
+    private void ApplyOptimisticFileLists()
+    {
+        if (_lastStatus is null) return;
+        RebuildFileLists(_lastStatus);
+    }
+
+    private void ScheduleHistoryPrefetch(string oid, IReadOnlyList<FileItemViewModel> files)
+    {
+        if (_repoPath is null) return;
+        _prefetchCts?.Cancel();
+        _prefetchCts = new CancellationTokenSource();
+        var ct = _prefetchCts.Token;
+        _ = PrefetchHistoryDiffsAsync(oid, files, ct);
+    }
+
+    private async Task PrefetchHistoryDiffsAsync(
+        string oid,
+        IReadOnlyList<FileItemViewModel> files,
+        CancellationToken ct)
+    {
+        if (_repoPath is null) return;
+        try
+        {
+            var options = BuildDiffOptions();
+            var ordered = OrderPrefetchAroundSelection(files, HistoryFiles.ToList());
+            foreach (var file in ordered)
+            {
+                if (ct.IsCancellationRequested) break;
+                var key = HistoryWarmKey(oid, file.Path, options);
+                if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry)
+                    && entry is { IsStale: false })
+                    continue;
+                var repoPath = _repoPath;
+                var path = file.Path;
+                var kind = file.Kind;
+                _ = _warmStore.GetOrStart(key, token => LoadHistoryFileDiffAsync(repoPath, oid, path, kind, options, token));
+            }
+
+            await Task.Yield();
+            await InvokeOnUiAsync(UpdateFileCacheIndicators);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private void ScheduleStashPrefetch(int stashIndex, IReadOnlyList<FileItemViewModel> files)
+    {
+        if (_repoPath is null) return;
+        _prefetchCts?.Cancel();
+        _prefetchCts = new CancellationTokenSource();
+        var ct = _prefetchCts.Token;
+        _ = PrefetchStashDiffsAsync(stashIndex, files, ct);
+    }
+
+    private async Task PrefetchStashDiffsAsync(
+        int stashIndex,
+        IReadOnlyList<FileItemViewModel> files,
+        CancellationToken ct)
+    {
+        if (_repoPath is null) return;
+        try
+        {
+            var options = BuildDiffOptions();
+            var ordered = OrderPrefetchAroundSelection(files, StashFiles.ToList());
+            foreach (var file in ordered)
+            {
+                if (ct.IsCancellationRequested) break;
+                var key = StashWarmKey(stashIndex, file.Path, options);
+                if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry)
+                    && entry is { IsStale: false })
+                    continue;
+                var repoPath = _repoPath;
+                var path = file.Path;
+                var kind = file.Kind;
+                _ = _warmStore.GetOrStart(
+                    key,
+                    token => LoadStashFileDiffAsync(repoPath, stashIndex, path, kind, options, token));
+            }
+
+            await Task.Yield();
+            await InvokeOnUiAsync(UpdateFileCacheIndicators);
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private List<FileItemViewModel> OrderPrefetchAroundSelection(
+        IReadOnlyList<FileItemViewModel> all,
+        IReadOnlyList<FileItemViewModel> visible)
+    {
+        var result = new List<FileItemViewModel>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        void Add(FileItemViewModel file)
+        {
+            if (!seen.Add(file.Path.Value)) return;
+            result.Add(file);
+        }
+
+        if (SelectedFile is { } selected)
+        {
+            Add(selected);
+            var idx = -1;
+            for (var i = 0; i < visible.Count; i++)
+            {
+                if (string.Equals(visible[i].Path.Value, selected.Path.Value, StringComparison.Ordinal))
+                {
+                    idx = i;
+                    break;
+                }
+            }
+
+            if (idx >= 0)
+            {
+                if (idx > 0) Add(visible[idx - 1]);
+                if (idx + 1 < visible.Count) Add(visible[idx + 1]);
+            }
+        }
+
+        foreach (var f in visible)
+            Add(f);
+        foreach (var f in all)
+            Add(f);
+
+        return result;
+    }
+
+    private async Task<FileDiff> LoadHistoryFileDiffAsync(
+        string repoPath,
+        string oid,
+        FilePath path,
+        ChangeKind kind,
+        DiffOptions options,
+        CancellationToken ct)
+    {
+        var rawPatch = await _history.GetCommitPatchAsync(repoPath, oid, path, options, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(rawPatch) && kind is ChangeKind.Added)
+            return UntrackedFileDiff.Create(path, string.Empty, DiffTarget.HeadToWorktree);
+        return PatchParser.Parse(rawPatch, DiffTarget.HeadToWorktree);
+    }
+
+    private async Task<FileDiff> LoadStashFileDiffAsync(
+        string repoPath,
+        int stashIndex,
+        FilePath path,
+        ChangeKind kind,
+        DiffOptions options,
+        CancellationToken ct)
+    {
+        var rawPatch = await _stash.GetStashPatchAsync(repoPath, stashIndex, path, options, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(rawPatch) && kind is ChangeKind.Added or ChangeKind.Untracked)
+            return UntrackedFileDiff.Create(path, string.Empty, DiffTarget.HeadToWorktree);
+        return PatchParser.Parse(rawPatch, DiffTarget.HeadToWorktree);
     }
 
     private static bool IsImagePath(string path)
@@ -1421,7 +2070,8 @@ public partial class WorkingCopyViewModel : ObservableObject
         if (file is null || _repoPath is null) return;
         var pending = new PendingMutation(file.Path, WasUnstage: false);
         _pending.Add(pending);
-        await RefreshAsync();
+        _warmStore.SoftInvalidatePath(file.Path.Value);
+        ApplyOptimisticFileLists();
         try
         {
             var sw = Stopwatch.StartNew();
@@ -1445,7 +2095,8 @@ public partial class WorkingCopyViewModel : ObservableObject
         if (file is null || _repoPath is null) return;
         var pending = new PendingMutation(file.Path, WasUnstage: true);
         _pending.Add(pending);
-        await RefreshAsync();
+        _warmStore.SoftInvalidatePath(file.Path.Value);
+        ApplyOptimisticFileLists();
         try
         {
             await _staging.UnstageFileAsync(_repoPath, file.Path);
@@ -1483,7 +2134,9 @@ public partial class WorkingCopyViewModel : ObservableObject
         var pendings = files.Select(f => new PendingMutation(f.Path, WasUnstage: false)).ToList();
         var paths = files.Select(f => f.Path).ToList();
         _pending.AddRange(pendings);
-        await RefreshAsync();
+        foreach (var path in paths)
+            _warmStore.SoftInvalidatePath(path.Value);
+        ApplyOptimisticFileLists();
         try
         {
             await _staging.StageFilesAsync(_repoPath, paths);
@@ -1506,7 +2159,9 @@ public partial class WorkingCopyViewModel : ObservableObject
         var pendings = files.Select(f => new PendingMutation(f.Path, WasUnstage: true)).ToList();
         var paths = files.Select(f => f.Path).ToList();
         _pending.AddRange(pendings);
-        await RefreshAsync();
+        foreach (var path in paths)
+            _warmStore.SoftInvalidatePath(path.Value);
+        ApplyOptimisticFileLists();
         try
         {
             await _staging.UnstageFilesAsync(_repoPath, paths);
@@ -1589,6 +2244,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         if (pending is not null)
         {
             _pending.Add(pending);
+            _warmStore.SoftInvalidatePath(_currentDiff.NewPath.Value);
             ProjectRowsOptimisticRemoveHunk(hunkIndex);
         }
 
@@ -1597,7 +2253,10 @@ public partial class WorkingCopyViewModel : ObservableObject
             if (stage)
                 await _staging.StagePatchAsync(_repoPath, patch);
             else
+            {
+                _warmStore.SoftInvalidatePath(_currentDiff.NewPath.Value);
                 await _staging.UnstagePatchAsync(_repoPath, patch);
+            }
         }
         catch (Exception ex)
         {
@@ -2018,42 +2677,32 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(CanUnstageLines));
         OnPropertyChanged(nameof(CanDiscardLines));
 
-        IsLoadingDiff = true;
+        var options = BuildDiffOptions();
+        var key = StashWarmKey(SelectedStash.Index, file.Path, options);
         try
         {
-            var options = BuildDiffOptions();
-            var rawPatch = await _stash.GetStashPatchAsync(_repoPath, SelectedStash.Index, file.Path, options, ct);
-            ct.ThrowIfCancellationRequested();
-
-            FileDiff diff;
-            if (string.IsNullOrWhiteSpace(rawPatch) && file.Kind is ChangeKind.Added or ChangeKind.Untracked)
-            {
-                // Untracked files in a stash may only appear via the untracked commit; fall back to empty.
-                diff = UntrackedFileDiff.Create(file.Path, string.Empty, DiffTarget.HeadToWorktree);
-            }
-            else
-            {
-                diff = PatchParser.Parse(rawPatch, DiffTarget.HeadToWorktree);
-            }
-
-            _currentDiff = ApplyIntraLine(diff);
-            UpdateDiffStats(_currentDiff);
+            await LoadTrackedDiffWithSwrAsync(
+                file,
+                key,
+                DiffTarget.HeadToWorktree,
+                force: false,
+                factory: token => LoadStashFileDiffAsync(
+                    _repoPath, SelectedStash.Index, file.Path, file.Kind, options, token),
+                ct);
 
             if (IsImagePath(file.Path.Value))
             {
-                // Stash image preview: show after-side only when we cannot resolve both blobs easily.
                 ClearImagePreview();
                 IsImagePreview = false;
                 DiffEmptyMessage = "Image preview is not available for stash entries yet";
             }
-            else if (_currentDiff.IsBinary)
+            else if (_currentDiff?.IsBinary == true)
             {
                 DiffEmptyMessage = "Binary file";
             }
-            else
+            else if (DiffRows.Count == 0)
             {
-                ProjectRows(_currentDiff);
-                DiffEmptyMessage = DiffRows.Count == 0 ? "No differences" : "Select a file to view its diff";
+                DiffEmptyMessage = "No differences";
             }
 
             OnPropertyChanged(nameof(DiffFooterText));
@@ -2070,6 +2719,9 @@ public partial class WorkingCopyViewModel : ObservableObject
         finally
         {
             IsLoadingDiff = false;
+            IsDiffRefreshing = false;
+            UpdateDiffCacheState(key);
+            UpdateFileCacheIndicators();
             UpdateDiffOverlay();
         }
     }
@@ -2084,19 +2736,18 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(CanUnstageLines));
         OnPropertyChanged(nameof(CanDiscardLines));
 
-        IsLoadingDiff = true;
+        var options = BuildDiffOptions();
+        var key = HistoryWarmKey(SelectedCommit.Oid, file.Path, options);
         try
         {
-            var options = BuildDiffOptions();
-            var rawPatch = await _history.GetCommitPatchAsync(_repoPath, SelectedCommit.Oid, file.Path, options, ct);
-            ct.ThrowIfCancellationRequested();
-
-            var diff = string.IsNullOrWhiteSpace(rawPatch) && file.Kind is ChangeKind.Added
-                ? UntrackedFileDiff.Create(file.Path, string.Empty, DiffTarget.HeadToWorktree)
-                : PatchParser.Parse(rawPatch, DiffTarget.HeadToWorktree);
-
-            _currentDiff = ApplyIntraLine(diff);
-            UpdateDiffStats(_currentDiff);
+            await LoadTrackedDiffWithSwrAsync(
+                file,
+                key,
+                DiffTarget.HeadToWorktree,
+                force: false,
+                factory: token => LoadHistoryFileDiffAsync(
+                    _repoPath, SelectedCommit.Oid, file.Path, file.Kind, options, token),
+                ct);
 
             if (IsImagePath(file.Path.Value))
             {
@@ -2104,14 +2755,13 @@ public partial class WorkingCopyViewModel : ObservableObject
                 IsImagePreview = false;
                 DiffEmptyMessage = "Image preview is not available for history entries yet";
             }
-            else if (_currentDiff.IsBinary)
+            else if (_currentDiff?.IsBinary == true)
             {
                 DiffEmptyMessage = "Binary file";
             }
-            else
+            else if (DiffRows.Count == 0)
             {
-                ProjectRows(_currentDiff);
-                DiffEmptyMessage = DiffRows.Count == 0 ? "No differences" : "Select a file to view its diff";
+                DiffEmptyMessage = "No differences";
             }
 
             OnPropertyChanged(nameof(DiffFooterText));
@@ -2128,6 +2778,9 @@ public partial class WorkingCopyViewModel : ObservableObject
         finally
         {
             IsLoadingDiff = false;
+            IsDiffRefreshing = false;
+            UpdateDiffCacheState(key);
+            UpdateFileCacheIndicators();
             UpdateDiffOverlay();
         }
     }
@@ -2183,6 +2836,9 @@ public partial class FileItemViewModel : ObservableObject
     public string Directory => Path.Directory ?? "";
     public string KindLabel => Kind.ToString();
     public bool IsChecked => IsStagedList;
+
+    [ObservableProperty] private bool _hasCachedDiff;
+    [ObservableProperty] private bool _isDiffStale;
 
     public string StatusBadge => Kind switch
     {

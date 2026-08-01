@@ -14,7 +14,16 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCodeReviewrGit(this IServiceCollection services)
     {
         services.AddSingleton<IGitCommandLog, GitCommandLog>();
-        services.AddSingleton<IGitProcessRunner, GitProcessRunner>();
+        services.AddSingleton<GitProcessRunner>();
+        services.AddSingleton<IGitProcessRunner>(sp =>
+        {
+            var inner = sp.GetRequiredService<GitProcessRunner>();
+            var settings = sp.GetService<ISettingsStore>();
+            // Integration / unit hosts may omit ISettingsStore; skip the temporary latency wrapper then.
+            return settings is null
+                ? inner
+                : new SimulatedLatencyGitProcessRunner(inner, settings);
+        });
         services.AddSingleton<IGitEnvironment, GitEnvironment>();
         services.AddSingleton<IRepositoryGate, RepositoryGate>();
 

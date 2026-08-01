@@ -23,11 +23,18 @@ public partial class MainWindow : Window
         InitializeComponent();
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         Opened += OnOpened;
+        Activated += OnActivated;
         Closing += OnClosing;
         DataContextChanged += OnDataContextChanged;
     }
 
     private MainWindowViewModel Vm => (MainWindowViewModel)DataContext!;
+
+    private void OnActivated(object? sender, EventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.WorkingCopy.NotifyWindowActivated();
+    }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
