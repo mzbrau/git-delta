@@ -556,7 +556,8 @@
                          Text="{Binding WorkingCopy.CommitMessage}"
                          PlaceholderText="Commit message..." />
                 <Button Classes="Primary" Content="{Binding WorkingCopy.CommitButtonLabel}"
-                        Command="{Binding WorkingCopy.CommitCommand}" />
+                        Command="{Binding WorkingCopy.CommitCommand}"
+                        IsEnabled="{Binding WorkingCopy.CanCommit}" />
                 <StackPanel Orientation="Horizontal" Spacing="12">
                   <CheckBox Content="Amend" IsChecked="{Binding WorkingCopy.AmendCommit}" FontSize="11" />
                   <CheckBox Content="--no-verify" IsChecked="{Binding WorkingCopy.NoVerify}" FontSize="11" />
@@ -658,9 +659,6 @@
                 <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-                      <Button Classes="Link" Content="Discard"
-                              Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}"
-                              IsVisible="{Binding WorkingCopy.HasStagedSelection}" />
                       <Button Classes="Link" Content="Unstage Selected"
                               Command="{Binding WorkingCopy.UnstageSelectedCommand}"
                               IsVisible="{Binding WorkingCopy.HasStagedSelection}" />

@@ -45,6 +45,7 @@ public partial class MainWindow : Window
 
         if (!_selectionSyncSubscribed)
         {
+            vm.WorkingCopy.SelectionClearRequested += ClearFileStatusListSelection;
             vm.WorkingCopy.SelectionSyncRequested += ApplySelectionToListBoxes;
             _selectionSyncSubscribed = true;
         }
@@ -480,6 +481,23 @@ public partial class MainWindow : Window
         CollectSelected(UnstagedFileList, selected);
         CollectSelected(ConflictedFileList, selected);
         Vm.WorkingCopy.SetFileSelection(selected);
+    }
+
+    private void ClearFileStatusListSelection()
+    {
+        _suppressSelectionSync = true;
+        try
+        {
+            StagedFileList.SelectedItems?.Clear();
+            UnstagedFileList.SelectedItems?.Clear();
+            ConflictedFileList.SelectedItems?.Clear();
+            if (this.FindControl<ListBox>("StashFileList") is { } stashFiles)
+                stashFiles.SelectedItems?.Clear();
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
     }
 
     private void ApplySelectionToListBoxes()
