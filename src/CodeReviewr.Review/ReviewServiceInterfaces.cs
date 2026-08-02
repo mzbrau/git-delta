@@ -79,4 +79,6 @@ public interface IReviewOutbox
     Task<IReadOnlyList<OutboxEntry>> ListPendingAsync(string? prNodeId = null, CancellationToken ct = default);
 }
 
-public interface IReviewSessionStore;
+public interface IReviewSessionStore
+{
+}

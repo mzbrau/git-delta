@@ -11,7 +11,10 @@ public sealed class ReviewThreadParserTests
     [Test]
     public void ParseReviewThreads_FromFixture_MapsFieldsAndNeverSurfacesDiffHunkInComments()
     {
-        var json = File.ReadAllText(Path.Combine("Fixtures", "pull-request-threads-response.json"));
+        var json = File.ReadAllText(Path.Combine(
+            TestContext.CurrentContext.TestDirectory,
+            "Fixtures",
+            "pull-request-threads-response.json"));
         using var doc = JsonDocument.Parse(json);
         var threads = ReviewThreadParser.Parse(doc.RootElement);
 

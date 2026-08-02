@@ -29,7 +29,8 @@ public sealed class GitReviewTreeTests
             .WithFile("src/App.cs", "class App {}\n")
             .WithInitialCommit("root")
             .WithFile("src/App.cs", "class App { void Run() {} }\n")
-            .WithFile("README.md", "hello\n")
+            .WithFile("src2/Other.cs", "class Other {}\n")
+            .WithFile("README.md", "hello -n flag\n")
             .WithCommit("feature");
         var path = repo.Build();
         var head = repo.RunGit("rev-parse", "HEAD").Trim();
@@ -43,6 +44,7 @@ public sealed class GitReviewTreeTests
 
         var files = await tree.ListAsync(FilePath.From("src"), CancellationToken.None);
         Assert.That(files.Any(f => f.Value == "src/App.cs"), Is.True);
+        Assert.That(files.Any(f => f.Value == "src2/Other.cs"), Is.False);
         Assert.That(files.Any(f => f.Value == "README.md"), Is.False);
 
         var content = await tree.ReadAsync(FilePath.From("src/App.cs"), CancellationToken.None);
@@ -50,5 +52,12 @@ public sealed class GitReviewTreeTests
 
         var hits = await tree.SearchAsync("class App", CancellationToken.None);
         Assert.That(hits.Any(h => h.Path.Value == "src/App.cs"), Is.True);
+
+        var readmeHits = await tree.SearchAsync("hello", CancellationToken.None);
+        Assert.That(readmeHits.Any(h => h.Path.Value == "README.md"), Is.True);
+
+        // Patterns starting with '-' must be passed via -e, not as git options.
+        var dashHits = await tree.SearchAsync("-n", CancellationToken.None);
+        Assert.That(dashHits.Any(h => h.Path.Value == "README.md"), Is.True);
     }
 }

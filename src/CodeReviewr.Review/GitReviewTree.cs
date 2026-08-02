@@ -57,8 +57,8 @@ internal sealed class GitReviewTree(
                     continue;
 
                 if (hasPrefix &&
-                    !trimmed.StartsWith(prefixValue, StringComparison.Ordinal) &&
-                    !string.Equals(trimmed, prefixValue, StringComparison.Ordinal))
+                    !string.Equals(trimmed, prefixValue, StringComparison.Ordinal) &&
+                    !trimmed.StartsWith(prefixValue + "/", StringComparison.Ordinal))
                     continue;
 
                 paths.Add(FilePath.From(trimmed));
@@ -74,7 +74,7 @@ internal sealed class GitReviewTree(
         {
             var result = await runner.RunAsync(
                     repoPath,
-                    ["grep", "-n", "--no-color", pattern, commit.Value],
+                    ["grep", "-n", "--no-color", "-e", pattern, commit.Value],
                     options: null,
                     token)
                 .ConfigureAwait(false);
@@ -108,7 +108,7 @@ internal sealed class GitReviewTree(
         int pathIndex;
         int lineIndex;
         int textIndex;
-        if (segments.Length >= 4 && segments[1].Contains('/'))
+        if (segments.Length >= 4 && !int.TryParse(segments[1], out _))
         {
             pathIndex = 1;
             lineIndex = 2;
