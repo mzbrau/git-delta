@@ -21,6 +21,7 @@
     <PackageReference Include="Serilog.Extensions.Logging" />
     <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="Velopack" />
     <PackageReference Include="Markdig" />
   </ItemGroup>
   <ItemGroup>
