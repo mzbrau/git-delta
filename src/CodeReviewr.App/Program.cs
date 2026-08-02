@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Threading;
 using Serilog;
+using Velopack;
 
 namespace CodeReviewr.App;
 
@@ -12,6 +13,8 @@ internal static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        VelopackApp.Build().Run();
+
         AttachGlobalExceptionHandlers();
         try
         {

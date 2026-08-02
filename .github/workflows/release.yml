@@ -1,0 +1,143 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, test, package, and release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          lfs: true
+
+      - name: Fetch release refs
+        shell: bash
+        run: |
+          git fetch --tags --force
+          git fetch origin main:refs/remotes/origin/main
+
+      - name: Verify tag is on main
+        id: guard
+        shell: bash
+        run: |
+          tag_commit="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "::error::Release tags must point to commits reachable from origin/main."
+            exit 1
+          fi
+          echo "tag_commit=$tag_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Velopack CLI
+        shell: pwsh
+        run: |
+          dotnet tool install --global vpk --version 0.0.1298
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Restore
+        run: dotnet restore src/CodeReviewr.slnx
+
+      - name: Resolve release version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag.StartsWith("v")) {
+            throw "Release tag must start with 'v'. Actual tag: $tag"
+          }
+
+          $tagVersion = $tag.Substring(1)
+          $minVerVersion = (dotnet msbuild src/CodeReviewr.App/CodeReviewr.App.csproj -target:MinVer -getProperty:MinVerVersion -nologo).Trim()
+          if ([string]::IsNullOrWhiteSpace($minVerVersion) -or $minVerVersion.StartsWith("0.0.0-alpha.0.")) {
+            throw "MinVer did not resolve a release version from tag $tag. Resolved: $minVerVersion"
+          }
+
+          if ($minVerVersion -ne $tagVersion) {
+            throw "Tag version '$tagVersion' does not match MinVer version '$minVerVersion'."
+          }
+
+          "version=$minVerVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build
+        run: dotnet build src/CodeReviewr.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test src/CodeReviewr.slnx --configuration Release --no-build --logger "console;verbosity=minimal"
+
+      - name: Publish Windows folder
+        shell: pwsh
+        run: ./scripts/publish-windows.ps1 -Configuration Release -RuntimeIdentifier win-x64 -OutputPath artifacts/publish/CodeReviewr-win-x64
+
+      - name: Package Windows installer
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $packageArgs = @{
+            Version = $version
+            RuntimeIdentifier = "win-x64"
+            PublishPath = "artifacts/publish/CodeReviewr-win-x64"
+            ReleasePath = "artifacts/release"
+            RepoUrl = "https://github.com/${{ github.repository }}"
+            GitHubToken = $env:GITHUB_TOKEN
+          }
+
+          if ($version.Contains("-")) {
+            $packageArgs.Prerelease = $true
+          }
+
+          ./scripts/package-windows.ps1 @packageArgs
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: CodeReviewr-win-x64-release-${{ steps.version.outputs.version }}
+          path: artifacts/release
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ steps.version.outputs.version }}"
+          $uploadArgs = @(
+            "upload", "github",
+            "--repoUrl", "https://github.com/${{ github.repository }}",
+            "--token", $env:GITHUB_TOKEN,
+            "--outputDir", "artifacts/release",
+            "--channel", "win",
+            "--publish",
+            "--merge",
+            "--releaseName", "CodeReviewr $version",
+            "--tag", "${{ steps.version.outputs.tag }}",
+            "--targetCommitish", "${{ steps.guard.outputs.tag_commit }}"
+          )
+
+          if ($version.Contains("-")) {
+            $uploadArgs += "--pre"
+          }
+
+          & vpk @uploadArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Velopack GitHub release upload failed with exit code $LASTEXITCODE."
+          }
