@@ -23,7 +23,7 @@ public sealed class GitCommandLog : IGitCommandLog
     {
         var trimmed = entry with
         {
-            Stdout = Truncate(entry.Stdout),
+            Stdout = RedactSensitiveStdout(entry.CommandLine, Truncate(entry.Stdout)),
             Stderr = Truncate(entry.Stderr),
         };
 
@@ -49,5 +49,24 @@ public sealed class GitCommandLog : IGitCommandLog
         if (string.IsNullOrEmpty(value) || value.Length <= MaxStreamChars)
             return value;
         return value[..MaxStreamChars] + "\n… (truncated)";
+    }
+
+    /// <summary>
+    /// Diff / show / cat-file patch bodies are user source code — keep a short preview only in the console.
+    /// </summary>
+    private static string RedactSensitiveStdout(string commandLine, string stdout)
+    {
+        if (string.IsNullOrEmpty(stdout))
+            return stdout;
+
+        var isPatchBearing =
+            commandLine.Contains(" diff ", StringComparison.Ordinal)
+            || commandLine.Contains(" show ", StringComparison.Ordinal)
+            || commandLine.Contains(" cat-file ", StringComparison.Ordinal);
+
+        if (!isPatchBearing || stdout.Length < 512)
+            return stdout;
+
+        return $"[patch output redacted — {stdout.Length} chars]";
     }
 }

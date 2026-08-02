@@ -20,6 +20,37 @@ public sealed class MemoryDiffCacheTests
         Assert.That(cache.HitCount, Is.EqualTo(1));
         Assert.That(cache.MissCount, Is.EqualTo(0));
     }
+
+    [Test]
+    public void Set_Evicts_Least_Recently_Used_When_Over_Capacity()
+    {
+        var cache = new MemoryDiffCache(capacity: 2);
+        var opts = DiffOptions.Default;
+        var a = new FileDiffKey(ContentId.FromSha("a".PadRight(40, 'a')), ContentId.FromSha("b".PadRight(40, 'b')), opts);
+        var b = new FileDiffKey(ContentId.FromSha("c".PadRight(40, 'c')), ContentId.FromSha("d".PadRight(40, 'd')), opts);
+        var c = new FileDiffKey(ContentId.FromSha("e".PadRight(40, 'e')), ContentId.FromSha("f".PadRight(40, 'f')), opts);
+
+        var empty = new FileDiff(
+            DiffTarget.IndexToWorktree.AsWorkingCopy(),
+            FilePath.From("a"),
+            FilePath.From("a"),
+            ChangeKind.Modified,
+            ContentId.Empty,
+            ContentId.Empty,
+            IsBinary: false,
+            Hunks: [],
+            RawPatch: "");
+
+        cache.Set(a, empty);
+        cache.Set(b, empty);
+        Assert.That(cache.TryGet(a, out _), Is.True);
+
+        cache.Set(c, empty);
+        Assert.That(cache.Count, Is.EqualTo(2));
+        Assert.That(cache.TryGet(a, out _), Is.True);
+        Assert.That(cache.TryGet(b, out _), Is.False);
+        Assert.That(cache.TryGet(c, out _), Is.True);
+    }
 }
 
 public sealed class GitVersionTests

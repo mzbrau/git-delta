@@ -23,10 +23,10 @@ public sealed class WorkingCopyViewModelStashDialogTests
     private IGitStashService _stash = null!;
     private IGitHistoryService _history = null!;
     private ISettingsStore _settings = null!;
-    private IGitProcessRunner _runner = null!;
+    private IFsmonitorService _fsmonitor = null!;
     private NotificationService _notifications = null!;
     private AlwaysConfirmDialog _confirm = null!;
-    private GitRepositoryWatcher _watcher = null!;
+    private IRepositoryWatcher _watcher = null!;
 
     [SetUp]
     public void SetUp()
@@ -42,10 +42,10 @@ public sealed class WorkingCopyViewModelStashDialogTests
         _stash = Substitute.For<IGitStashService>();
         _history = Substitute.For<IGitHistoryService>();
         _settings = Substitute.For<ISettingsStore>();
-        _runner = Substitute.For<IGitProcessRunner>();
+        _fsmonitor = Substitute.For<IFsmonitorService>();
         _notifications = new NotificationService();
         _confirm = new AlwaysConfirmDialog();
-        _watcher = new GitRepositoryWatcher();
+        _watcher = Substitute.For<IRepositoryWatcher>();
 
         _settings.Current.Returns(new AppSettings());
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -63,7 +63,7 @@ public sealed class WorkingCopyViewModelStashDialogTests
     private WorkingCopyViewModel CreateVm(IStashDialog stashDialog) =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
             _conflicts, _stash, _history, _settings, _notifications, _confirm, stashDialog,
-            new IntraLineDiffer(), _runner, _watcher);
+            new IntraLineDiffer(), _fsmonitor, _watcher);
 
     private static RepositoryStatus StatusWithChange() =>
         new(

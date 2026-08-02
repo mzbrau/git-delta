@@ -55,18 +55,46 @@ public sealed class GitProcessRunner : IGitProcessRunner
         GitProcessOptions? options = null,
         CancellationToken ct = default)
     {
-        AssertNotOnUiSyncContext();
+        // Prefer never starting git under a UI SynchronizationContext. When assert mode is on,
+        // offload rather than throwing so existing ConfigureAwait(true) UI call sites keep working
+        // while still freeing the UI thread for the duration of the process.
+        if (_assertNoUiSyncContext && SynchronizationContext.Current is not null)
+        {
+            return await Task.Run(
+                () => RunCoreAsync(workingDirectory, arguments, options, ct),
+                ct).ConfigureAwait(false);
+        }
+
+        return await RunCoreAsync(workingDirectory, arguments, options, ct).ConfigureAwait(false);
+    }
+
+    private async Task<GitCommandResult> RunCoreAsync(
+        string workingDirectory,
+        IReadOnlyList<string> arguments,
+        GitProcessOptions? options,
+        CancellationToken ct)
+    {
         options ??= GitProcessOptions.Default;
 
         var fullArguments = BuildFullArguments(arguments);
         var stdoutBuilder = new StringBuilder();
         var stderrBuilder = new StringBuilder();
         long bytesRead = 0;
+        long stdoutBytes = 0;
+        using var limitCts = options.MaxStdoutBytes is not null
+            ? CancellationTokenSource.CreateLinkedTokenSource(ct)
+            : null;
 
         var stdoutTarget = options.StdoutTarget ?? BuildTextTarget(stdoutBuilder, options.OnStdoutLine);
         var stderrTarget = BuildTextTarget(stderrBuilder, options.OnStderrLine);
 
-        stdoutTarget = new ByteCountingPipeTarget(stdoutTarget, n => Interlocked.Add(ref bytesRead, n));
+        stdoutTarget = new ByteCountingPipeTarget(stdoutTarget, n =>
+        {
+            Interlocked.Add(ref bytesRead, n);
+            var total = Interlocked.Add(ref stdoutBytes, n);
+            if (options.MaxStdoutBytes is { } max && total > max)
+                limitCts?.Cancel();
+        });
         stderrTarget = new ByteCountingPipeTarget(stderrTarget, n => Interlocked.Add(ref bytesRead, n));
 
         var command = Cli.Wrap(options.ExecutableOverride ?? _executablePath)
@@ -81,8 +109,11 @@ public sealed class GitProcessRunner : IGitProcessRunner
             command = command.WithStandardInputPipe(PipeSource.FromString(options.StdinText, Encoding.UTF8));
 
         using var timeoutCts = options.Timeout is { } timeout ? new CancellationTokenSource(timeout) : null;
-        using var linkedCts = timeoutCts is null ? null : CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
-        var effectiveToken = linkedCts?.Token ?? ct;
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+            ct,
+            timeoutCts?.Token ?? CancellationToken.None,
+            limitCts?.Token ?? CancellationToken.None);
+        var effectiveToken = linkedCts.Token;
 
         CodeReviewrMeters.GitInvocations.Add(1);
         _logger.LogDebug("git {Arguments}", string.Join(' ', fullArguments));
@@ -91,6 +122,13 @@ public sealed class GitProcessRunner : IGitProcessRunner
         try
         {
             result = await command.ExecuteAsync(effectiveToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (
+            options.MaxStdoutBytes is { } maxLimit
+            && Interlocked.Read(ref stdoutBytes) > maxLimit
+            && !ct.IsCancellationRequested)
+        {
+            throw new DiffTooLargeException(maxLimit, Interlocked.Read(ref stdoutBytes));
         }
         catch (OperationCanceledException) when (timeoutCts?.IsCancellationRequested == true && !ct.IsCancellationRequested)
         {
@@ -102,6 +140,9 @@ public sealed class GitProcessRunner : IGitProcessRunner
         {
             CodeReviewrMeters.GitBytesRead.Add(Interlocked.Read(ref bytesRead));
         }
+
+        if (options.MaxStdoutBytes is { } postMax && Interlocked.Read(ref stdoutBytes) > postMax)
+            throw new DiffTooLargeException(postMax, Interlocked.Read(ref stdoutBytes));
 
         var stdout = stdoutBuilder.ToString();
         var stderr = stderrBuilder.ToString();
@@ -134,7 +175,13 @@ public sealed class GitProcessRunner : IGitProcessRunner
         IReadOnlyList<string> arguments,
         CancellationToken ct = default)
     {
-        AssertNotOnUiSyncContext();
+        // Long-lived starts must not capture the UI sync context either; callers should
+        // already be off the UI thread, but Task.Run is unsafe here (returns a process handle).
+        if (_assertNoUiSyncContext && SynchronizationContext.Current is not null)
+        {
+            _logger.LogWarning(
+                "StartLongLived invoked with a UI SynchronizationContext; continuing on the current thread. Prefer calling from a background thread.");
+        }
 
         var fullArguments = BuildFullArguments(arguments);
         var stdinPipe = new Pipe();
@@ -183,16 +230,6 @@ public sealed class GitProcessRunner : IGitProcessRunner
         finally
         {
             await stdoutWriter.CompleteAsync().ConfigureAwait(false);
-        }
-    }
-
-    private void AssertNotOnUiSyncContext()
-    {
-        if (_assertNoUiSyncContext && SynchronizationContext.Current is not null)
-        {
-            throw new InvalidOperationException(
-                "A git process was invoked while a UI SynchronizationContext was current. " +
-                "Dispatch to a background thread (e.g. Task.Run) before invoking git.");
         }
     }
 

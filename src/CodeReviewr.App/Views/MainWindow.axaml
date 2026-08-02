@@ -1387,6 +1387,8 @@
                                      EmptyMessage="{Binding Review.DiffEmptyMessage}"
                                      Annotations="{Binding Review.DiffAnnotations}"
                                      SelectedAnnotation="{Binding Review.SelectedAnnotation, Mode=TwoWay}"
+                                     LeftSyntaxTokens="{Binding Review.LeftSyntaxTokens}"
+                                     RightSyntaxTokens="{Binding Review.RightSyntaxTokens}"
                                      CanAddLineComments="True"
                                      AddLineCommentCommand="{Binding Review.BeginLineCommentCommand}"
                                      CanStageLines="False"

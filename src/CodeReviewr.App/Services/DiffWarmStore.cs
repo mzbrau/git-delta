@@ -7,6 +7,13 @@ namespace CodeReviewr.App.Services;
 /// Path-keyed single-flight cache of in-flight / completed <see cref="FileDiff"/> loads.
 /// Supports stale-while-revalidate: soft-invalidated entries stay readable while a background
 /// refetch replaces them.
+///
+/// Distinct from content-addressed <see cref="CodeReviewr.Core.Caching.MemoryDiffCache"/>:
+/// <list type="bullet">
+/// <item><see cref="DiffWarmStore"/> keys by repository path + pathspec + scope for UI prefetch.</item>
+/// <item><c>MemoryDiffCache</c> keys by <see cref="FileDiffKey"/> (blob content + options) and is shared across scopes.</item>
+/// </list>
+/// Prefer warming through this store from the App layer; prefer <c>MemoryDiffCache</c> inside Diff orchestration.
 /// </summary>
 public sealed class DiffWarmStore : IDisposable
 {

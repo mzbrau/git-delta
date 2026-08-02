@@ -14,7 +14,12 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddCodeReviewrDiff(this IServiceCollection services)
     {
-        services.TryAddSingleton<IDiffCache, MemoryDiffCache>();
+        services.TryAddSingleton<IDiffCache>(sp =>
+        {
+            var capacity = sp.GetService<ISettingsStore>()?.Current.DiffCacheCapacity
+                ?? MemoryDiffCache.DefaultCapacity;
+            return new MemoryDiffCache(capacity);
+        });
         services.TryAddSingleton<IIntraLineDiffer, IntraLineDiffer>();
         services.TryAddSingleton<ISyntaxTokenService, SyntaxTokenService>();
         services.TryAddSingleton<IGitDiffService, GitDiffService>();

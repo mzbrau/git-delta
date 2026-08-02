@@ -35,10 +35,15 @@ dotnet run --project src/CodeReviewr.App
 
 | Project | Role |
 | --- | --- |
-| `CodeReviewr.Core` | Domain model, settings, abstractions |
+| `CodeReviewr.Core` | Domain model, settings, Git/diff abstractions, AI contracts |
 | `CodeReviewr.Git` | CliWrap invocation, porcelain parsing, concurrency gate |
-| `CodeReviewr.Diff` | Patch parsing, `FileDiff`, row projection, intra-line differ |
+| `CodeReviewr.Diff` | Patch parsing, `FileDiff`, row projection, syntax, intra-line differ |
+| `CodeReviewr.GitHub` | GraphQL client, accounts, pull request inbox |
+| `CodeReviewr.Persistence` | OS token stores, SQLite durable user data / outbox / cache |
+| `CodeReviewr.Review` | PR session orchestration, comments, `IReviewTree` |
 | `CodeReviewr.App` | Avalonia UI, custom diff control, DI composition root |
+
+Phase 3 AI reads revision-pinned trees via `IReviewTree` and overlays results through `IDiffAnnotationSource` / `IAIReviewService` — never mutating cached `FileDiff`s.
 
 ## License
 

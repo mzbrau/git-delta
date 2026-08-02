@@ -14,7 +14,13 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddCodeReviewrGit(this IServiceCollection services)
     {
         services.AddSingleton<IGitCommandLog, GitCommandLog>();
-        services.AddSingleton<GitProcessRunner>();
+        services.AddSingleton(sp =>
+        {
+            var logger = sp.GetService<Microsoft.Extensions.Logging.ILogger<GitProcessRunner>>();
+            var log = sp.GetService<IGitCommandLog>();
+            // Production DI asserts Git never starts on a UI SynchronizationContext.
+            return new GitProcessRunner(logger, log, assertNoUiSyncContext: true);
+        });
         services.AddSingleton<IGitProcessRunner>(sp =>
         {
             var inner = sp.GetRequiredService<GitProcessRunner>();
@@ -40,6 +46,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IGitStashService, GitStashService>();
         services.AddSingleton<IGitHistoryService, GitHistoryService>();
         services.AddSingleton<GitRepositoryWatcher>();
+        services.AddSingleton<IRepositoryWatcher>(sp => sp.GetRequiredService<GitRepositoryWatcher>());
+        services.AddSingleton<IFsmonitorService, FsmonitorService>();
 
         return services;
     }

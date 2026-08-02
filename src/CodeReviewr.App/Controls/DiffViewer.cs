@@ -92,8 +92,23 @@ public sealed class DiffViewer : Control
     private readonly List<HunkButtonHit> _hunkButtons = [];
     private readonly List<AnnotationHit> _annotationHits = [];
     private readonly List<AddCommentHit> _addCommentHits = [];
+    private MinimapSnapshot? _minimapSnapshot;
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
+
+    /// <summary>Subsampled minimap marks — one entry per vertical pixel, rebuilt when rows/mode/height change.</summary>
+    private sealed class MinimapSnapshot(
+        object rowsIdentity,
+        DiffViewMode mode,
+        int heightPx,
+        byte[] marks)
+    {
+        public object RowsIdentity { get; } = rowsIdentity;
+        public DiffViewMode Mode { get; } = mode;
+        public int HeightPx { get; } = heightPx;
+        /// <summary>0=none, 1=added, 2=removed, 3=both (side-by-side).</summary>
+        public byte[] Marks { get; } = marks;
+    }
 
     private enum HunkButtonAction { Stage, Unstage, Discard }
 
@@ -231,6 +246,7 @@ public sealed class DiffViewer : Control
             _hoverSide = null;
             _hoverAddComment = false;
             _scrollY = 0;
+            _minimapSnapshot = null;
             InvalidateVisual();
             InvalidateMeasure();
         }
@@ -267,6 +283,7 @@ public sealed class DiffViewer : Control
 
     private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        _minimapSnapshot = null;
         ClampScroll();
         InvalidateVisual();
         InvalidateMeasure();
@@ -676,40 +693,30 @@ public sealed class DiffViewer : Control
         var track = Brush("ForgeMinimapTrackBrush", Brushes.Transparent);
         context.FillRectangle(track, new Rect(0, 0, MinimapWidth, bounds.Height));
 
-        var total = Math.Max(1, rows.Count);
+        var heightPx = Math.Max(1, (int)Math.Ceiling(bounds.Height));
+        var snapshot = EnsureMinimapSnapshot(rows, ViewMode, heightPx);
         var added = Brush("ForgeStatusAddedBrush", Brushes.LimeGreen);
         var removed = Brush("ForgeStatusDeletedBrush", Brushes.OrangeRed);
 
-        for (var i = 0; i < rows.Count; i++)
+        // Paint O(viewport height) marks from the subsampled cache — never O(rows).
+        for (var y = 0; y < snapshot.Marks.Length; y++)
         {
-            var row = rows[i];
-            var y = i / (double)total * bounds.Height;
-            var h = Math.Max(2, bounds.Height / total);
-            var markRect = new Rect(2, y, MinimapWidth - 4, h);
-
-            if (ViewMode == DiffViewMode.SideBySide)
+            var mark = snapshot.Marks[y];
+            if (mark == 0) continue;
+            var markRect = new Rect(2, y, MinimapWidth - 4, 1);
+            if (mark == 3)
             {
-                var leftKind = DiffRowPresentation.SideBySideLeftKind(row);
-                var rightKind = DiffRowPresentation.SideBySideRightKind(row);
-                if (leftKind == DiffRowKind.Removed && rightKind == DiffRowKind.Added)
-                {
-                    var half = (MinimapWidth - 4) / 2;
-                    context.FillRectangle(removed, new Rect(2, y, half, h));
-                    context.FillRectangle(added, new Rect(2 + half, y, MinimapWidth - 4 - half, h));
-                }
-                else if (rightKind == DiffRowKind.Added)
-                    context.FillRectangle(added, markRect);
-                else if (leftKind == DiffRowKind.Removed)
-                    context.FillRectangle(removed, markRect);
+                var half = (MinimapWidth - 4) / 2;
+                context.FillRectangle(removed, new Rect(2, y, half, 1));
+                context.FillRectangle(added, new Rect(2 + half, y, MinimapWidth - 4 - half, 1));
             }
-            else if (row.Kind is DiffRowKind.Added or DiffRowKind.Removed)
-            {
-                context.FillRectangle(
-                    row.Kind == DiffRowKind.Added ? added : removed,
-                    markRect);
-            }
+            else if (mark == 1)
+                context.FillRectangle(added, markRect);
+            else
+                context.FillRectangle(removed, markRect);
         }
 
+        var total = Math.Max(1, rows.Count);
         var contentHeight = total * RowHeight;
         if (contentHeight <= 0) return;
         var viewportRatio = Math.Clamp(bounds.Height / contentHeight, 0, 1);
@@ -723,6 +730,43 @@ public sealed class DiffViewer : Control
             new Pen(Brush("ForgeOutlineBrush", Brushes.Gray), 1),
             new Rect(1, viewportY, MinimapWidth - 2, viewportH),
             1, 1);
+    }
+
+    private MinimapSnapshot EnsureMinimapSnapshot(IReadOnlyList<DiffRow> rows, DiffViewMode mode, int heightPx)
+    {
+        if (_minimapSnapshot is { } cached
+            && ReferenceEquals(cached.RowsIdentity, rows)
+            && cached.Mode == mode
+            && cached.HeightPx == heightPx)
+        {
+            return cached;
+        }
+
+        var marks = new byte[heightPx];
+        var total = Math.Max(1, rows.Count);
+        for (var y = 0; y < heightPx; y++)
+        {
+            var i = Math.Min(total - 1, (int)((long)y * total / heightPx));
+            var row = rows[i];
+            if (mode == DiffViewMode.SideBySide)
+            {
+                var leftKind = DiffRowPresentation.SideBySideLeftKind(row);
+                var rightKind = DiffRowPresentation.SideBySideRightKind(row);
+                if (leftKind == DiffRowKind.Removed && rightKind == DiffRowKind.Added)
+                    marks[y] = 3;
+                else if (rightKind == DiffRowKind.Added)
+                    marks[y] = 1;
+                else if (leftKind == DiffRowKind.Removed)
+                    marks[y] = 2;
+            }
+            else if (row.Kind == DiffRowKind.Added)
+                marks[y] = 1;
+            else if (row.Kind == DiffRowKind.Removed)
+                marks[y] = 2;
+        }
+
+        _minimapSnapshot = new MinimapSnapshot(rows, mode, heightPx, marks);
+        return _minimapSnapshot;
     }
 
     private void DrawUnifiedHunkButtons(DrawingContext context, int hunkIndex, double y, double rowH, double width)

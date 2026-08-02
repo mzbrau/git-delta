@@ -84,7 +84,7 @@ dotnet run --project tests/CodeReviewr.Benchmarks -c Release
 
 ### Conventions & Patterns
 
-- Projects: `CodeReviewr.Core` (domain, settings, abstractions), `CodeReviewr.Git` (CliWrap + porcelain), `CodeReviewr.Diff` (patch/FileDiff/row projection/syntax), `CodeReviewr.App` (Avalonia UI + DI root).
+- Projects: `CodeReviewr.Core` (domain, settings, abstractions), `CodeReviewr.Git` (CliWrap + porcelain), `CodeReviewr.Diff` (patch/FileDiff/row projection/syntax), `CodeReviewr.GitHub` (GraphQL), `CodeReviewr.Persistence` (tokens + SQLite), `CodeReviewr.Review` (PR sessions / outbox / `IReviewTree`), `CodeReviewr.App` (Avalonia UI + DI root).
 - Tests mirror projects under `tests/`; shared fixtures in `tests/CodeReviewr.TestSupport` (`RepositoryBuilder`). `TestSupport` is not a test project.
 - Namespaces match assembly (`CodeReviewr.Core`, `CodeReviewr.Git`, …). Prefer file-scoped namespaces.
 - Git interfaces live in `src/CodeReviewr.Core/Abstractions/`; implementations in `Git` / `Diff`. Register via `AddCodeReviewrGit()` / `AddCodeReviewrDiff()` and `ServiceConfiguration.Build()`.

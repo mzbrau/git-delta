@@ -42,6 +42,26 @@ public sealed record AppSettings
     /// </summary>
     public int DiffPrefetchConcurrency { get; set; } = 4;
 
+    /// <summary>
+    /// Maximum raw unified-diff patch size (bytes) that will be buffered from Git.
+    /// Larger outputs fail with <see cref="DiffTooLargeException"/> instead of risking OOM.
+    /// </summary>
+    public int MaxDiffPatchBytes { get; set; } = 32 * 1024 * 1024;
+
+    /// <summary>Maximum entries retained in the content-addressed <c>MemoryDiffCache</c>.</summary>
+    public int DiffCacheCapacity { get; set; } = 256;
+
+    /// <summary>
+    /// When false (default), AI features that would send repository content off-device are disabled.
+    /// Phase 3 wires this to the Copilot (or other) SDK.
+    /// </summary>
+    public bool AiAssistanceEnabled { get; set; }
+
+    /// <summary>
+    /// When true, AI prompts redact likely secrets (tokens, private keys) before leaving the device.
+    /// </summary>
+    public bool AiRedactSecrets { get; set; } = true;
+
     /// <summary>Root folder scanned for local Git repositories (Phase 2).</summary>
     public string? DevelopmentFolder { get; set; }
 

@@ -80,7 +80,7 @@ public sealed record GitResult(int ExitCode, string? StderrSummary)
     public bool Succeeded => ExitCode == 0;
 }
 
-public sealed class GitException : Exception
+public class GitException : Exception
 {
     public int ExitCode { get; }
     public string? StderrSummary { get; }

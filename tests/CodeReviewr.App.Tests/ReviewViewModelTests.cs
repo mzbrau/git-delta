@@ -52,7 +52,8 @@ public sealed class ReviewViewModelTests
             new AlwaysConfirmDialog(),
             settings,
             new NotificationService(),
-            new IntraLineDiffer());
+            new IntraLineDiffer(),
+            Substitute.For<IGitObjectReader>());
     }
 
     private static PullRequestSummary CreateSummary(InboxSection section, string title) =>

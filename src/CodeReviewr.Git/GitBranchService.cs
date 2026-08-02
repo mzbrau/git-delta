@@ -24,7 +24,7 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
 
     public Task CheckoutAsync(string repositoryPath, string branch, CancellationToken ct = default) =>
         gates.For(repositoryPath).RunWorktreeWriteAsync(
-            token => runner.RunAsync(repositoryPath, ["checkout", branch], options: null, token),
+            token => runner.RunAsync(repositoryPath, ["checkout", "--", branch], options: null, token),
             ct);
 
     public Task CreateBranchAsync(string repositoryPath, string name, bool checkout, CancellationToken ct = default)
@@ -32,7 +32,7 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
         if (checkout)
         {
             return gates.For(repositoryPath).RunWorktreeWriteAsync(
-                token => runner.RunAsync(repositoryPath, ["checkout", "-b", name], options: null, token),
+                token => runner.RunAsync(repositoryPath, ["checkout", "-b", "--", name], options: null, token),
                 ct);
         }
 
@@ -48,7 +48,7 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
 
     public Task RenameBranchAsync(string repositoryPath, string oldName, string newName, CancellationToken ct = default) =>
         gates.For(repositoryPath).RunIndexWriteAsync(
-            token => runner.RunAsync(repositoryPath, ["branch", "-m", oldName, newName], options: null, token),
+            token => runner.RunAsync(repositoryPath, ["branch", "-m", "--", oldName, newName], options: null, token),
             ct);
 
     public Task FetchAsync(string repositoryPath, CancellationToken ct = default) =>
