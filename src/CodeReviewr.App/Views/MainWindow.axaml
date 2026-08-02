@@ -259,7 +259,7 @@
                 </Button>
                 <StackPanel IsVisible="{Binding WorkingCopy.WorkspaceExpanded}" Spacing="1">
                   <Button Classes="Ghost"
-                          Classes.NavSelected="{Binding WorkingCopy.IsFileStatusNavSelected}"
+                          Classes.NavSelected="{Binding ShowFileStatusPane}"
                           HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                           Padding="28,6,12,6" Command="{Binding SelectWorkspaceFileStatusCommand}">
                     <DockPanel>
@@ -273,18 +273,18 @@
                       <StackPanel Orientation="Horizontal" Spacing="8">
                         <icons:MaterialIcon Kind="FileDocumentOutline" Width="16" Height="16" />
                         <TextBlock Text="File Status" VerticalAlignment="Center"
-                                   FontWeight="{Binding WorkingCopy.IsFileStatusNavSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                                   FontWeight="{Binding ShowFileStatusPane, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
                       </StackPanel>
                     </DockPanel>
                   </Button>
                   <Button Classes="Ghost"
-                          Classes.NavSelected="{Binding WorkingCopy.IsHistoryNavSelected}"
+                          Classes.NavSelected="{Binding ShowHistoryPane}"
                           HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                           Padding="28,6,12,6" Command="{Binding SelectWorkspaceHistoryCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                       <icons:MaterialIcon Kind="History" Width="16" Height="16" />
                       <TextBlock Text="History" VerticalAlignment="Center"
-                                 FontWeight="{Binding WorkingCopy.IsHistoryNavSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                                 FontWeight="{Binding ShowHistoryPane, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
                     </StackPanel>
                   </Button>
                 </StackPanel>
@@ -1051,7 +1051,7 @@
         <GridSplitter Grid.Column="3" Width="4" ResizeDirection="Columns"
                       Background="{DynamicResource ForgeOutlineVariantBrush}"
                       DragCompleted="OnColumnSplitterDragCompleted"
-                      IsVisible="{Binding ShowFileStatusPane}" />
+                      IsVisible="{Binding ShowMainFileDiffSplitter}" />
 
         <!-- Diff pane (File Status / Stash) -->
         <DockPanel Grid.Column="4" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"

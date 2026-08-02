@@ -92,6 +92,9 @@ public static class ForgeConverters
 
     public static string FormatRelativeTime(DateTimeOffset date)
     {
+        if (date == default || date == DateTimeOffset.MinValue)
+            return string.Empty;
+
         var elapsed = DateTimeOffset.Now - date.ToLocalTime();
         if (elapsed < TimeSpan.Zero)
             elapsed = TimeSpan.Zero;

@@ -48,6 +48,7 @@ query PullRequestDetail($owner: String!, $name: String!, $number: Int!) {
           body
           state
           submittedAt
+          createdAt
           url
         }
       }

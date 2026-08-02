@@ -57,6 +57,7 @@ public partial class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(ShowFileStatusPane));
                 OnPropertyChanged(nameof(ShowPullRequestPane));
                 OnPropertyChanged(nameof(ShowHistoryPane));
+                OnPropertyChanged(nameof(ShowMainFileDiffSplitter));
             }
         };
         Review.PropertyChanged += (_, e) =>
@@ -67,6 +68,7 @@ public partial class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(ShowFileStatusPane));
                 OnPropertyChanged(nameof(ShowPullRequestPane));
                 OnPropertyChanged(nameof(ShowHistoryPane));
+                OnPropertyChanged(nameof(ShowMainFileDiffSplitter));
 
                 // Opening a PR must leave History so the History grid cannot cover PR panes
                 // after the loading overlay clears.
@@ -137,6 +139,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool ShowFileStatusPane => !WorkingCopy.IsHistoryMode && !Review.IsPullRequestMode;
     public bool ShowPullRequestPane => Review.IsPullRequestMode;
     public bool ShowHistoryPane => WorkingCopy.IsHistoryMode && !Review.IsPullRequestMode;
+    public bool ShowMainFileDiffSplitter => ShowFileStatusPane || ShowPullRequestPane;
 
     partial void OnNavigatorWidthChanged(double value) => OnPropertyChanged(nameof(NavigatorColumnWidth));
     partial void OnFileListWidthChanged(double value) => OnPropertyChanged(nameof(FileListColumnWidth));

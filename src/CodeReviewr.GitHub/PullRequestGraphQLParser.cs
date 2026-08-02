@@ -225,10 +225,19 @@ internal static class PullRequestGraphQLParser
                     body = stateOnly.GetString() ?? string.Empty;
                 }
 
-                var submittedAt = review.TryGetProperty("submittedAt", out var submittedProp) &&
-                                  submittedProp.ValueKind == JsonValueKind.String
-                    ? DateTimeOffset.Parse(submittedProp.GetString()!)
-                    : DateTimeOffset.MinValue;
+                // PENDING reviews have null submittedAt; fall back to createdAt.
+                var createdAt = DateTimeOffset.MinValue;
+                if (review.TryGetProperty("submittedAt", out var submittedProp) &&
+                    submittedProp.ValueKind == JsonValueKind.String)
+                {
+                    createdAt = DateTimeOffset.Parse(submittedProp.GetString()!);
+                }
+                else if (review.TryGetProperty("createdAt", out var createdProp) &&
+                         createdProp.ValueKind == JsonValueKind.String)
+                {
+                    createdAt = DateTimeOffset.Parse(createdProp.GetString()!);
+                }
+
                 string? author = null;
                 if (review.TryGetProperty("author", out var authorProp) &&
                     authorProp.ValueKind == JsonValueKind.Object &&
@@ -242,7 +251,7 @@ internal static class PullRequestGraphQLParser
                     Kind: "review",
                     AuthorLogin: author,
                     Body: body,
-                    CreatedAt: submittedAt,
+                    CreatedAt: createdAt,
                     Url: review.TryGetProperty("url", out var url) && url.ValueKind == JsonValueKind.String
                         ? url.GetString()
                         : null,
