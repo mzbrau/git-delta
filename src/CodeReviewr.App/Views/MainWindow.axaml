@@ -749,9 +749,6 @@
                 <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-                      <Button Classes="Link" Content="Discard"
-                              Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}"
-                              IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
                       <Button Classes="Link" Content="Stage Selected"
                               Command="{Binding WorkingCopy.StageSelectedCommand}"
                               IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
@@ -1094,43 +1091,71 @@
                   Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
             <DockPanel>
-              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <Button Classes="IconOnly"
                         Command="{Binding WorkingCopy.ForceRefreshDiffCommand}"
                         ToolTip.Tip="Refresh diff"
                         IsVisible="{Binding WorkingCopy.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                   <icons:MaterialIcon Kind="Refresh" Width="16" Height="16" />
                 </Button>
-                <CheckBox Content="Ignore whitespace"
-                          IsChecked="{Binding WorkingCopy.IgnoreWhitespace}"
-                          FontSize="11" VerticalAlignment="Center" />
-                <ToggleButton Content="{Binding WorkingCopy.FullFileToggleLabel}"
-                              IsChecked="{Binding WorkingCopy.ShowFullFile}"
-                              FontSize="11" Padding="8,4" />
-                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
-                            IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
-                  <TextBlock Text="Context" FontSize="11" VerticalAlignment="Center"
-                             Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                  <ComboBox ItemsSource="{Binding WorkingCopy.ContextLineOptions}"
-                            SelectedIndex="{Binding WorkingCopy.ContextLinesIndex}"
-                            MinWidth="56" FontSize="11" />
-                </StackPanel>
-                <ComboBox SelectedItem="{Binding WorkingCopy.ViewMode}" MinWidth="120">
-                  <core:DiffViewMode>SideBySide</core:DiffViewMode>
-                  <core:DiffViewMode>Unified</core:DiffViewMode>
-                </ComboBox>
-                <Button Classes="Link" Content="Discard"
-                        Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}"
-                        IsVisible="{Binding WorkingCopy.CanDiscardSelection}"
-                        FontSize="11" VerticalAlignment="Center" />
-                <Button Classes="IconOnly">
+                <Button Classes="ReviewAction"
+                        Classes.Pressed="{Binding WorkingCopy.ShowFullFile}"
+                        Command="{Binding WorkingCopy.ToggleShowFullFileCommand}"
+                        ToolTip.Tip="{Binding WorkingCopy.FullFileToggleTooltip}">
+                  <icons:MaterialIcon Kind="FileDocumentOutline" Width="18" Height="18" />
+                </Button>
+                <Border Width="1" Height="22" Margin="2,0"
+                        Background="{DynamicResource ForgeOutlineVariantBrush}" />
+                <Button Classes="IconOnly" ToolTip.Tip="Diff options">
                   <Button.Flyout>
                     <MenuFlyout Placement="BottomEdgeAlignedRight">
                       <MenuItem Header="Combined review"
-                                Command="{Binding WorkingCopy.ToggleCombinedReviewCommand}" />
-                      <MenuItem Header="Stage hunk" Command="{Binding WorkingCopy.StageHunkCommand}" />
-                      <MenuItem Header="Unstage hunk" Command="{Binding WorkingCopy.UnstageHunkCommand}" />
-                      <MenuItem Header="Discard hunk" Command="{Binding WorkingCopy.DiscardHunkCommand}" />
+                                Command="{Binding WorkingCopy.ToggleCombinedReviewCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding WorkingCopy.IsCombinedReviewMode, Mode=OneWay}" />
+                      <MenuItem Header="Ignore whitespace"
+                                Command="{Binding WorkingCopy.ToggleIgnoreWhitespaceCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding WorkingCopy.IgnoreWhitespace, Mode=OneWay}" />
+                      <MenuItem Header="Context"
+                                IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                        <MenuItem Header="1"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="1"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines1, Mode=OneWay}" />
+                        <MenuItem Header="3"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="3"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines3, Mode=OneWay}" />
+                        <MenuItem Header="5"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="5"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines5, Mode=OneWay}" />
+                        <MenuItem Header="10"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="10"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines10, Mode=OneWay}" />
+                        <MenuItem Header="25"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="25"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines25, Mode=OneWay}" />
+                      </MenuItem>
+                      <Separator />
+                      <MenuItem Header="Unified"
+                                Command="{Binding WorkingCopy.SetViewModeCommand}"
+                                CommandParameter="{x:Static core:DiffViewMode.Unified}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding WorkingCopy.IsUnifiedView, Mode=OneWay}" />
+                      <MenuItem Header="Side by side"
+                                Command="{Binding WorkingCopy.SetViewModeCommand}"
+                                CommandParameter="{x:Static core:DiffViewMode.SideBySide}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding WorkingCopy.IsSideBySideView, Mode=OneWay}" />
                       <Separator />
                       <MenuItem Header="Discard file(s)"
                                 Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
@@ -2004,31 +2029,74 @@
                       Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                       BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
                 <DockPanel>
-                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <Button Classes="IconOnly"
                             Command="{Binding WorkingCopy.ForceRefreshDiffCommand}"
                             ToolTip.Tip="Refresh diff"
                             IsVisible="{Binding WorkingCopy.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                       <icons:MaterialIcon Kind="Refresh" Width="16" Height="16" />
                     </Button>
-                    <CheckBox Content="Ignore whitespace"
-                              IsChecked="{Binding WorkingCopy.IgnoreWhitespace}"
-                              FontSize="11" VerticalAlignment="Center" />
-                    <ToggleButton Content="{Binding WorkingCopy.FullFileToggleLabel}"
-                                  IsChecked="{Binding WorkingCopy.ShowFullFile}"
-                                  FontSize="11" Padding="8,4" />
-                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
-                                IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
-                      <TextBlock Text="Context" FontSize="11" VerticalAlignment="Center"
-                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                      <ComboBox ItemsSource="{Binding WorkingCopy.ContextLineOptions}"
-                                SelectedIndex="{Binding WorkingCopy.ContextLinesIndex}"
-                                MinWidth="56" FontSize="11" />
-                    </StackPanel>
-                    <ComboBox SelectedItem="{Binding WorkingCopy.ViewMode}" MinWidth="120">
-                      <core:DiffViewMode>SideBySide</core:DiffViewMode>
-                      <core:DiffViewMode>Unified</core:DiffViewMode>
-                    </ComboBox>
+                    <Button Classes="ReviewAction"
+                            Classes.Pressed="{Binding WorkingCopy.ShowFullFile}"
+                            Command="{Binding WorkingCopy.ToggleShowFullFileCommand}"
+                            ToolTip.Tip="{Binding WorkingCopy.FullFileToggleTooltip}">
+                      <icons:MaterialIcon Kind="FileDocumentOutline" Width="18" Height="18" />
+                    </Button>
+                    <Border Width="1" Height="22" Margin="2,0"
+                            Background="{DynamicResource ForgeOutlineVariantBrush}" />
+                    <Button Classes="IconOnly" ToolTip.Tip="Diff options">
+                      <Button.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                          <MenuItem Header="Ignore whitespace"
+                                    Command="{Binding WorkingCopy.ToggleIgnoreWhitespaceCommand}"
+                                    ToggleType="CheckBox"
+                                    IsChecked="{Binding WorkingCopy.IgnoreWhitespace, Mode=OneWay}" />
+                          <MenuItem Header="Context"
+                                    IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                            <MenuItem Header="1"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="1"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines1, Mode=OneWay}" />
+                            <MenuItem Header="3"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="3"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines3, Mode=OneWay}" />
+                            <MenuItem Header="5"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="5"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines5, Mode=OneWay}" />
+                            <MenuItem Header="10"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="10"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines10, Mode=OneWay}" />
+                            <MenuItem Header="25"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="25"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines25, Mode=OneWay}" />
+                          </MenuItem>
+                          <Separator />
+                          <MenuItem Header="Unified"
+                                    Command="{Binding WorkingCopy.SetViewModeCommand}"
+                                    CommandParameter="{x:Static core:DiffViewMode.Unified}"
+                                    ToggleType="Radio"
+                                    IsChecked="{Binding WorkingCopy.IsUnifiedView, Mode=OneWay}" />
+                          <MenuItem Header="Side by side"
+                                    Command="{Binding WorkingCopy.SetViewModeCommand}"
+                                    CommandParameter="{x:Static core:DiffViewMode.SideBySide}"
+                                    ToggleType="Radio"
+                                    IsChecked="{Binding WorkingCopy.IsSideBySideView, Mode=OneWay}" />
+                          <Separator />
+                          <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                    Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
+                        </MenuFlyout>
+                      </Button.Flyout>
+                      <icons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
+                    </Button>
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center"
                               IsVisible="{Binding WorkingCopy.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">

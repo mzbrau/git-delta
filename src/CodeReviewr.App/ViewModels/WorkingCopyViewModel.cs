@@ -240,6 +240,14 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
 
     public string FullFileToggleLabel => ShowFullFile ? "Diff only" : "Full file";
+    public string FullFileToggleTooltip => ShowFullFile ? "Diff only" : "Full file";
+    public bool IsUnifiedView => ViewMode == DiffViewMode.Unified;
+    public bool IsSideBySideView => ViewMode == DiffViewMode.SideBySide;
+    public bool IsContextLines1 => ContextLines == 1;
+    public bool IsContextLines3 => ContextLines == 3;
+    public bool IsContextLines5 => ContextLines == 5;
+    public bool IsContextLines10 => ContextLines == 10;
+    public bool IsContextLines25 => ContextLines == 25;
 
     public string RevealInFileManagerLabel => FileManagerReveal.Label;
 
@@ -406,6 +414,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnContextLinesChanged(int value)
     {
         OnPropertyChanged(nameof(ContextLinesIndex));
+        NotifyContextLineSelectionChanged();
         if (value <= 0) return;
         _settings.Update(s => s.ContextLines = value);
         _ = _settings.SaveAsync();
@@ -420,6 +429,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnShowFullFileChanged(bool value)
     {
         OnPropertyChanged(nameof(FullFileToggleLabel));
+        OnPropertyChanged(nameof(FullFileToggleTooltip));
         _expandedCollapses.Clear();
         _warmStore.InvalidateAll();
         _ = LoadDiffForSelectionAsync(SelectedFile);
@@ -1494,6 +1504,8 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     partial void OnViewModeChanged(DiffViewMode value)
     {
+        OnPropertyChanged(nameof(IsUnifiedView));
+        OnPropertyChanged(nameof(IsSideBySideView));
         if (_currentDiff is null) return;
         // Instant switch: recompute layout only — zero git, zero tokenize
         ProjectRows(_currentDiff);
@@ -1511,6 +1523,34 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleShowFullFile() => ShowFullFile = !ShowFullFile;
+
+    [RelayCommand]
+    private void ToggleIgnoreWhitespace() => IgnoreWhitespace = !IgnoreWhitespace;
+
+    [RelayCommand]
+    private void SetViewMode(DiffViewMode mode) => ViewMode = mode;
+
+    [RelayCommand]
+    private void SetContextLines(object? lines)
+    {
+        var value = lines switch
+        {
+            int i => i,
+            string s when int.TryParse(s, out var parsed) => parsed,
+            _ => -1,
+        };
+        if (value > 0)
+            ContextLines = value;
+    }
+
+    private void NotifyContextLineSelectionChanged()
+    {
+        OnPropertyChanged(nameof(IsContextLines1));
+        OnPropertyChanged(nameof(IsContextLines3));
+        OnPropertyChanged(nameof(IsContextLines5));
+        OnPropertyChanged(nameof(IsContextLines10));
+        OnPropertyChanged(nameof(IsContextLines25));
+    }
 
     public void ExpandCollapsedSection(int hunkIndex, int lineIndexInHunk)
     {
