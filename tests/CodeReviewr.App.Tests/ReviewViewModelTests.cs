@@ -901,6 +901,112 @@ public sealed class ReviewViewModelTests
         }
     }
 
+    [Test]
+    public void CanShowMarkdownPreview_Depends_On_Selected_File_Extension()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        Assert.That(vm.CanShowMarkdownPreview, Is.False);
+
+        vm.SelectedFile = new FileItemViewModel(FilePath.From("README.md"), ChangeKind.Modified, isStagedList: false);
+        Assert.That(vm.IsMarkdownFile, Is.True);
+        Assert.That(vm.CanShowMarkdownPreview, Is.True);
+
+        vm.SelectedFile = new FileItemViewModel(FilePath.From("Program.cs"), ChangeKind.Modified, isStagedList: false);
+        Assert.That(vm.IsMarkdownFile, Is.False);
+        Assert.That(vm.CanShowMarkdownPreview, Is.False);
+    }
+
+    [Test]
+    public async Task ToggleShowMarkdownPreview_Loads_New_Blob_Text()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var path = FilePath.From("docs/guide.md");
+        var content = ContentId.FromSha(new string('c', 40));
+        var markdown = "# Guide\n\nHello world.\n";
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(path, ChangeKind.Modified)]);
+
+        var hunk = new DiffHunk(
+            OldStart: 1, OldCount: 1, NewStart: 1, NewCount: 1,
+            Header: "@@ -1,1 +1,1 @@",
+            Lines:
+            [
+                new DiffLine(DiffLineKind.Removed, 1, null, "old\n".AsMemory()),
+                new DiffLine(DiffLineKind.Added, null, 1, "# Guide\n".AsMemory()),
+            ]);
+        var fileDiff = new FileDiff(
+            new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+            path, path, ChangeKind.Modified,
+            content, content, false, [hunk], "");
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(session, path, Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            .Returns(fileDiff);
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+        comments.ResolveAnchorsAsync(
+                session,
+                Arg.Any<IReadOnlyList<ReviewThread>>(),
+                path,
+                Arg.Any<FileDiff>(),
+                Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var objects = Substitute.For<IGitObjectReader>();
+        objects.ReadBlobAsync(session.RepositoryPath, content, Arg.Any<CancellationToken>())
+            .Returns(System.Text.Encoding.UTF8.GetBytes(markdown));
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+
+        var vm = CreateViewModel(pullRequests, settings, reviewService, comments, outbox, durable, objects: objects);
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && !vm.IsLoadingDiff);
+
+        Assert.That(vm.CanShowMarkdownPreview, Is.True);
+        Assert.That(vm.ShowMarkdownPreviewPane, Is.False);
+        Assert.That(vm.ShowDiffViewer, Is.True);
+
+        vm.ToggleShowMarkdownPreviewCommand.Execute(null);
+        await WaitUntilAsync(() => vm.MarkdownPreviewText is not null);
+
+        Assert.That(vm.ShowMarkdownPreviewPane, Is.True);
+        Assert.That(vm.ShowDiffViewer, Is.False);
+        Assert.That(vm.MarkdownPreviewText, Is.EqualTo(markdown));
+
+        vm.ToggleShowMarkdownPreviewCommand.Execute(null);
+        Assert.That(vm.ShowMarkdownPreviewPane, Is.False);
+        Assert.That(vm.ShowDiffViewer, Is.True);
+        Assert.That(vm.MarkdownPreviewText, Is.Null);
+    }
+
     private static ReviewViewModel CreateViewModel(
         IPullRequestService pullRequests,
         ISettingsStore settings,
@@ -908,7 +1014,8 @@ public sealed class ReviewViewModelTests
         IReviewCommentService? comments = null,
         IReviewOutbox? outbox = null,
         IDurableUserStore? durable = null,
-        IReviewSubmitDialog? reviewSubmit = null)
+        IReviewSubmitDialog? reviewSubmit = null,
+        IGitObjectReader? objects = null)
     {
         outbox ??= Substitute.For<IReviewOutbox>();
         outbox.IsOffline.Returns(false);
@@ -926,7 +1033,7 @@ public sealed class ReviewViewModelTests
             settings,
             new NotificationService(),
             new IntraLineDiffer(),
-            Substitute.For<IGitObjectReader>());
+            objects ?? Substitute.For<IGitObjectReader>());
     }
 
     private static PullRequestSummary CreateSummary(

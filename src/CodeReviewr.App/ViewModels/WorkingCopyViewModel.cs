@@ -5,6 +5,7 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CodeReviewr.App.Controls;
 using CodeReviewr.App.Services;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
@@ -208,6 +209,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private bool _ignoreWhitespace;
     [ObservableProperty] private int _contextLines = 3;
     [ObservableProperty] private bool _showFullFile;
+    [ObservableProperty] private bool _showMarkdownPreview;
+    [ObservableProperty] private string? _markdownPreviewText;
     [ObservableProperty] private bool _isImagePreview;
     [ObservableProperty] private bool _hasImageBefore;
     [ObservableProperty] private bool _isSingleImagePreview;
@@ -215,6 +218,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private Bitmap? _imageAfter;
     [ObservableProperty] private FileSyntaxTokens? _leftSyntaxTokens;
     [ObservableProperty] private FileSyntaxTokens? _rightSyntaxTokens;
+    private DiffTarget _currentDiffTarget = DiffTarget.IndexToWorktree;
 
     /// <summary>Raised before File Status entry collections are cleared so the view can drop ListBox selection first.</summary>
     public event Action? SelectionClearRequested;
@@ -241,6 +245,14 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     public string FullFileToggleLabel => ShowFullFile ? "Diff only" : "Full file";
     public string FullFileToggleTooltip => ShowFullFile ? "Diff only" : "Full file";
+    public bool IsMarkdownFile => SelectedFile is not null && MarkdownPath.IsMarkdownPath(SelectedFile.Path.Value);
+    public bool CanShowMarkdownPreview => IsMarkdownFile;
+    public bool ShowMarkdownPreviewPane => ShowMarkdownPreview && IsMarkdownFile;
+    public bool ShowDiffViewer => !IsImagePreview && !ShowMarkdownPreviewPane;
+    public string MarkdownPreviewEmptyMessage =>
+        SelectedFile is null ? "Select a file to view its diff"
+        : MarkdownPreviewText is null ? "No new version"
+        : "No markdown content";
     public bool IsUnifiedView => ViewMode == DiffViewMode.Unified;
     public bool IsSideBySideView => ViewMode == DiffViewMode.SideBySide;
     public bool IsContextLines1 => ContextLines == 1;
@@ -804,6 +816,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnSelectedFileChanged(FileItemViewModel? value)
     {
         OnPropertyChanged(nameof(SelectedFileAbsolutePath));
+        NotifyMarkdownPreviewStateChanged();
 
         if (_skipNextSelectedFileLoad)
         {
@@ -814,6 +827,17 @@ public partial class WorkingCopyViewModel : ObservableObject
         if (SelectedFileCount <= 1)
             _ = LoadDiffForSelectionAsync(value);
     }
+
+    partial void OnShowMarkdownPreviewChanged(bool value)
+    {
+        NotifyMarkdownPreviewStateChanged();
+        if (value && SelectedFile is not null && _currentDiff is not null)
+            _ = LoadMarkdownPreviewTextAsync(SelectedFile, _currentDiff, _currentDiffTarget, CancellationToken.None);
+        else if (!value)
+            MarkdownPreviewText = null;
+    }
+
+    partial void OnIsImagePreviewChanged(bool value) => NotifyMarkdownPreviewStateChanged();
 
     [RelayCommand]
     private void RevealSelectedInFileManager() => RevealInFileManager(SelectedFile);
@@ -1525,6 +1549,14 @@ public partial class WorkingCopyViewModel : ObservableObject
     private void ToggleShowFullFile() => ShowFullFile = !ShowFullFile;
 
     [RelayCommand]
+    private void ToggleShowMarkdownPreview()
+    {
+        if (!CanShowMarkdownPreview)
+            return;
+        ShowMarkdownPreview = !ShowMarkdownPreview;
+    }
+
+    [RelayCommand]
     private void ToggleIgnoreWhitespace() => IgnoreWhitespace = !IgnoreWhitespace;
 
     [RelayCommand]
@@ -2011,11 +2043,14 @@ public partial class WorkingCopyViewModel : ObservableObject
         CancellationToken ct)
     {
         _currentDiff = ApplyIntraLine(diff);
+        _currentDiffTarget = target;
         UpdateDiffStats(_currentDiff);
+        NotifyMarkdownPreviewStateChanged();
 
         if (IsImagePath(file.Path.Value))
         {
             ClearSyntaxTokens();
+            ClearMarkdownPreviewText();
             await LoadImagePreviewAsync(file, _currentDiff, target, ct);
             DiffRows.Clear();
             DiffEmptyMessage = "";
@@ -2023,6 +2058,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         else if (_currentDiff.IsBinary)
         {
             ClearSyntaxTokens();
+            ClearMarkdownPreviewText();
             DiffRows.Clear();
             DiffEmptyMessage = "Binary file";
             IsImagePreview = false;
@@ -2033,11 +2069,54 @@ public partial class WorkingCopyViewModel : ObservableObject
             ProjectRows(_currentDiff);
             // Tokenise once per selected FileDiff; view-mode switches reuse these tokens.
             await LoadSyntaxTokensAsync(file, _currentDiff, target, ct);
+            if (ShowMarkdownPreviewPane)
+                await LoadMarkdownPreviewTextAsync(file, _currentDiff, target, ct);
+            else
+                ClearMarkdownPreviewText();
         }
 
         OnPropertyChanged(nameof(CanStageLines));
         OnPropertyChanged(nameof(CanUnstageLines));
         OnPropertyChanged(nameof(CanDiscardLines));
+    }
+
+    private async Task LoadMarkdownPreviewTextAsync(
+        FileItemViewModel file,
+        FileDiff diff,
+        DiffTarget target,
+        CancellationToken ct)
+    {
+        if (!MarkdownPath.IsMarkdownPath(file.Path.Value))
+        {
+            ClearMarkdownPreviewText();
+            return;
+        }
+
+        try
+        {
+            var text = await ReadSideTextAsync(diff.NewContent, file, target, sideIsNew: true, ct)
+                .ConfigureAwait(false);
+            await InvokeOnUiAsync(() => MarkdownPreviewText = text);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            await InvokeOnUiAsync(ClearMarkdownPreviewText);
+        }
+    }
+
+    private void ClearMarkdownPreviewText() => MarkdownPreviewText = null;
+
+    private void NotifyMarkdownPreviewStateChanged()
+    {
+        OnPropertyChanged(nameof(IsMarkdownFile));
+        OnPropertyChanged(nameof(CanShowMarkdownPreview));
+        OnPropertyChanged(nameof(ShowMarkdownPreviewPane));
+        OnPropertyChanged(nameof(ShowDiffViewer));
+        OnPropertyChanged(nameof(MarkdownPreviewEmptyMessage));
     }
 
     private void ClearSyntaxTokens()
@@ -2456,7 +2535,11 @@ public partial class WorkingCopyViewModel : ObservableObject
         IsImagePreview = false;
         HasImageBefore = false;
         IsSingleImagePreview = false;
+        ClearMarkdownPreviewText();
     }
+
+    partial void OnMarkdownPreviewTextChanged(string? value) =>
+        OnPropertyChanged(nameof(MarkdownPreviewEmptyMessage));
 
     private void ClearImagePreviewBitmaps()
     {
