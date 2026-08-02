@@ -154,6 +154,7 @@ public sealed class PullRequestBudgetTests
             Title: "Fix inbox parsing",
             Url: "https://github.com/octo/repo/pull/42",
             IsDraft: false,
+            CreatedAt: DateTimeOffset.UtcNow,
             UpdatedAt: DateTimeOffset.UtcNow,
             ReviewDecision: "REVIEW_REQUIRED",
             BaseRefName: "main",

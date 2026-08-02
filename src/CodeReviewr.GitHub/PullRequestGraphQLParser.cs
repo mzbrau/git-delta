@@ -31,6 +31,12 @@ internal static class PullRequestGraphQLParser
             Title: pr.GetProperty("title").GetString() ?? string.Empty,
             Url: pr.GetProperty("url").GetString() ?? string.Empty,
             IsDraft: pr.GetProperty("isDraft").GetBoolean(),
+            CreatedAt: DateTimeOffset.Parse(
+                (pr.TryGetProperty("createdAt", out var createdAt) && createdAt.ValueKind == JsonValueKind.String
+                    ? createdAt.GetString()
+                    : null)
+                ?? pr.GetProperty("updatedAt").GetString()
+                ?? throw new InvalidOperationException("Pull request createdAt/updatedAt missing.")),
             UpdatedAt: DateTimeOffset.Parse(pr.GetProperty("updatedAt").GetString()
                 ?? throw new InvalidOperationException("Pull request updatedAt missing.")),
             ReviewDecision: pr.TryGetProperty("reviewDecision", out var rd) && rd.ValueKind != JsonValueKind.Null

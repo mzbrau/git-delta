@@ -19,6 +19,7 @@ public sealed class NotificationService : ObservableObject
     {
         var n = new AppNotification(message, retry, retry is null ? null : "Retry", isError: true);
         Notifications.Insert(0, n);
+        _ = DismissAfterAsync(n, TimeSpan.FromSeconds(12));
     }
 
     public void Dismiss(AppNotification n) => Notifications.Remove(n);

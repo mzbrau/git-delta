@@ -56,6 +56,7 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(ShowFileStatusPane));
                 OnPropertyChanged(nameof(ShowPullRequestPane));
+                OnPropertyChanged(nameof(ShowHistoryPane));
             }
         };
         Review.PropertyChanged += (_, e) =>
@@ -65,6 +66,12 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(ShowFileStatusPane));
                 OnPropertyChanged(nameof(ShowPullRequestPane));
+                OnPropertyChanged(nameof(ShowHistoryPane));
+
+                // Opening a PR must leave History so the History grid cannot cover PR panes
+                // after the loading overlay clears.
+                if (Review.IsPullRequestMode && WorkingCopy.IsHistoryMode)
+                    WorkingCopy.SelectFileStatusCommand.Execute(null);
             }
         };
 
@@ -86,6 +93,12 @@ public partial class MainWindowViewModel : ObservableObject
 
     public System.Collections.ObjectModel.ObservableCollection<GitHubAccountSettings> GitHubAccounts { get; }
     public System.Collections.ObjectModel.ObservableCollection<string> EnterpriseHostUrls { get; }
+
+    public string[] SettingsCategories { get; } = ["General", "Accounts", "Diff", "Git", "Diagnostics"];
+
+    [ObservableProperty] private string _selectedSettingsCategory = "General";
+    [ObservableProperty] private GitHubAccountSettings? _selectedGitHubAccount;
+    [ObservableProperty] private bool _isAddingGitHubAccount;
 
     [ObservableProperty] private string _developmentFolder = "";
     [ObservableProperty] private string _newGitHubHost = "github.com";
@@ -110,15 +123,50 @@ public partial class MainWindowViewModel : ObservableObject
     public System.Collections.ObjectModel.ObservableCollection<string> RecentRepositories { get; }
 
     public bool HasRecentRepositories => RecentRepositories.Count > 0;
+    public bool HasGitHubAccounts => GitHubAccounts.Count > 0;
+    public bool IsSettingsGeneral => SelectedSettingsCategory == "General";
+    public bool IsSettingsAccounts => SelectedSettingsCategory == "Accounts";
+    public bool IsSettingsDiff => SelectedSettingsCategory == "Diff";
+    public bool IsSettingsGit => SelectedSettingsCategory == "Git";
+    public bool IsSettingsDiagnostics => SelectedSettingsCategory == "Diagnostics";
+    public bool ShowAddAccountForm => IsAddingGitHubAccount || SelectedGitHubAccount is null;
+    public bool ShowAccountDetail => !IsAddingGitHubAccount && SelectedGitHubAccount is not null;
 
     public GridLength NavigatorColumnWidth => new(NavigatorWidth);
     public GridLength FileListColumnWidth => new(FileListWidth);
     public bool ShowFileStatusPane => !WorkingCopy.IsHistoryMode && !Review.IsPullRequestMode;
     public bool ShowPullRequestPane => Review.IsPullRequestMode;
+    public bool ShowHistoryPane => WorkingCopy.IsHistoryMode && !Review.IsPullRequestMode;
 
     partial void OnNavigatorWidthChanged(double value) => OnPropertyChanged(nameof(NavigatorColumnWidth));
     partial void OnFileListWidthChanged(double value) => OnPropertyChanged(nameof(FileListColumnWidth));
+    partial void OnSelectedSettingsCategoryChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsSettingsGeneral));
+        OnPropertyChanged(nameof(IsSettingsAccounts));
+        OnPropertyChanged(nameof(IsSettingsDiff));
+        OnPropertyChanged(nameof(IsSettingsGit));
+        OnPropertyChanged(nameof(IsSettingsDiagnostics));
 
+        if (value == "Accounts" && !IsAddingGitHubAccount && SelectedGitHubAccount is null && GitHubAccounts.Count > 0)
+            SelectedGitHubAccount = GitHubAccounts[0];
+    }
+
+    partial void OnSelectedGitHubAccountChanged(GitHubAccountSettings? value)
+    {
+        if (value is not null)
+            IsAddingGitHubAccount = false;
+        OnPropertyChanged(nameof(ShowAddAccountForm));
+        OnPropertyChanged(nameof(ShowAccountDetail));
+    }
+
+    partial void OnIsAddingGitHubAccountChanged(bool value)
+    {
+        if (value)
+            SelectedGitHubAccount = null;
+        OnPropertyChanged(nameof(ShowAddAccountForm));
+        OnPropertyChanged(nameof(ShowAccountDetail));
+    }
     partial void OnIsNavigatorCollapsedChanged(bool value)
     {
         if (value)
@@ -227,10 +275,24 @@ public partial class MainWindowViewModel : ObservableObject
     private async Task RefreshAsync() => await WorkingCopy.RefreshAsync();
 
     [RelayCommand]
-    private void OpenSettings() => ShowSettings = true;
+    private void OpenSettings()
+    {
+        ShowSettings = true;
+        if (SelectedSettingsCategory == "Accounts" && !IsAddingGitHubAccount && SelectedGitHubAccount is null && GitHubAccounts.Count > 0)
+            SelectedGitHubAccount = GitHubAccounts[0];
+    }
 
     [RelayCommand]
     private void CloseSettings() => ShowSettings = false;
+
+    [RelayCommand]
+    private void BeginAddGitHubAccount()
+    {
+        IsAddingGitHubAccount = true;
+        NewGitHubToken = "";
+        if (string.IsNullOrWhiteSpace(NewGitHubHost))
+            NewGitHubHost = "github.com";
+    }
 
     [RelayCommand]
     private void SelectNav(string nav)
@@ -309,6 +371,10 @@ public partial class MainWindowViewModel : ObservableObject
             var account = await _accounts.AddAccountAsync(NewGitHubHost, NewGitHubToken);
             RefreshAccountCollections();
             NewGitHubToken = "";
+            IsAddingGitHubAccount = false;
+            SelectedGitHubAccount = GitHubAccounts.FirstOrDefault(a =>
+                string.Equals(a.Host, account.Host, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(a.Login, account.Login, StringComparison.OrdinalIgnoreCase));
             _notifications.Info($"Added GitHub account {account.Login} on {account.Host}.");
             await Review.RefreshInboxCommand.ExecuteAsync(null);
         }
@@ -390,9 +456,21 @@ public partial class MainWindowViewModel : ObservableObject
 
     private void RefreshAccountCollections()
     {
+        var selectedHost = SelectedGitHubAccount?.Host;
+        var selectedLogin = SelectedGitHubAccount?.Login;
+
         GitHubAccounts.Clear();
         foreach (var existing in _accounts.ListAccounts())
             GitHubAccounts.Add(existing);
+
+        OnPropertyChanged(nameof(HasGitHubAccounts));
+
+        if (selectedHost is not null && selectedLogin is not null)
+        {
+            SelectedGitHubAccount = GitHubAccounts.FirstOrDefault(a =>
+                string.Equals(a.Host, selectedHost, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(a.Login, selectedLogin, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     [RelayCommand]
@@ -404,6 +482,15 @@ public partial class MainWindowViewModel : ObservableObject
         {
             await _accounts.RemoveAccountAsync(account.Host, account.Login);
             RefreshAccountCollections();
+            if (GitHubAccounts.Count > 0)
+            {
+                IsAddingGitHubAccount = false;
+                SelectedGitHubAccount = GitHubAccounts[0];
+            }
+            else
+            {
+                BeginAddGitHubAccount();
+            }
             await Review.RefreshInboxCommand.ExecuteAsync(null);
         }
         catch (Exception ex)
@@ -424,5 +511,19 @@ public partial class MainWindowViewModel : ObservableObject
     {
         Review.ClearPullRequestMode();
         WorkingCopy.SelectFileStatusCommand.Execute(null);
+    }
+
+    [RelayCommand]
+    private void SelectWorkspaceFileStatus()
+    {
+        Review.ClearPullRequestMode();
+        WorkingCopy.SelectFileStatusCommand.Execute(null);
+    }
+
+    [RelayCommand]
+    private void SelectWorkspaceHistory()
+    {
+        Review.ClearPullRequestMode();
+        WorkingCopy.SelectHistoryCommand.Execute(null);
     }
 }

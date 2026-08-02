@@ -10,15 +10,9 @@ query PullRequestThreads($owner: String!, $name: String!, $number: Int!) {
           line
           startLine
           diffSide
+          subjectType
           originalLine
           originalStartLine
-          diffHunk
-          commit {
-            oid
-          }
-          originalCommit {
-            oid
-          }
           comments(first: 50) {
             nodes {
               id
@@ -28,6 +22,13 @@ query PullRequestThreads($owner: String!, $name: String!, $number: Int!) {
               viewerDidAuthor
               author {
                 login
+              }
+              diffHunk
+              commit {
+                oid
+              }
+              originalCommit {
+                oid
               }
             }
           }

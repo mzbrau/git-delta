@@ -19,6 +19,7 @@ public sealed record PullRequestSummary(
     string Title,
     string Url,
     bool IsDraft,
+    DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     string? ReviewDecision,
     string BaseRefName,

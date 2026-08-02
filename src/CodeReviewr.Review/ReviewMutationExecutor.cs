@@ -59,7 +59,8 @@ internal sealed class ReviewMutationExecutor(
         var envelope = DeserializeEnvelope<AddCommentPayload>(entry.PayloadJson);
         var (owner, name, number) = (envelope.Owner, envelope.Name, envelope.Number);
         var payload = envelope.Data;
-        await EnsurePendingReviewIdAsync(host, token, owner, name, number, ct).ConfigureAwait(false);
+        var reviewId = await EnsurePendingReviewIdAsync(host, token, owner, name, number, ct)
+            .ConfigureAwait(false);
 
         var input = new Dictionary<string, object?>
         {
@@ -68,6 +69,8 @@ internal sealed class ReviewMutationExecutor(
             ["path"] = payload.Path,
             ["side"] = payload.Side,
         };
+        if (!string.IsNullOrEmpty(reviewId))
+            input["pullRequestReviewId"] = reviewId;
         if (payload.Line is not null)
             input["line"] = payload.Line;
         if (payload.StartLine is not null)
@@ -269,11 +272,14 @@ internal sealed class ReviewMutationExecutor(
 
         var prId = pullRequest.GetProperty("id").GetString()
             ?? throw new InvalidOperationException("Pull request id missing from GraphQL response.");
+
+        // Omit event so GitHub creates a PENDING review. PullRequestReviewEvent does not
+        // include PENDING (that is a state); sending event: PENDING fails GraphQL validation.
         var (createData, _) = await gitHubClient.ExecuteAsync(
                 host,
                 token,
                 EmbeddedQueries.AddPullRequestReviewMutation,
-                new { input = new { pullRequestId = prId, @event = "PENDING" } },
+                new { input = new { pullRequestId = prId } },
                 ct)
             .ConfigureAwait(false);
 

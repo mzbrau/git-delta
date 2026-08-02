@@ -7,6 +7,7 @@ public sealed class JsonSettingsStore : ISettingsStore
 {
     private readonly string _path;
     private readonly object _lock = new();
+    private readonly SemaphoreSlim _saveGate = new(1, 1);
     private AppSettings _current = new();
 
     public JsonSettingsStore(string? path = null)
@@ -48,22 +49,31 @@ public sealed class JsonSettingsStore : ISettingsStore
 
     public async Task SaveAsync(CancellationToken ct = default)
     {
-        AppSettings snapshot;
-        lock (_lock)
-            snapshot = Clone(_current);
-
-        var dir = Path.GetDirectoryName(_path)!;
-        Directory.CreateDirectory(dir);
-        var tmp = _path + ".tmp";
-        await using (var stream = File.Create(tmp))
+        await _saveGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            await JsonSerializer.SerializeAsync(
-                stream,
-                snapshot,
-                new JsonSerializerOptions { WriteIndented = true },
-                ct).ConfigureAwait(false);
+            // Re-clone under the store lock so waiters always persist the latest in-memory state.
+            AppSettings snapshot;
+            lock (_lock)
+                snapshot = Clone(_current);
+
+            var dir = Path.GetDirectoryName(_path)!;
+            Directory.CreateDirectory(dir);
+            var tmp = _path + ".tmp";
+            await using (var stream = File.Create(tmp))
+            {
+                await JsonSerializer.SerializeAsync(
+                    stream,
+                    snapshot,
+                    new JsonSerializerOptions { WriteIndented = true },
+                    ct).ConfigureAwait(false);
+            }
+            File.Move(tmp, _path, overwrite: true);
         }
-        File.Move(tmp, _path, overwrite: true);
+        finally
+        {
+            _saveGate.Release();
+        }
     }
 
     public void Update(Action<AppSettings> mutate)

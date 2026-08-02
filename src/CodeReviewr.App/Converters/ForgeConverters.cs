@@ -21,6 +21,30 @@ public static class ForgeConverters
     public static readonly IValueConverter IsNotNullOrEmpty =
         new FuncValueConverter<string?, bool>(v => !string.IsNullOrEmpty(v));
 
+    public static readonly IValueConverter IsNullOrEmpty =
+        new FuncValueConverter<string?, bool>(v => string.IsNullOrEmpty(v));
+
+    public static readonly IValueConverter NullOrEmptyDisplay =
+        new FuncValueConverter<string?, string>(v => string.IsNullOrEmpty(v) ? "—" : v!);
+
+    public static readonly IValueConverter CheckStateBadgeBrush =
+        new FuncValueConverter<string?, IBrush>(state => CheckStateCategory(state) switch
+        {
+            CheckCategory.Success => Brush("ForgeStatusAddedBrush"),
+            CheckCategory.Failure => Brush("ForgeStatusDeletedBrush"),
+            CheckCategory.Pending => Brush("ForgeStatusModifiedBrush"),
+            _ => Brush("ForgeOnSurfaceVariantBrush"),
+        });
+
+    public static readonly IValueConverter CheckStateBadgeBackground =
+        new FuncValueConverter<string?, IBrush>(state => CheckStateCategory(state) switch
+        {
+            CheckCategory.Success => Brush("ForgeStatusAddedBadgeBgBrush"),
+            CheckCategory.Failure => Brush("ForgeStatusDeletedBadgeBgBrush"),
+            CheckCategory.Pending => Brush("ForgeStatusModifiedBadgeBgBrush"),
+            _ => Brush("ForgeStatusUntrackedBadgeBgBrush"),
+        });
+
     public static readonly IValueConverter PlusPrefix =
         new FuncValueConverter<int, string>(v => $"+{v}");
 
@@ -63,6 +87,30 @@ public static class ForgeConverters
     public static readonly IValueConverter CommitDateDisplay =
         new FuncValueConverter<DateTimeOffset, string>(WorkingCopyViewModel.FormatCommitDate);
 
+    public static readonly IValueConverter RelativeTime =
+        new FuncValueConverter<DateTimeOffset, string>(FormatRelativeTime);
+
+    public static string FormatRelativeTime(DateTimeOffset date)
+    {
+        var elapsed = DateTimeOffset.Now - date.ToLocalTime();
+        if (elapsed < TimeSpan.Zero)
+            elapsed = TimeSpan.Zero;
+
+        if (elapsed.TotalSeconds < 60)
+            return "just now";
+        if (elapsed.TotalMinutes < 60)
+            return $"{(int)elapsed.TotalMinutes}m ago";
+        if (elapsed.TotalHours < 24)
+            return $"{(int)elapsed.TotalHours}h ago";
+        if (elapsed.TotalDays < 14)
+            return $"{(int)elapsed.TotalDays}d ago";
+
+        var local = date.ToLocalTime();
+        return local.Year == DateTimeOffset.Now.Year
+            ? local.ToString("d MMM")
+            : local.ToString("d MMM yyyy");
+    }
+
     public static readonly IValueConverter GitConsoleLineBrush =
         new FuncValueConverter<GitConsoleLineKind, IBrush>(kind => kind switch
         {
@@ -71,6 +119,24 @@ public static class ForgeConverters
             GitConsoleLineKind.Meta => Brush("ForgeOnSurfaceVariantBrush"),
             _ => Brush("ForgeOnSurfaceBrush"),
         });
+
+    private enum CheckCategory { Neutral, Success, Failure, Pending }
+
+    private static CheckCategory CheckStateCategory(string? state)
+    {
+        if (string.IsNullOrEmpty(state))
+            return CheckCategory.Neutral;
+
+        return state.ToUpperInvariant() switch
+        {
+            "SUCCESS" or "COMPLETED" or "APPROVED" or "PASS" or "PASSED" => CheckCategory.Success,
+            "FAILURE" or "FAILED" or "ERROR" or "CANCELLED" or "TIMED_OUT" or "STARTUP_FAILURE"
+                or "ACTION_REQUIRED" or "CHANGES_REQUESTED" or "REJECTED" => CheckCategory.Failure,
+            "PENDING" or "QUEUED" or "IN_PROGRESS" or "WAITING" or "REQUESTED"
+                or "EXPECTED" or "REVIEW_REQUIRED" or "UNSTABLE" => CheckCategory.Pending,
+            _ => CheckCategory.Neutral,
+        };
+    }
 
     private static IBrush Brush(string key)
     {

@@ -73,12 +73,70 @@ internal static class ReviewThreadParser
             };
         }
 
+        var subjectType = ReviewThreadSubjectType.Line;
+        if (thread.TryGetProperty("subjectType", out var subjectTypeEl) &&
+            subjectTypeEl.ValueKind == JsonValueKind.String &&
+            string.Equals(subjectTypeEl.GetString(), "FILE", StringComparison.OrdinalIgnoreCase))
+        {
+            subjectType = ReviewThreadSubjectType.File;
+        }
+
         int? line = thread.TryGetProperty("line", out var lineEl) && lineEl.ValueKind == JsonValueKind.Number
             ? lineEl.GetInt32()
             : null;
         int? startLine = thread.TryGetProperty("startLine", out var startEl) && startEl.ValueKind == JsonValueKind.Number
             ? startEl.GetInt32()
             : null;
+
+        string? diffHunk = null;
+        string? commitOid = null;
+        string? originalCommitOid = null;
+        if (thread.TryGetProperty("comments", out var commentsForFields) &&
+            commentsForFields.TryGetProperty("nodes", out var fieldNodes) &&
+            fieldNodes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var comment in fieldNodes.EnumerateArray())
+            {
+                if (comment.ValueKind == JsonValueKind.Null)
+                    continue;
+
+                if (diffHunk is null &&
+                    comment.TryGetProperty("diffHunk", out var hunkEl) &&
+                    hunkEl.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrEmpty(hunkEl.GetString()))
+                {
+                    diffHunk = hunkEl.GetString();
+                }
+
+                if (commitOid is null &&
+                    TryReadCommitOid(comment, "commit", out var commentCommitOid))
+                {
+                    commitOid = commentCommitOid;
+                }
+
+                if (originalCommitOid is null &&
+                    TryReadCommitOid(comment, "originalCommit", out var commentOriginalOid))
+                {
+                    originalCommitOid = commentOriginalOid;
+                }
+
+                if (diffHunk is not null && commitOid is not null && originalCommitOid is not null)
+                    break;
+            }
+        }
+
+        // Legacy fixtures may still place these fields on the thread node.
+        if (diffHunk is null &&
+            thread.TryGetProperty("diffHunk", out var threadHunk) &&
+            threadHunk.ValueKind == JsonValueKind.String)
+        {
+            diffHunk = threadHunk.GetString();
+        }
+
+        if (commitOid is null)
+            TryReadCommitOid(thread, "commit", out commitOid);
+        if (originalCommitOid is null)
+            TryReadCommitOid(thread, "originalCommit", out originalCommitOid);
 
         return new ReviewThread(
             NodeId: thread.GetProperty("id").GetString() ?? "",
@@ -93,18 +151,8 @@ internal static class ReviewThreadParser
                         outdated.ValueKind == JsonValueKind.True,
             Comments: comments,
             Side: side,
-            CommitOid: thread.TryGetProperty("commit", out var commit) &&
-                       commit.ValueKind == JsonValueKind.Object &&
-                       commit.TryGetProperty("oid", out var commitOid) &&
-                       commitOid.ValueKind == JsonValueKind.String
-                ? commitOid.GetString()
-                : null,
-            OriginalCommitOid: thread.TryGetProperty("originalCommit", out var originalCommit) &&
-                               originalCommit.ValueKind == JsonValueKind.Object &&
-                               originalCommit.TryGetProperty("oid", out var originalCommitOid) &&
-                               originalCommitOid.ValueKind == JsonValueKind.String
-                ? originalCommitOid.GetString()
-                : null,
+            CommitOid: commitOid,
+            OriginalCommitOid: originalCommitOid,
             OriginalLine: thread.TryGetProperty("originalLine", out var originalLine) &&
                           originalLine.ValueKind == JsonValueKind.Number
                 ? originalLine.GetInt32()
@@ -113,9 +161,23 @@ internal static class ReviewThreadParser
                                originalStartLine.ValueKind == JsonValueKind.Number
                 ? originalStartLine.GetInt32()
                 : null,
-            DiffHunk: thread.TryGetProperty("diffHunk", out var diffHunk) &&
-                      diffHunk.ValueKind == JsonValueKind.String
-                ? diffHunk.GetString()
-                : null);
+            DiffHunk: diffHunk,
+            SubjectType: subjectType,
+            IsFileLevel: subjectType == ReviewThreadSubjectType.File);
+    }
+
+    private static bool TryReadCommitOid(JsonElement parent, string propertyName, out string? oid)
+    {
+        oid = null;
+        if (!parent.TryGetProperty(propertyName, out var commit) ||
+            commit.ValueKind != JsonValueKind.Object ||
+            !commit.TryGetProperty("oid", out var oidEl) ||
+            oidEl.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        oid = oidEl.GetString();
+        return !string.IsNullOrEmpty(oid);
     }
 }

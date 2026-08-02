@@ -40,6 +40,7 @@ public sealed class ReviewServiceTests
             Title: "Demo PR",
             Url: "https://github.com/acme/demo/pull/42",
             IsDraft: false,
+            CreatedAt: DateTimeOffset.UtcNow,
             UpdatedAt: DateTimeOffset.UtcNow,
             ReviewDecision: null,
             BaseRefName: "main",

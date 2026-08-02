@@ -23,6 +23,12 @@ public enum SubmitReviewEvent
     RequestChanges,
 }
 
+public enum ReviewThreadSubjectType
+{
+    Line,
+    File,
+}
+
 public sealed record ReviewComment(
     string NodeId,
     string Body,
@@ -47,7 +53,32 @@ public sealed record ReviewThread(
     string? DiffHunk = null,
     AnnotationRange? Anchor = null,
     bool IsUnplaceable = false,
-    string? ContextLines = null);
+    string? ContextLines = null,
+    ReviewThreadSubjectType SubjectType = ReviewThreadSubjectType.Line,
+    bool IsFileLevel = false)
+{
+    /// <summary>Context shown for unplaceable threads: migrated snippet, else a short DiffHunk excerpt.</summary>
+    public string? DisplayContext
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(ContextLines))
+                return ContextLines;
+            return FormatDiffHunkSnippet(DiffHunk);
+        }
+    }
+
+    private static string? FormatDiffHunkSnippet(string? diffHunk)
+    {
+        if (string.IsNullOrWhiteSpace(diffHunk))
+            return null;
+
+        var lines = diffHunk.Replace("\r\n", "\n").Split('\n');
+        var take = Math.Min(lines.Length, 8);
+        var start = Math.Max(0, lines.Length - take);
+        return string.Join('\n', lines[start..(start + take)]);
+    }
+}
 
 public sealed record AddCommentPayload(
     string ClientCommentId,

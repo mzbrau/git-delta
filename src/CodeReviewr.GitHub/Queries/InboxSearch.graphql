@@ -8,6 +8,7 @@ query InboxSearch($query: String!, $first: Int!) {
         title
         url
         isDraft
+        createdAt
         updatedAt
         reviewDecision
         baseRefName

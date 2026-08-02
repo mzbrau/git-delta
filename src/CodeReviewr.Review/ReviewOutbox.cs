@@ -109,6 +109,7 @@ internal sealed class ReviewOutbox(
         catch (Exception ex)
         {
             await durableStore.MarkFailedAsync(entry.Id, ex.Message, ct).ConfigureAwait(false);
+            throw;
         }
     }
 

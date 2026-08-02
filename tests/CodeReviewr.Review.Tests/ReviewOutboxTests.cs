@@ -106,6 +106,97 @@ public sealed class ReviewOutboxTests
         Assert.That(await durable.IsViewedAsync(session.Detail.Summary.NodeId, "src/a.cs"), Is.True);
     }
 
+    [Test]
+    public async Task AddComment_CreatesPendingReviewWithoutEventPending()
+    {
+        var requests = new List<string>();
+        var services = BuildServices(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            requests.Add(body);
+            using var doc = JsonDocument.Parse(body);
+            var query = doc.RootElement.GetProperty("query").GetString() ?? "";
+
+            if (query.Contains("PendingReviewQuery", StringComparison.Ordinal))
+            {
+                return JsonOk("""
+                    {
+                      "data": {
+                        "repository": {
+                          "pullRequest": {
+                            "id": "PR_1",
+                            "headRefOid": "deadbeef",
+                            "reviews": { "nodes": [] }
+                          }
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            if (query.Contains("addPullRequestReview", StringComparison.Ordinal) &&
+                !query.Contains("addPullRequestReviewThread", StringComparison.Ordinal) &&
+                !query.Contains("addPullRequestReviewComment", StringComparison.Ordinal))
+            {
+                Assert.That(body, Does.Not.Contain("PENDING"));
+                using var vars = JsonDocument.Parse(body);
+                if (vars.RootElement.TryGetProperty("variables", out var variables) &&
+                    variables.TryGetProperty("input", out var input))
+                {
+                    Assert.That(input.TryGetProperty("event", out _), Is.False);
+                }
+
+                return JsonOk("""
+                    {
+                      "data": {
+                        "addPullRequestReview": {
+                          "pullRequestReview": { "id": "RV_NEW" }
+                        }
+                      }
+                    }
+                    """);
+            }
+
+            if (query.Contains("addPullRequestReviewThread", StringComparison.Ordinal))
+            {
+                Assert.That(body, Does.Contain("RV_NEW"));
+                return JsonOk("""{ "data": { "addPullRequestReviewThread": { "thread": { "id": "TH_1" } } } }""");
+            }
+
+            return MutationSuccess(query);
+        });
+
+        await using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IDurableUserStore>().EnsureSchema();
+
+        var outbox = provider.GetRequiredService<IReviewOutbox>();
+        await outbox.EnqueueAsync(CreateAddCommentEntry());
+
+        Assert.That(requests.Any(r => r.Contains("addPullRequestReview", StringComparison.Ordinal)), Is.True);
+        Assert.That(await provider.GetRequiredService<IDurableUserStore>().ListAsync(OutboxState.Pending), Is.Empty);
+        Assert.That(await provider.GetRequiredService<IDurableUserStore>().ListAsync(OutboxState.Failed), Is.Empty);
+    }
+
+    [Test]
+    public async Task EnqueueAsync_PermanentGraphQlFailure_ThrowsAndMarksFailed()
+    {
+        var services = BuildServices(_ => JsonOk("""
+            {
+              "errors": [ { "message": "Value `PENDING` does not exist in enum" } ]
+            }
+            """));
+        await using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IDurableUserStore>().EnsureSchema();
+
+        var outbox = provider.GetRequiredService<IReviewOutbox>();
+        var store = provider.GetRequiredService<IDurableUserStore>();
+
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(() =>
+            outbox.EnqueueAsync(CreateEntry(OutboxKind.MarkFileViewed, "mark")));
+        Assert.That(ex!.Message, Does.Contain("PENDING"));
+        Assert.That(await store.ListAsync(OutboxState.Failed), Has.Count.EqualTo(1));
+    }
+
     private static ServiceCollection BuildServices(Func<HttpRequestMessage, HttpResponseMessage> responder)
     {
         var tokenStore = Substitute.For<ITokenStore>();
@@ -182,6 +273,30 @@ public sealed class ReviewOutboxTests
             Content = new StringContent(json, Encoding.UTF8, "application/json"),
         };
 
+    private static OutboxEntry CreateAddCommentEntry() =>
+        new(
+            Guid.NewGuid().ToString("N"),
+            "github.com",
+            "dev",
+            "PR_NODE",
+            OutboxKind.AddComment,
+            JsonSerializer.Serialize(new OutboxPayloadEnvelope<AddCommentPayload>(
+                "acme",
+                "demo",
+                1,
+                new AddCommentPayload(
+                    Guid.NewGuid().ToString("N"),
+                    "src/a.cs",
+                    10,
+                    null,
+                    "RIGHT",
+                    "looks good",
+                    "deadbeef")), ReviewJson.Options),
+            DateTimeOffset.UtcNow,
+            0,
+            null,
+            OutboxState.Pending);
+
     private static OutboxEntry CreateEntry(OutboxKind kind, string marker) =>
         new(
             Guid.NewGuid().ToString("N"),
@@ -223,6 +338,7 @@ public sealed class ReviewOutboxTests
                     "Title",
                     "https://example.com",
                     false,
+                    DateTimeOffset.UtcNow,
                     DateTimeOffset.UtcNow,
                     null,
                     "main",

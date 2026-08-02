@@ -17,47 +17,47 @@ public sealed class CommentAnchorMapper(
         FileDiff fileDiff,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(thread.Path) ||
-            thread.Side is null ||
-            thread.Line is null)
+        if (string.IsNullOrEmpty(thread.Path))
+            return thread with { IsUnplaceable = true, IsFileLevel = false, Anchor = null };
+
+        // File-level review threads have no line/side; show them as file comments, not unplaceable.
+        if (thread.SubjectType == ReviewThreadSubjectType.File ||
+            (thread.Side is null && thread.Line is null && thread.OriginalLine is null))
         {
-            return thread with { IsUnplaceable = true, Anchor = null };
+            return thread with
+            {
+                IsFileLevel = true,
+                IsUnplaceable = false,
+                Anchor = null,
+                SubjectType = ReviewThreadSubjectType.File,
+            };
         }
 
-        var side = thread.Side.Value;
+        // Incomplete payloads sometimes omit diffSide while still providing a line — assume RIGHT.
+        var side = thread.Side ?? DiffSide.New;
         var targetCommit = side == DiffSide.New
             ? session.Head.Value
             : session.MergeBase.Value;
 
-        var sourceCommit = thread.OriginalCommitOid ?? thread.CommitOid ?? targetCommit;
-        var sourceLine = thread.OriginalLine ?? thread.Line.Value;
-        var sourceStartLine = thread.OriginalStartLine ?? thread.StartLine;
-
         var targetContentId = side == DiffSide.New ? fileDiff.NewContent : fileDiff.OldContent;
         if (targetContentId.IsEmpty)
-        {
-            return thread with { IsUnplaceable = true, Anchor = null };
-        }
+            return thread with { IsUnplaceable = true, IsFileLevel = false, Anchor = null };
 
-        var needsMigration = thread.IsOutdated ||
-                             !string.Equals(thread.CommitOid, targetCommit, StringComparison.OrdinalIgnoreCase);
+        // GitHub's current line (when present) is authoritative on the three-dot diff, even when
+        // isOutdated is true. Comment commit OIDs are usually the head SHA and must not force
+        // migration — especially for LEFT, where the line is in merge-base coordinates.
+        if (thread.Line is { } currentLine)
+            return PlaceOnTarget(thread, side, targetContentId, currentLine, thread.StartLine);
 
-        if (!needsMigration)
-        {
-            var line = thread.Line.Value;
-            var start = thread.StartLine ?? line;
-            var end = line;
-            if (start > end)
-                (start, end) = (end, start);
+        var sourceLine = thread.OriginalLine;
+        if (sourceLine is null)
+            return thread with { IsUnplaceable = true, IsFileLevel = false, Anchor = null };
 
-            var startAnchor = new DiffAnchor(side, targetContentId, start);
-            var endAnchor = new DiffAnchor(side, targetContentId, end);
-            var anchor = start == end
-                ? new AnnotationRange(startAnchor, startAnchor)
-                : new AnnotationRange(startAnchor, endAnchor);
-
-            return thread with { Anchor = anchor, IsUnplaceable = false };
-        }
+        // LEFT lines live on the merge-base blob; never use head CommitOid as the migration source.
+        var sourceCommit = side == DiffSide.Old
+            ? thread.OriginalCommitOid ?? targetCommit
+            : thread.OriginalCommitOid ?? thread.CommitOid ?? targetCommit;
+        var sourceStartLine = thread.OriginalStartLine ?? thread.StartLine;
 
         ContentId sourceContentId;
         try
@@ -67,7 +67,7 @@ public sealed class CommentAnchorMapper(
         }
         catch (GitException)
         {
-            return thread with { IsUnplaceable = true, Anchor = null };
+            return thread with { IsUnplaceable = true, IsFileLevel = false, Anchor = null };
         }
 
         var sourceLines = await AnchorMigrator.ReadBlobLinesAsync(
@@ -83,7 +83,7 @@ public sealed class CommentAnchorMapper(
             targetContentId,
             sourceLines,
             targetLines,
-            sourceLine,
+            sourceLine.Value,
             sourceStartLine);
     }
 
@@ -102,6 +102,33 @@ public sealed class CommentAnchorMapper(
         }
 
         return mapped;
+    }
+
+    private static ReviewThread PlaceOnTarget(
+        ReviewThread thread,
+        DiffSide side,
+        ContentId targetContentId,
+        int line,
+        int? startLine)
+    {
+        var start = startLine ?? line;
+        var end = line;
+        if (start > end)
+            (start, end) = (end, start);
+
+        var startAnchor = new DiffAnchor(side, targetContentId, start);
+        var endAnchor = new DiffAnchor(side, targetContentId, end);
+        var anchor = start == end
+            ? new AnnotationRange(startAnchor, startAnchor)
+            : new AnnotationRange(startAnchor, endAnchor);
+
+        return thread with
+        {
+            Side = side,
+            Anchor = anchor,
+            IsUnplaceable = false,
+            IsFileLevel = false,
+        };
     }
 
     private Task<ContentId> RevParseBlobAsync(

@@ -68,6 +68,7 @@ public sealed class ReviewViewModelTests
             Title: title,
             Url: "https://example.com",
             IsDraft: false,
+            CreatedAt: DateTimeOffset.UtcNow,
             UpdatedAt: DateTimeOffset.UtcNow,
             ReviewDecision: null,
             BaseRefName: "main",

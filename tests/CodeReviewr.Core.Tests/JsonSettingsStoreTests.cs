@@ -76,4 +76,45 @@ public sealed class JsonSettingsStoreTests
         Assert.That(options.IgnoreAllSpace, Is.True);
         Assert.That(options.Algorithm, Is.EqualTo("myers"));
     }
+
+    [Test]
+    public async Task Concurrent_Saves_Persist_Latest_Accounts_Mutation()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "codereviewr-tests", Guid.NewGuid().ToString("N"), "settings.json");
+        try
+        {
+            var store = new JsonSettingsStore(path);
+
+            // Start a save of an early snapshot, then mutate accounts while it is in flight /
+            // queued, then save again. The final file must include the account.
+            store.Update(s => s.DevelopmentFolder = "/early");
+            var first = store.SaveAsync();
+
+            store.Update(s =>
+            {
+                s.DevelopmentFolder = "/late";
+                s.Accounts.Add(new GitHubAccountSettings
+                {
+                    Host = "github.com",
+                    Login = "octocat",
+                    NeedsReauth = false,
+                });
+            });
+            var second = store.SaveAsync();
+
+            await Task.WhenAll(first, second);
+
+            var loaded = new JsonSettingsStore(path);
+            loaded.Load();
+            Assert.That(loaded.Current.DevelopmentFolder, Is.EqualTo("/late"));
+            Assert.That(loaded.Current.Accounts, Has.Count.EqualTo(1));
+            Assert.That(loaded.Current.Accounts[0].Login, Is.EqualTo("octocat"));
+        }
+        finally
+        {
+            var dir = Path.GetDirectoryName(path);
+            if (dir is not null && Directory.Exists(dir))
+                Directory.Delete(dir, recursive: true);
+        }
+    }
 }

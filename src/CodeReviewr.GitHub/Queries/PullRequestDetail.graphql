@@ -6,6 +6,7 @@ query PullRequestDetail($owner: String!, $name: String!, $number: Int!) {
       title
       url
       isDraft
+      createdAt
       updatedAt
       reviewDecision
       mergeable

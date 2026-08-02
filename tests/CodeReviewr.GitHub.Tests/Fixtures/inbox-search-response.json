@@ -9,6 +9,7 @@
           "title": "Fix inbox parsing",
           "url": "https://github.com/octo/repo/pull/42",
           "isDraft": false,
+          "createdAt": "2026-01-10T08:00:00Z",
           "updatedAt": "2026-01-15T10:30:00Z",
           "reviewDecision": "REVIEW_REQUIRED",
           "baseRefName": "main",

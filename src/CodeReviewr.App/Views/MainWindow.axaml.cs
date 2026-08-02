@@ -5,9 +5,11 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using CodeReviewr.App.Controls;
 using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
+using CodeReviewr.Review;
 
 namespace CodeReviewr.App.Views;
 
@@ -55,15 +57,99 @@ public partial class MainWindow : Window
 
         vm.Review.FocusCommentDraftRequested += FocusPrCommentDraft;
         vm.Review.FocusFileFilterRequested += FocusPrFileFilter;
+        vm.Review.ExpandedThreadChanged += PositionInlineThreadCard;
     }
 
     private void FocusPrCommentDraft()
     {
+        if (DataContext is MainWindowViewModel { Review.HasDraftCommentAnchor: true } vm)
+        {
+            PositionInlineCommentDraft(vm);
+            if (this.FindControl<TextBox>("InlineCommentDraftBox") is { } inlineBox)
+            {
+                Dispatcher.UIThread.Post(() =>
+                {
+                    inlineBox.Focus();
+                    inlineBox.CaretIndex = inlineBox.Text?.Length ?? 0;
+                }, DispatcherPriority.Input);
+                return;
+            }
+        }
+
         if (this.FindControl<TextBox>("PrCommentDraftBox") is { } box)
         {
             box.Focus();
             box.CaretIndex = box.Text?.Length ?? 0;
         }
+    }
+
+    private void PositionInlineCommentDraft(MainWindowViewModel vm)
+    {
+        if (this.FindControl<DiffViewer>("PrDiffViewer") is not { } viewer ||
+            this.FindControl<Border>("InlineCommentDraft") is not { } draft)
+            return;
+
+        var side = string.Equals(vm.Review.DraftCommentSide, "LEFT", StringComparison.OrdinalIgnoreCase)
+            ? DiffSide.Old
+            : DiffSide.New;
+        var line = vm.Review.DraftCommentLine ?? 1;
+
+        double left = 48;
+        double top = 24;
+        if (viewer.TryGetLineAnchorRect(side, line, out var anchor))
+        {
+            left = Math.Max(8, anchor.X);
+            top = Math.Max(8, anchor.Y);
+            var maxTop = Math.Max(8, viewer.Bounds.Height - 180);
+            if (top > maxTop)
+                top = maxTop;
+            var maxWidth = Math.Max(280, viewer.Bounds.Width - left - 16);
+            draft.Width = Math.Min(520, maxWidth);
+        }
+
+        Canvas.SetLeft(draft, left);
+        Canvas.SetTop(draft, top);
+    }
+
+    private void PositionInlineThreadCard()
+    {
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+        if (!vm.Review.HasExpandedInlineThread ||
+            vm.Review.SelectedThread?.Anchor is not { } range ||
+            this.FindControl<DiffViewer>("PrDiffViewer") is not { } viewer ||
+            this.FindControl<Border>("InlineThreadCard") is not { } card)
+            return;
+
+        var side = range.End.Side;
+        var line = range.End.Line;
+
+        double left = 48;
+        double top = 24;
+        if (viewer.TryGetLineAnchorRect(side, line, out var anchor))
+        {
+            left = Math.Max(8, anchor.X);
+            top = Math.Max(8, anchor.Y);
+            var maxTop = Math.Max(8, viewer.Bounds.Height - 220);
+            if (top > maxTop)
+                top = maxTop;
+            var maxWidth = Math.Max(280, viewer.Bounds.Width - left - 16);
+            card.Width = Math.Min(520, maxWidth);
+        }
+
+        Canvas.SetLeft(card, left);
+        Canvas.SetTop(card, top);
+    }
+
+    private void OnFileOrUnplaceableThreadPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Control { Tag: ReviewThread thread } ||
+            DataContext is not MainWindowViewModel vm)
+            return;
+
+        vm.Review.SelectedAnnotation = null;
+        vm.Review.SelectedThread = thread;
+        e.Handled = true;
     }
 
     private void FocusPrFileFilter()
@@ -102,6 +188,18 @@ public partial class MainWindow : Window
 
         switch (e.Key)
         {
+            case Key.Escape:
+                if (vm.Review.HasExpandedInlineThread || vm.Review.ShowSideThreadPanel)
+                {
+                    e.Handled = true;
+                    vm.Review.ClearExpandedThreadCommand.Execute(null);
+                }
+                else if (vm.Review.HasDraftCommentAnchor)
+                {
+                    e.Handled = true;
+                    vm.Review.ClearDraftCommentAnchorCommand.Execute(null);
+                }
+                break;
             case Key.J:
             case Key.Down:
                 e.Handled = true;
@@ -207,6 +305,12 @@ public partial class MainWindow : Window
             n.Action?.Invoke();
             Vm.Notifications.Dismiss(n);
         }
+    }
+
+    private void OnNotificationDismiss(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: AppNotification n })
+            Vm.Notifications.Dismiss(n);
     }
 
     private void OnToggleWorkspace(object? sender, RoutedEventArgs e) =>

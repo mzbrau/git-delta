@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Text;
+using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Media;
@@ -57,21 +59,39 @@ public sealed class DiffViewer : Control
         AvaloniaProperty.Register<DiffViewer, IReadOnlyList<IDiffAnnotation>?>(nameof(Annotations));
 
     public static readonly StyledProperty<IDiffAnnotation?> SelectedAnnotationProperty =
-        AvaloniaProperty.Register<DiffViewer, IDiffAnnotation?>(nameof(SelectedAnnotation));
+        AvaloniaProperty.Register<DiffViewer, IDiffAnnotation?>(
+            nameof(SelectedAnnotation),
+            defaultBindingMode: BindingMode.TwoWay);
 
-    private const double GutterWidth = 40;
+    public static readonly StyledProperty<bool> CanAddLineCommentsProperty =
+        AvaloniaProperty.Register<DiffViewer, bool>(nameof(CanAddLineComments));
+
+    public static readonly StyledProperty<ICommand?> AddLineCommentCommandProperty =
+        AvaloniaProperty.Register<DiffViewer, ICommand?>(nameof(AddLineCommentCommand));
+
+    private const double GutterWidth = 30;
+    private const double CommentLaneWidth = 18;
+    private const double CodePadding = 8;
     private const double HunkButtonWidth = 64;
     private const double HunkButtonGap = 6;
     private const double MinimapWidth = 12;
+    private const double AddCommentHitSize = 14;
+    private const double AddCommentHoverScale = 1.2;
+    private const double AnnotationDotSize = 8;
 
     private int _selectionStart = -1;
     private int _selectionEnd = -1;
+    private int _hoverRowIndex = -1;
+    private DiffSide? _hoverSide;
+    private bool _hoverAddComment;
     private double _scrollY;
     private double _scrollX;
     private bool _draggingMinimap;
     private INotifyCollectionChanged? _rowsNotify;
+    private INotifyCollectionChanged? _annotationsNotify;
     private readonly List<HunkButtonHit> _hunkButtons = [];
     private readonly List<AnnotationHit> _annotationHits = [];
+    private readonly List<AddCommentHit> _addCommentHits = [];
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
 
@@ -79,6 +99,7 @@ public sealed class DiffViewer : Control
 
     private readonly record struct HunkButtonHit(Rect Bounds, int HunkIndex, HunkButtonAction Action);
     private readonly record struct AnnotationHit(Rect Bounds, IDiffAnnotation Annotation);
+    private readonly record struct AddCommentHit(Rect Bounds, DiffSide Side, int Line, int? StartLine);
 
     public IReadOnlyList<DiffRow>? Rows
     {
@@ -152,6 +173,18 @@ public sealed class DiffViewer : Control
         set => SetValue(SelectedAnnotationProperty, value);
     }
 
+    public bool CanAddLineComments
+    {
+        get => GetValue(CanAddLineCommentsProperty);
+        set => SetValue(CanAddLineCommentsProperty, value);
+    }
+
+    public ICommand? AddLineCommentCommand
+    {
+        get => GetValue(AddLineCommentCommandProperty);
+        set => SetValue(AddLineCommentCommandProperty, value);
+    }
+
     public int? SelectedHunkIndex
     {
         get
@@ -167,7 +200,8 @@ public sealed class DiffViewer : Control
         AffectsRender<DiffViewer>(
             RowsProperty, ViewModeProperty, ShowWhitespaceProperty, RowHeightProperty,
             EmptyMessageProperty, CanStageLinesProperty, CanUnstageLinesProperty, CanDiscardLinesProperty,
-            LeftSyntaxTokensProperty, RightSyntaxTokensProperty, AnnotationsProperty, SelectedAnnotationProperty);
+            LeftSyntaxTokensProperty, RightSyntaxTokensProperty, AnnotationsProperty, SelectedAnnotationProperty,
+            CanAddLineCommentsProperty);
         FocusableProperty.OverrideDefaultValue<DiffViewer>(true);
     }
 
@@ -193,16 +227,24 @@ public sealed class DiffViewer : Control
             DetachRowsNotify();
             AttachRowsNotify(change.NewValue as INotifyCollectionChanged);
             _selectionStart = _selectionEnd = -1;
+            _hoverRowIndex = -1;
+            _hoverSide = null;
+            _hoverAddComment = false;
             _scrollY = 0;
             InvalidateVisual();
             InvalidateMeasure();
+        }
+        else if (change.Property == AnnotationsProperty)
+        {
+            DetachAnnotationsNotify();
+            AttachAnnotationsNotify(change.NewValue as INotifyCollectionChanged);
+            InvalidateVisual();
         }
         else if (change.Property == ViewModeProperty || change.Property == RowHeightProperty
                  || change.Property == EmptyMessageProperty
                  || change.Property == CanStageLinesProperty
                  || change.Property == CanUnstageLinesProperty
                  || change.Property == CanDiscardLinesProperty
-                 || change.Property == AnnotationsProperty
                  || change.Property == SelectedAnnotationProperty)
         {
             InvalidateVisual();
@@ -229,6 +271,23 @@ public sealed class DiffViewer : Control
         InvalidateVisual();
         InvalidateMeasure();
     }
+
+    private void AttachAnnotationsNotify(INotifyCollectionChanged? notify)
+    {
+        _annotationsNotify = notify;
+        if (_annotationsNotify is not null)
+            _annotationsNotify.CollectionChanged += OnAnnotationsCollectionChanged;
+    }
+
+    private void DetachAnnotationsNotify()
+    {
+        if (_annotationsNotify is not null)
+            _annotationsNotify.CollectionChanged -= OnAnnotationsCollectionChanged;
+        _annotationsNotify = null;
+    }
+
+    private void OnAnnotationsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        InvalidateVisual();
 
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -257,6 +316,7 @@ public sealed class DiffViewer : Control
     {
         _hunkButtons.Clear();
         _annotationHits.Clear();
+        _addCommentHits.Clear();
         var rows = Rows;
         var bounds = Bounds;
         using var clip = context.PushClip(new Rect(bounds.Size));
@@ -330,13 +390,13 @@ public sealed class DiffViewer : Control
                 {
                     DrawGutter(context, row.OldLineNumber, contentLeft, y);
                     if (row.Kind == DiffRowKind.HunkHeader)
-                        DrawText(context, row.LeftText.ToString(), contentLeft + GutterWidth + 8 - _scrollX, y, muted);
+                        DrawText(context, row.LeftText.ToString(), SideBySideCodeX(contentLeft) - _scrollX, y, muted);
                     else if (row.Kind == DiffRowKind.Collapsed)
                         DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines — click to expand",
-                            contentLeft + GutterWidth + 8, y, muted);
+                            SideBySideCodeX(contentLeft), y, muted);
                     else if (!row.LeftText.IsEmpty)
                     {
-                        var x = contentLeft + GutterWidth + 8 - _scrollX;
+                        var x = SideBySideCodeX(contentLeft) - _scrollX;
                         DrawIntraLineHighlights(context, FormatText(row.LeftText), row.LeftIntraLine, x, y, rowH, removedAccent);
                         DrawSyntaxOrPlainText(context, FormatText(row.LeftText), x, y,
                             TextBrush(leftKind, contextText), LeftSyntaxTokens, row.OldLineNumber);
@@ -348,7 +408,7 @@ public sealed class DiffViewer : Control
                     DrawGutter(context, row.NewLineNumber, midX, y);
                     if (row.Kind is not DiffRowKind.HunkHeader and not DiffRowKind.Collapsed && !row.RightText.IsEmpty)
                     {
-                        var x = midX + GutterWidth + 8 - _scrollX;
+                        var x = SideBySideCodeX(midX) - _scrollX;
                         DrawIntraLineHighlights(context, FormatText(row.RightText), row.RightIntraLine, x, y, rowH, addedAccent);
                         DrawSyntaxOrPlainText(context, FormatText(row.RightText), x, y,
                             TextBrush(rightKind, contextText), RightSyntaxTokens, row.NewLineNumber);
@@ -362,7 +422,7 @@ public sealed class DiffViewer : Control
 
                 if (row.Kind == DiffRowKind.HunkHeader)
                 {
-                    DrawText(context, row.LeftText.ToString(), contentLeft + GutterWidth * 2 + 8 - _scrollX, y, muted);
+                    DrawText(context, row.LeftText.ToString(), UnifiedCodeX(contentLeft) - _scrollX, y, muted);
                     DrawUnifiedHunkButtons(context, row.HunkIndex, y, rowH, bounds.Width);
                     continue;
                 }
@@ -370,7 +430,7 @@ public sealed class DiffViewer : Control
                 if (row.Kind == DiffRowKind.Collapsed)
                 {
                     DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines — click to expand",
-                        contentLeft + GutterWidth * 2 + 8, y, muted);
+                        UnifiedCodeX(contentLeft), y, muted);
                     continue;
                 }
 
@@ -383,8 +443,7 @@ public sealed class DiffViewer : Control
                     _ => " ",
                 };
                 var formatted = FormatText(text);
-                var lineText = prefix + formatted;
-                var x = contentLeft + GutterWidth * 2 + 8 - _scrollX;
+                var x = UnifiedCodeX(contentLeft) - _scrollX;
                 var intra = row.Kind == DiffRowKind.Removed ? row.LeftIntraLine : row.RightIntraLine;
                 var accent = row.Kind == DiffRowKind.Added ? addedAccent : removedAccent;
                 // Offset highlights by the +/- prefix width.
@@ -403,9 +462,21 @@ public sealed class DiffViewer : Control
                     TextBrush(row.Kind, contextText), tokens, lineNo);
             }
 
-            DrawAnnotationMarkers(context, row, contentLeft, midX, y, rowH, bounds.Width);
+            DrawAnnotationMarkers(context, row, contentLeft, midX, y, rowH);
+            DrawAddCommentAffordance(context, row, i, contentLeft, midX, y, rowH);
         }
     }
+
+    private static double UnifiedCodeX(double contentLeft) =>
+        contentLeft + GutterWidth * 2 + CommentLaneWidth + CodePadding;
+
+    private static double SideBySideCodeX(double paneLeft) =>
+        paneLeft + GutterWidth + CommentLaneWidth + CodePadding;
+
+    private double CommentLaneX(DiffSide side, double contentLeft, double midX) =>
+        ViewMode == DiffViewMode.SideBySide
+            ? (side == DiffSide.Old ? contentLeft : midX) + GutterWidth
+            : contentLeft + GutterWidth * 2;
 
     private void DrawAnnotationMarkers(
         DrawingContext context,
@@ -413,8 +484,7 @@ public sealed class DiffViewer : Control
         double contentLeft,
         double midX,
         double y,
-        double rowH,
-        double boundsWidth)
+        double rowH)
     {
         var annotations = Annotations;
         if (annotations is null || annotations.Count == 0)
@@ -427,39 +497,178 @@ public sealed class DiffViewer : Control
         foreach (var annotation in annotations)
         {
             var range = annotation.Range;
-            var startLine = range.Start.Line;
-            var endLine = range.End.Line;
-            var matches = false;
+            var side = range.Start.Side;
+            // Show a single marker on the range end line (not every line in a multi-line span).
+            var markerLine = range.End.Line;
+            int? rowLine = side == DiffSide.Old ? row.OldLineNumber : row.NewLineNumber;
+            if (rowLine != markerLine)
+                continue;
 
-            if (range.Start.Side == DiffSide.Old)
-            {
-                if (row.OldLineNumber is { } oldLine &&
-                    oldLine >= Math.Min(startLine, endLine) &&
-                    oldLine <= Math.Max(startLine, endLine))
-                    matches = true;
-            }
-            else if (row.NewLineNumber is { } newLine &&
-                     newLine >= Math.Min(startLine, endLine) &&
-                     newLine <= Math.Max(startLine, endLine))
-            {
-                matches = true;
-            }
-
-            if (!matches) continue;
-
-            var gutterX = range.Start.Side == DiffSide.Old
-                ? (ViewMode == DiffViewMode.SideBySide ? contentLeft : contentLeft)
-                : (ViewMode == DiffViewMode.SideBySide ? midX : contentLeft + GutterWidth);
-
+            var laneX = CommentLaneX(side, contentLeft, midX);
             var isOutdated = annotation is ReviewThreadAnnotation { IsOutdated: true };
             var fill = SelectedAnnotation == annotation
                 ? selectedBrush
                 : isOutdated ? outdatedBrush : markerBrush;
 
-            var dot = new Rect(gutterX + 4, y + (rowH - 8) / 2, 8, 8);
-            context.FillRectangle(fill, dot, 4);
+            var dot = new Rect(
+                laneX + 2,
+                y + (rowH - AnnotationDotSize) / 2,
+                AnnotationDotSize,
+                AnnotationDotSize);
+            context.FillRectangle(fill, dot, (float)(AnnotationDotSize / 2));
             _annotationHits.Add(new AnnotationHit(dot, annotation));
         }
+    }
+
+    private void DrawAddCommentAffordance(
+        DrawingContext context,
+        DiffRow row,
+        int rowIndex,
+        double contentLeft,
+        double midX,
+        double y,
+        double rowH)
+    {
+        if (!CanAddLineComments || rowIndex != _hoverRowIndex || _hoverSide is not { } side)
+            return;
+        if (row.Kind is DiffRowKind.HunkHeader or DiffRowKind.Collapsed or DiffRowKind.Padding)
+            return;
+
+        int? line = side == DiffSide.Old ? row.OldLineNumber : row.NewLineNumber;
+        if (line is null)
+            return;
+
+        var laneX = CommentLaneX(side, contentLeft, midX);
+        var hasMarker = RowHasAnnotationMarker(row, side);
+        // Keep + clear of the marker: markers sit at lane left; + sits to their right (into padding).
+        var baseX = hasMarker
+            ? laneX + AnnotationDotSize + 4
+            : laneX + (CommentLaneWidth - AddCommentHitSize) / 2;
+
+        var size = _hoverAddComment ? AddCommentHitSize * AddCommentHoverScale : AddCommentHitSize;
+        var hit = new Rect(
+            baseX - (size - AddCommentHitSize) / 2,
+            y + (rowH - size) / 2,
+            size,
+            size);
+        var fill = _hoverAddComment
+            ? Brush("ForgePrimaryBrush", Brushes.SteelBlue)
+            : Brush("ForgeSurfaceContainerHighestBrush", Brushes.DimGray);
+        var glyphBrush = _hoverAddComment
+            ? Brush("ForgeOnPrimaryBrush", Brushes.White)
+            : Brush("ForgePrimaryBrush", Brushes.SteelBlue);
+        context.FillRectangle(fill, hit, 3);
+        var ft = new FormattedText(
+            "+",
+            System.Globalization.CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight,
+            _typeface,
+            _hoverAddComment ? 13 : 12,
+            glyphBrush);
+        context.DrawText(ft, new Point(
+            hit.X + (hit.Width - ft.Width) / 2,
+            hit.Y + (hit.Height - ft.Height) / 2));
+
+        // Hit-test uses the base (non-scaled) rect so the affordance doesn't jitter.
+        var baseHit = new Rect(
+            baseX,
+            y + (rowH - AddCommentHitSize) / 2,
+            AddCommentHitSize,
+            AddCommentHitSize);
+        var (startLine, endLine) = ResolveCommentLineRange(side, line.Value);
+        _addCommentHits.Add(new AddCommentHit(baseHit, side, endLine, startLine));
+    }
+
+    private bool RowHasAnnotationMarker(DiffRow row, DiffSide side)
+    {
+        var annotations = Annotations;
+        if (annotations is null || annotations.Count == 0)
+            return false;
+
+        int? rowLine = side == DiffSide.Old ? row.OldLineNumber : row.NewLineNumber;
+        if (rowLine is null)
+            return false;
+
+        foreach (var annotation in annotations)
+        {
+            var range = annotation.Range;
+            if (range.Start.Side != side)
+                continue;
+            if (range.End.Line == rowLine.Value)
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns the control-relative rectangle just below the row for <paramref name="side"/>/<paramref name="line"/>,
+    /// used to position the inline comment composer and expanded thread card.
+    /// </summary>
+    public bool TryGetLineAnchorRect(DiffSide side, int line, out Rect rect)
+    {
+        rect = default;
+        if (Rows is null || Rows.Count == 0)
+            return false;
+
+        for (var i = 0; i < Rows.Count; i++)
+        {
+            var row = Rows[i];
+            int? rowLine = side == DiffSide.Old ? row.OldLineNumber : row.NewLineNumber;
+            if (rowLine != line)
+                continue;
+
+            var contentLeft = MinimapWidth;
+            var contentWidth = Math.Max(0, Bounds.Width - contentLeft);
+            var midX = ViewMode == DiffViewMode.SideBySide
+                ? contentLeft + contentWidth / 2
+                : contentLeft + contentWidth;
+            double x;
+            if (ViewMode == DiffViewMode.SideBySide)
+            {
+                var paneLeft = side == DiffSide.Old ? contentLeft : midX;
+                x = SideBySideCodeX(paneLeft);
+            }
+            else
+            {
+                x = UnifiedCodeX(contentLeft);
+            }
+
+            var y = i * RowHeight - _scrollY + RowHeight + 2;
+            var width = Math.Max(240, Bounds.Width - x - 16);
+            rect = new Rect(x, y, width, 0);
+            return true;
+        }
+
+        return false;
+    }
+
+    private (int? StartLine, int Line) ResolveCommentLineRange(DiffSide side, int clickedLine)
+    {
+        if (Rows is null || _selectionStart < 0)
+            return (null, clickedLine);
+
+        var from = Math.Min(_selectionStart, _selectionEnd);
+        var to = Math.Max(_selectionStart, _selectionEnd);
+        if (from == to)
+            return (null, clickedLine);
+
+        int? first = null;
+        int? last = null;
+        for (var i = from; i <= to; i++)
+        {
+            if (i < 0 || i >= Rows.Count) continue;
+            var row = Rows[i];
+            var line = side == DiffSide.Old ? row.OldLineNumber : row.NewLineNumber;
+            if (line is null) continue;
+            first ??= line;
+            last = line;
+        }
+
+        if (first is null || last is null || first == last)
+            return (null, clickedLine);
+
+        return (Math.Min(first.Value, last.Value), Math.Max(first.Value, last.Value));
     }
 
     private void DrawMinimap(DrawingContext context, IReadOnlyList<DiffRow> rows, Rect bounds)
@@ -579,7 +788,7 @@ public sealed class DiffViewer : Control
             _typeface,
             12,
             brush);
-        ctx.DrawText(ft, new Point(x + GutterWidth - ft.Width - 8, y + (RowHeight - ft.Height) / 2));
+        ctx.DrawText(ft, new Point(x + GutterWidth - ft.Width - 4, y + (RowHeight - ft.Height) / 2));
     }
 
     private void DrawText(DrawingContext ctx, string text, double x, double y, IBrush brush)
@@ -604,7 +813,7 @@ public sealed class DiffViewer : Control
             _typeface,
             12,
             Brushes.Transparent);
-        return ft.Width;
+        return ft.WidthIncludingTrailingWhitespace;
     }
 
     private void DrawIntraLineHighlights(
@@ -664,20 +873,33 @@ public sealed class DiffViewer : Control
             return;
         }
 
-        // Paint default text first, then overwrite token segments with scoped colors.
-        DrawText(ctx, text, x, y, fallback);
+        // Paint each character once: gaps use fallback, tokens use scope color.
+        var drawX = x;
+        var pos = 0;
         foreach (var span in spans)
         {
             if (span.Length <= 0 || span.Start < 0 || span.Start >= text.Length)
                 continue;
-            var len = Math.Min(span.Length, text.Length - span.Start);
+            var start = Math.Max(span.Start, pos);
+            var len = Math.Min(span.Length - (start - span.Start), text.Length - start);
             if (len <= 0) continue;
-            var color = SyntaxScopePalette.BrushForScope(span.Scope, ActualThemeVariant);
-            if (color is null) continue;
-            var before = text[..span.Start];
-            var mid = text.Substring(span.Start, len);
-            DrawText(ctx, mid, x + MeasureWidth(before), y, color);
+
+            if (pos < start)
+            {
+                var gap = text[pos..start];
+                DrawText(ctx, gap, drawX, y, fallback);
+                drawX += MeasureWidth(gap);
+            }
+
+            var mid = text.Substring(start, len);
+            var color = SyntaxScopePalette.BrushForScope(span.Scope, ActualThemeVariant) ?? fallback;
+            DrawText(ctx, mid, drawX, y, color);
+            drawX += MeasureWidth(mid);
+            pos = start + len;
         }
+
+        if (pos < text.Length)
+            DrawText(ctx, text[pos..], drawX, y, fallback);
     }
 
     private IBrush RowBrush(DiffRowKind kind, bool selected) =>
@@ -788,7 +1010,20 @@ public sealed class DiffViewer : Control
         foreach (var hit in _annotationHits)
         {
             if (!hit.Bounds.Contains(pos)) continue;
-            SelectedAnnotation = hit.Annotation;
+            // Toggle: click the same marker again to collapse the inline thread.
+            SelectedAnnotation = ReferenceEquals(SelectedAnnotation, hit.Annotation)
+                ? null
+                : hit.Annotation;
+            e.Handled = true;
+            return;
+        }
+
+        foreach (var hit in _addCommentHits)
+        {
+            if (!hit.Bounds.Contains(pos)) continue;
+            var request = new LineCommentRequest(hit.Side, hit.Line, hit.StartLine);
+            if (AddLineCommentCommand?.CanExecute(request) == true)
+                AddLineCommentCommand.Execute(request);
             e.Handled = true;
             return;
         }
@@ -818,9 +1053,114 @@ public sealed class DiffViewer : Control
 
     protected override void OnPointerMoved(PointerEventArgs e)
     {
-        if (!_draggingMinimap) return;
-        ScrollFromMinimapY(e.GetPosition(this).Y);
-        e.Handled = true;
+        if (_draggingMinimap)
+        {
+            ScrollFromMinimapY(e.GetPosition(this).Y);
+            e.Handled = true;
+            return;
+        }
+
+        if (!CanAddLineComments || Rows is null)
+            return;
+
+        var pos = e.GetPosition(this);
+        if (pos.X < MinimapWidth)
+        {
+            ClearHoverAffordance();
+            return;
+        }
+
+        var contentLeft = MinimapWidth;
+        var contentWidth = Math.Max(0, Bounds.Width - contentLeft);
+        var midX = ViewMode == DiffViewMode.SideBySide
+            ? contentLeft + contentWidth / 2
+            : contentLeft + contentWidth;
+        var index = (int)((pos.Y + _scrollY) / RowHeight);
+        if (index < 0 || index >= Rows.Count)
+        {
+            ClearHoverAffordance();
+            return;
+        }
+
+        var row = Rows[index];
+        DiffSide? side = null;
+        if (ViewMode == DiffViewMode.SideBySide)
+        {
+            side = pos.X < midX ? DiffSide.Old : DiffSide.New;
+            if ((side == DiffSide.Old && row.OldLineNumber is null) ||
+                (side == DiffSide.New && row.NewLineNumber is null))
+                side = null;
+        }
+        else
+        {
+            if (pos.X < contentLeft + GutterWidth && row.OldLineNumber is not null)
+                side = DiffSide.Old;
+            else if (pos.X < contentLeft + GutterWidth * 2 && row.NewLineNumber is not null)
+                side = DiffSide.New;
+            else
+            {
+                side = row.Kind switch
+                {
+                    DiffRowKind.Removed => DiffSide.Old,
+                    DiffRowKind.Added => DiffSide.New,
+                    _ when row.NewLineNumber is not null => DiffSide.New,
+                    _ when row.OldLineNumber is not null => DiffSide.Old,
+                    _ => null,
+                };
+            }
+        }
+
+        var overAdd = false;
+        if (side is not null)
+        {
+            foreach (var hit in _addCommentHits)
+            {
+                if (!hit.Bounds.Contains(pos)) continue;
+                overAdd = true;
+                break;
+            }
+
+            // Hits rebuild on paint; estimate the base + rect while hovering the row.
+            if (!overAdd && index == _hoverRowIndex && _hoverSide == side)
+            {
+                var laneX = CommentLaneX(side.Value, contentLeft, midX);
+                var hasMarker = RowHasAnnotationMarker(row, side.Value);
+                var baseX = hasMarker
+                    ? laneX + AnnotationDotSize + 4
+                    : laneX + (CommentLaneWidth - AddCommentHitSize) / 2;
+                var y = index * RowHeight - _scrollY;
+                var estimate = new Rect(
+                    baseX,
+                    y + (RowHeight - AddCommentHitSize) / 2,
+                    AddCommentHitSize,
+                    AddCommentHitSize);
+                overAdd = estimate.Contains(pos);
+            }
+        }
+
+        if (_hoverRowIndex == index && _hoverSide == side && _hoverAddComment == overAdd)
+            return;
+
+        _hoverRowIndex = side is null ? -1 : index;
+        _hoverSide = side;
+        _hoverAddComment = overAdd;
+        InvalidateVisual();
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        ClearHoverAffordance();
+    }
+
+    private void ClearHoverAffordance()
+    {
+        if (_hoverRowIndex < 0 && _hoverSide is null && !_hoverAddComment)
+            return;
+        _hoverRowIndex = -1;
+        _hoverSide = null;
+        _hoverAddComment = false;
+        InvalidateVisual();
     }
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
