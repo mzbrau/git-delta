@@ -1,0 +1,64 @@
+{
+  "repository": {
+    "pullRequest": {
+      "reviewThreads": {
+        "nodes": [
+          {
+            "id": "RT_kwDO",
+            "isResolved": false,
+            "isOutdated": false,
+            "path": "src/Foo.cs",
+            "line": 12,
+            "startLine": null,
+            "diffSide": "RIGHT",
+            "subjectType": "LINE",
+            "originalLine": null,
+            "originalStartLine": null,
+            "comments": {
+              "nodes": [
+                {
+                  "id": "RC_kwDO",
+                  "body": "Please rename **Foo** to `Bar`.",
+                  "createdAt": "2026-01-15T10:30:00Z",
+                  "url": "https://github.com/octo/repo/pull/1#issuecomment-1",
+                  "viewerDidAuthor": false,
+                  "author": { "login": "reviewer" },
+                  "diffHunk": "@@ -10,3 +10,4 @@\n context\n-old\n+new\n should-never-render",
+                  "commit": { "oid": "abc123def456789012345678901234567890abcd" },
+                  "originalCommit": { "oid": "abc123def456789012345678901234567890abcd" }
+                }
+              ]
+            }
+          },
+          {
+            "id": "RT_left",
+            "isResolved": true,
+            "isOutdated": true,
+            "path": "src/Foo.cs",
+            "line": 5,
+            "startLine": 3,
+            "diffSide": "LEFT",
+            "subjectType": "LINE",
+            "originalLine": 5,
+            "originalStartLine": 3,
+            "comments": {
+              "nodes": [
+                {
+                  "id": "RC_left",
+                  "body": "Left side note",
+                  "createdAt": "2026-01-14T08:00:00Z",
+                  "url": null,
+                  "viewerDidAuthor": true,
+                  "author": { "login": "dev" },
+                  "diffHunk": "hidden hunk text",
+                  "commit": { "oid": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" },
+                  "originalCommit": { "oid": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

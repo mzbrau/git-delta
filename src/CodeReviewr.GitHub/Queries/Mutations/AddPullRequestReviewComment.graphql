@@ -1,0 +1,7 @@
+mutation AddPullRequestReviewComment($input: AddPullRequestReviewCommentInput!) {
+  addPullRequestReviewComment(input: $input) {
+    comment {
+      id
+    }
+  }
+}

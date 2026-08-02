@@ -68,4 +68,13 @@ public enum WorkspaceMode
     FileStatus,
     History,
     Stash,
+    PullRequest,
+}
+
+/// <summary>Viewed-state filter for pull request file lists.</summary>
+public enum ViewedFilter
+{
+    All,
+    Viewed,
+    NotViewed,
 }

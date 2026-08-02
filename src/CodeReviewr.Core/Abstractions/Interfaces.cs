@@ -19,13 +19,13 @@ public interface IGitDiffService
     Task<FileDiff> GetDiffAsync(
         string repositoryPath,
         FilePath path,
-        DiffTarget target,
+        DiffScope scope,
         DiffOptions options,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<(FilePath Path, ContentId OldOid, ContentId NewOid, ChangeKind Kind)>> GetRawDiffAsync(
         string repositoryPath,
-        DiffTarget target,
+        DiffScope scope,
         DiffOptions options,
         CancellationToken ct = default);
 }
@@ -44,7 +44,7 @@ public interface IGitDiffRawService
     Task<string> GetPatchAsync(
         string repositoryPath,
         FilePath path,
-        DiffTarget target,
+        DiffScope scope,
         DiffOptions options,
         CancellationToken ct = default);
 
@@ -54,7 +54,7 @@ public interface IGitDiffRawService
     /// </summary>
     Task<IReadOnlyList<(FilePath Path, ContentId OldOid, ContentId NewOid, ChangeKind Kind)>> GetRawFileListAsync(
         string repositoryPath,
-        DiffTarget target,
+        DiffScope scope,
         DiffOptions options,
         CancellationToken ct = default);
 }
@@ -195,4 +195,9 @@ public interface IRepositoryGate
     Task<T> RunWorktreeWriteAsync<T>(Func<CancellationToken, Task<T>> action, CancellationToken ct);
     Task RunNetworkAsync(Func<CancellationToken, Task> action, CancellationToken ct);
     long CurrentEpoch { get; }
+}
+
+public interface IRepositoryGateProvider
+{
+    IRepositoryGate For(string repositoryPath);
 }

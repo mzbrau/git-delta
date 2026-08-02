@@ -40,7 +40,7 @@ public sealed class WalkingSkeletonTests
 
         var file = status.Unstaged[0].Path;
         var diff = await sp.GetRequiredService<IGitDiffService>()
-            .GetDiffAsync(path, file, DiffTarget.IndexToWorktree, DiffOptions.Default);
+            .GetWorkingCopyDiffAsync(path, file, DiffTarget.IndexToWorktree, DiffOptions.Default);
         Assert.That(diff.Hunks, Is.Not.Empty);
 
         var rows = UnifiedRowProjector.Project(diff);
@@ -61,13 +61,13 @@ public sealed class WalkingSkeletonTests
         var diffs = sp.GetRequiredService<IGitDiffService>();
         var file = FilePath.From("a.txt");
 
-        _ = await diffs.GetDiffAsync(path, file, DiffTarget.IndexToWorktree, DiffOptions.Default);
+        _ = await diffs.GetWorkingCopyDiffAsync(path, file, DiffTarget.IndexToWorktree, DiffOptions.Default);
 
         var cache = sp.GetRequiredService<IDiffCache>();
         var hitsBefore = cache.HitCount;
         var missesBefore = cache.MissCount;
 
-        _ = await diffs.GetDiffAsync(path, file, DiffTarget.IndexToWorktree, DiffOptions.Default);
+        _ = await diffs.GetWorkingCopyDiffAsync(path, file, DiffTarget.IndexToWorktree, DiffOptions.Default);
 
         Assert.That(cache.HitCount, Is.GreaterThan(hitsBefore), "Second identical diff should hit the content-addressed cache");
         Assert.That(cache.MissCount, Is.EqualTo(missesBefore));

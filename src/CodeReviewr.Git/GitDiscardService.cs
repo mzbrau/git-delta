@@ -15,7 +15,7 @@ namespace CodeReviewr.Git;
 /// recently-discarded list with <see cref="RestoreDiscardedAsync"/>. Untracked files work
 /// identically — their content is hashed before deletion.
 /// </summary>
-public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader objectReader, IRepositoryGate gate) : IGitDiscardService
+public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader objectReader, IRepositoryGateProvider gates) : IGitDiscardService
 {
     private const int MaxRecentlyDiscarded = 20;
     private readonly ConcurrentQueue<DiscardedEntry> _recentlyDiscarded = new();
@@ -31,7 +31,7 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
         var preImage = await objectReader.HashObjectAsync(repositoryPath, absolutePath, write: true, ct).ConfigureAwait(false);
         var isTracked = await IsTrackedAsync(repositoryPath, path, ct).ConfigureAwait(false);
 
-        await gate.RunWorktreeWriteAsync(async token =>
+        await gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
             if (isTracked)
             {
@@ -53,7 +53,7 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
             ? await objectReader.HashObjectAsync(repositoryPath, absolutePath, write: true, ct).ConfigureAwait(false)
             : null;
 
-        await gate.RunWorktreeWriteAsync(async token =>
+        await gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
             await runner.RunAsync(
                 repositoryPath,
@@ -76,7 +76,7 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
             ? await objectReader.HashObjectAsync(repositoryPath, absolutePath, write: true, ct).ConfigureAwait(false)
             : null;
 
-        await gate.RunWorktreeWriteAsync(async token =>
+        await gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
             var options = new GitProcessOptions { StdinText = patch };
             await runner.RunAsync(repositoryPath, ["apply", "--reverse", "--whitespace=nowarn", "-"], options, token).ConfigureAwait(false);
@@ -90,7 +90,7 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
     {
         var content = await objectReader.ReadBlobAsync(repositoryPath, entry.ObjectId, ct).ConfigureAwait(false);
 
-        await gate.RunWorktreeWriteAsync(async _ =>
+        await gates.For(repositoryPath).RunWorktreeWriteAsync(async _ =>
         {
             var absolutePath = Path.Combine(repositoryPath, entry.Path.Value);
             var directory = Path.GetDirectoryName(absolutePath);

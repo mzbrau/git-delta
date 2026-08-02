@@ -11,7 +11,7 @@ namespace CodeReviewr.Diff;
 /// (path, rename, binary) before hunk parsing completes.
 /// </summary>
 public sealed record PatchHeader(
-    DiffTarget Target,
+    DiffScope Scope,
     FilePath OldPath,
     FilePath NewPath,
     ChangeKind Change,
@@ -21,7 +21,7 @@ public sealed record PatchHeader(
     string RawPatch)
 {
     public FileDiff ToFileDiff(IReadOnlyList<DiffHunk> hunks) =>
-        new(Target, OldPath, NewPath, Change, OldContent, NewContent, IsBinary, hunks, RawPatch);
+        new(Scope, OldPath, NewPath, Change, OldContent, NewContent, IsBinary, hunks, RawPatch);
 }
 
 /// <summary>
@@ -41,12 +41,15 @@ public static class PatchParser
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     /// <summary>Parses the full patch, including all hunks, synchronously.</summary>
-    public static FileDiff Parse(string rawPatch, DiffTarget target)
+    public static FileDiff Parse(string rawPatch, DiffTarget target) =>
+        Parse(rawPatch, target.AsWorkingCopy());
+
+    public static FileDiff Parse(string rawPatch, DiffScope scope)
     {
         ArgumentNullException.ThrowIfNull(rawPatch);
 
         var scan = ScanHeader(rawPatch);
-        var header = BuildHeader(rawPatch, target, scan);
+        var header = BuildHeader(rawPatch, scope, scan);
         var hunks = scan.IsBinary
             ? (IReadOnlyList<DiffHunk>)Array.Empty<DiffHunk>()
             : ParseHunksCore(rawPatch, scan.BodyStart).ToList();
@@ -54,12 +57,15 @@ public static class PatchParser
     }
 
     /// <summary>Parses only the header, without walking hunk bodies. Cheap: one pass over the header lines.</summary>
-    public static PatchHeader ParseHeader(string rawPatch, DiffTarget target)
+    public static PatchHeader ParseHeader(string rawPatch, DiffTarget target) =>
+        ParseHeader(rawPatch, target.AsWorkingCopy());
+
+    public static PatchHeader ParseHeader(string rawPatch, DiffScope scope)
     {
         ArgumentNullException.ThrowIfNull(rawPatch);
 
         var scan = ScanHeader(rawPatch);
-        return BuildHeader(rawPatch, target, scan);
+        return BuildHeader(rawPatch, scope, scan);
     }
 
     /// <summary>
@@ -96,12 +102,19 @@ public static class PatchParser
         string rawPatch,
         DiffTarget target,
         Action<DiffHunk>? onHunkParsed = null,
+        CancellationToken ct = default) =>
+        await ParseProgressiveAsync(rawPatch, target.AsWorkingCopy(), onHunkParsed, ct).ConfigureAwait(false);
+
+    public static async Task<FileDiff> ParseProgressiveAsync(
+        string rawPatch,
+        DiffScope scope,
+        Action<DiffHunk>? onHunkParsed = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(rawPatch);
 
         var scan = ScanHeader(rawPatch);
-        var header = BuildHeader(rawPatch, target, scan);
+        var header = BuildHeader(rawPatch, scope, scan);
 
         var hunks = new List<DiffHunk>();
         if (!scan.IsBinary)
@@ -120,8 +133,8 @@ public static class PatchParser
         return header.ToFileDiff(hunks);
     }
 
-    private static PatchHeader BuildHeader(string rawPatch, DiffTarget target, HeaderScan scan) =>
-        new(target, scan.OldPath, scan.NewPath, scan.Change, scan.OldContent, scan.NewContent, scan.IsBinary, rawPatch);
+    private static PatchHeader BuildHeader(string rawPatch, DiffScope scope, HeaderScan scan) =>
+        new(scope, scan.OldPath, scan.NewPath, scan.Change, scan.OldContent, scan.NewContent, scan.IsBinary, rawPatch);
 
     private readonly record struct HeaderScan(
         FilePath OldPath,

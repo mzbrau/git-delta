@@ -1,0 +1,42 @@
+query InboxSearch($query: String!, $first: Int!) {
+  search(query: $query, type: ISSUE, first: $first) {
+    issueCount
+    nodes {
+      ... on PullRequest {
+        id
+        number
+        title
+        url
+        isDraft
+        createdAt
+        updatedAt
+        reviewDecision
+        baseRefName
+        headRefName
+        changedFiles
+        baseRefOid
+        headRefOid
+        author {
+          login
+          avatarUrl
+        }
+        repository {
+          id
+          name
+          nameWithOwner
+          owner {
+            login
+          }
+          url
+        }
+        commits(last: 1) {
+          nodes {
+            commit {
+              oid
+            }
+          }
+        }
+      }
+    }
+  }
+}

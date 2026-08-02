@@ -12,12 +12,12 @@ namespace CodeReviewr.Git;
 /// a diff read. Pull is a worktree write: `--ff-only` is the default mode, merge and rebase are
 /// explicit opt-ins.
 /// </summary>
-public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGate gate) : IGitRemoteService
+public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitRemoteService
 {
     private static readonly TimeSpan NetworkTimeout = TimeSpan.FromMinutes(5);
 
     public Task PushAsync(string repositoryPath, IProgress<string>? progress, CancellationToken ct = default) =>
-        gate.RunNetworkAsync(async token =>
+        gates.For(repositoryPath).RunNetworkAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var options = new GitProcessOptions
@@ -31,7 +31,7 @@ public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGate g
         }, ct);
 
     public Task PullAsync(string repositoryPath, PullMode mode, IProgress<string>? progress, CancellationToken ct = default) =>
-        gate.RunWorktreeWriteAsync(async token =>
+        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
             var args = new List<string> { "pull", "--progress" };
             args.Add(mode switch
@@ -57,7 +57,7 @@ public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGate g
         string repositoryPath,
         string remoteName = "origin",
         CancellationToken ct = default) =>
-        gate.RunReadAsync(async token =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
         {
             try
             {

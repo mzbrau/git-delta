@@ -235,7 +235,7 @@ public sealed class WorkingCopyViewModelDiscardTests
                 +y
                 """;
             var fileDiff = PatchParser.Parse(patch, DiffTarget.IndexToWorktree);
-            _diff.GetDiffAsync(repo, file, DiffTarget.IndexToWorktree, Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            _diff.GetDiffAsync(repo, file, DiffTarget.IndexToWorktree.AsWorkingCopy(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
                 .Returns(fileDiff);
 
             var vm = CreateVm();

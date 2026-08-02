@@ -22,6 +22,9 @@
     <ProjectReference Include="..\..\src\CodeReviewr.Core\CodeReviewr.Core.csproj" />
     <ProjectReference Include="..\..\src\CodeReviewr.Git\CodeReviewr.Git.csproj" />
     <ProjectReference Include="..\..\src\CodeReviewr.Diff\CodeReviewr.Diff.csproj" />
+    <ProjectReference Include="..\..\src\CodeReviewr.GitHub\CodeReviewr.GitHub.csproj" />
+    <ProjectReference Include="..\..\src\CodeReviewr.Review\CodeReviewr.Review.csproj" />
+    <ProjectReference Include="..\..\src\CodeReviewr.Persistence\CodeReviewr.Persistence.csproj" />
     <ProjectReference Include="..\CodeReviewr.TestSupport\CodeReviewr.TestSupport.csproj" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,7 @@
+mutation UnmarkFileAsViewed($input: UnmarkFileAsViewedInput!) {
+  unmarkFileAsViewed(input: $input) {
+    pullRequest {
+      id
+    }
+  }
+}

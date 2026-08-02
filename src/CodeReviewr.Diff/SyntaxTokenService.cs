@@ -159,7 +159,9 @@ public sealed class SyntaxTokenService : ISyntaxTokenService
                     if (end <= start)
                         continue;
 
-                    var scopeName = token.Scopes.Count > 0 ? token.Scopes[^1] : string.Empty;
+                    // Prefer the most specific non-language-root scope so painters can distinguish
+                    // keywords/strings/comments from the bare "source.cs" grammar root.
+                    var scopeName = PickScope(token.Scopes);
                     spans.Add(new SyntaxSpan(start, end - start, scopeName));
                 }
 
@@ -196,5 +198,21 @@ public sealed class SyntaxTokenService : ISyntaxTokenService
         {
             return null;
         }
+    }
+
+    private static string PickScope(IList<string> scopes)
+    {
+        if (scopes.Count == 0) return string.Empty;
+        for (var i = scopes.Count - 1; i >= 0; i--)
+        {
+            var s = scopes[i];
+            if (string.IsNullOrEmpty(s)) continue;
+            // Skip grammar roots like "source.cs" / "source.js".
+            if (s.StartsWith("source.", StringComparison.Ordinal) && s.IndexOf('.', 7) < 0)
+                continue;
+            return s;
+        }
+
+        return scopes[^1];
     }
 }

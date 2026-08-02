@@ -4,6 +4,9 @@ using CodeReviewr.Core.Caching;
 using CodeReviewr.Core.Settings;
 using CodeReviewr.Diff;
 using CodeReviewr.Git;
+using CodeReviewr.GitHub;
+using CodeReviewr.Persistence;
+using CodeReviewr.Review;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -31,10 +34,14 @@ public static class ServiceConfiguration
         services.AddLogging(b => b.AddSerilog(dispose: true));
         services.AddSingleton<ISettingsStore, JsonSettingsStore>();
         services.AddSingleton<IDiffCache, MemoryDiffCache>();
+        services.AddCodeReviewrPersistence();
         services.AddCodeReviewrGit();
         services.AddCodeReviewrDiff();
+        services.AddCodeReviewrGitHub();
+        services.AddCodeReviewrReview();
         services.AddSingleton<MainWindowViewModel>();
         services.AddTransient<WorkingCopyViewModel>();
+        services.AddTransient<ReviewViewModel>();
         services.AddSingleton<NotificationService>();
         services.AddSingleton<AvaloniaConfirmDialog>();
         services.AddSingleton<IConfirmDialog>(sp => sp.GetRequiredService<AvaloniaConfirmDialog>());
@@ -43,6 +50,9 @@ public static class ServiceConfiguration
         services.AddSingleton<DiagnosticsOverlayViewModel>();
         services.AddSingleton<GitConsoleViewModel>();
 
-        return services.BuildServiceProvider();
+        var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IDurableUserStore>().EnsureSchema();
+        provider.GetRequiredService<IDisposableCacheStore>().EnsureSchema();
+        return provider;
     }
 }

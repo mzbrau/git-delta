@@ -1,0 +1,4 @@
+﻿HunkHeader|old=1|new=1|L=@@ -1,4 +1,4 @@|R=|Li=|Ri=
+Context|old=1|new=1|L=using System;|R=using System;|Li=|Ri=
+Removed|old=2|new=2|L=public class Foo { }|R=public class Bar { }|Li=13+3|Ri=13+3
+Context|old=3|new=3|L=// trailing|R=// trailing|Li=|Ri=

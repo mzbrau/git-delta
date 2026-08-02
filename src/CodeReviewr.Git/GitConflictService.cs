@@ -9,13 +9,13 @@ namespace CodeReviewr.Git;
 /// *resolution* is out of scope; this only surfaces the state honestly and offers the standard
 /// exits (abort, continue, mergetool, mark resolved).
 /// </summary>
-public sealed class GitConflictService(IGitProcessRunner runner, IRepositoryGate gate) : IGitConflictService
+public sealed class GitConflictService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitConflictService
 {
     public Task<InProgressOperation> DetectInProgressAsync(string repositoryPath, CancellationToken ct = default) =>
-        gate.RunReadAsync(_ => Task.FromResult(GitRepositoryPaths.DetectInProgress(repositoryPath)), ct);
+        gates.For(repositoryPath).RunReadAsync(_ => Task.FromResult(GitRepositoryPaths.DetectInProgress(repositoryPath)), ct);
 
     public Task AbortAsync(string repositoryPath, CancellationToken ct = default) =>
-        gate.RunWorktreeWriteAsync(async token =>
+        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
             var inProgress = GitRepositoryPaths.DetectInProgress(repositoryPath);
             var args = inProgress switch
@@ -32,7 +32,7 @@ public sealed class GitConflictService(IGitProcessRunner runner, IRepositoryGate
         }, ct);
 
     public Task ContinueAsync(string repositoryPath, CancellationToken ct = default) =>
-        gate.RunWorktreeWriteAsync(async token =>
+        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
             var inProgress = GitRepositoryPaths.DetectInProgress(repositoryPath);
             var args = inProgress switch
@@ -49,7 +49,7 @@ public sealed class GitConflictService(IGitProcessRunner runner, IRepositoryGate
         }, ct);
 
     public Task OpenMergetoolAsync(string repositoryPath, FilePath? path, CancellationToken ct = default) =>
-        gate.RunWorktreeWriteAsync(async token =>
+        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
             var args = new List<string> { "mergetool" };
             if (path is { } p)
@@ -62,7 +62,7 @@ public sealed class GitConflictService(IGitProcessRunner runner, IRepositoryGate
         }, ct);
 
     public Task MarkResolvedAsync(string repositoryPath, FilePath path, CancellationToken ct = default) =>
-        gate.RunIndexWriteAsync(
+        gates.For(repositoryPath).RunIndexWriteAsync(
             token => runner.RunAsync(repositoryPath, ["add", "--", path.Value], options: null, token),
             ct);
 }

@@ -34,6 +34,34 @@ jobs:
           --collect:"XPlat Code Coverage"
           --results-directory ./TestResults
           --logger "trx;LogFileName=test-results.trx"
+          -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+      - name: Coverage floor (GitHub / Review / Persistence)
+        shell: pwsh
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool
+          reportgenerator `
+            -reports:"TestResults/**/coverage.opencover.xml" `
+            -targetdir:"TestResults/coverage-report" `
+            -reporttypes:"TextSummary"
+          $summary = Get-Content "TestResults/coverage-report/Summary.txt" -Raw
+          Write-Host $summary
+          function Get-LineRate($assembly) {
+            if ($summary -match "(?ms)$assembly.*?Line coverage:\s*([\d\.]+)%") { return [double]$Matches[1] }
+            return 0
+          }
+          $floors = @{
+            "CodeReviewr.GitHub" = 40
+            "CodeReviewr.Review" = 40
+            "CodeReviewr.Persistence" = 40
+          }
+          foreach ($entry in $floors.GetEnumerator()) {
+            $rate = Get-LineRate $entry.Key
+            Write-Host "$($entry.Key): $rate% (floor $($entry.Value)%)"
+            if ($rate -lt $entry.Value) {
+              Write-Error "$($entry.Key) line coverage $rate% is below floor $($entry.Value)%"
+            }
+          }
 
       - name: Publish win-x64
         run: >
@@ -49,3 +77,9 @@ jobs:
         with:
           name: windows-builds
           path: artifacts/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: TestResults/coverage-report/
+          if-no-files-found: ignore

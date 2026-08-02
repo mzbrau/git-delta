@@ -10,7 +10,7 @@ namespace CodeReviewr.Git;
 /// modify staged files, so commit is a progress-bearing operation rather than an instant one.
 /// Post-commit state is never predicted, unlike stage/unstage.
 /// </summary>
-public sealed class GitCommitService(IGitProcessRunner runner, IRepositoryGate gate) : IGitCommitService
+public sealed class GitCommitService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitCommitService
 {
     public Task CommitAsync(
         string repositoryPath,
@@ -28,7 +28,7 @@ public sealed class GitCommitService(IGitProcessRunner runner, IRepositoryGate g
         args.Add("-F");
         args.Add("-");
 
-        return gate.RunIndexWriteAsync(async token =>
+        return gates.For(repositoryPath).RunIndexWriteAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var options = new GitProcessOptions

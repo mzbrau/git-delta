@@ -1,0 +1,7 @@
+query CapabilityProbe {
+  __type(name: "Mutation") {
+    fields {
+      name
+    }
+  }
+}

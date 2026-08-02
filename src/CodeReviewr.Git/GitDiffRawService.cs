@@ -2,6 +2,7 @@ using System.Diagnostics;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
 using CodeReviewr.Core.Diagnostics;
+using CodeReviewr.Core.Diff;
 using CodeReviewr.Git.Internal;
 
 namespace CodeReviewr.Git;
@@ -11,18 +12,18 @@ namespace CodeReviewr.Git;
 /// patch into a canonical <c>FileDiff</c> is <c>CodeReviewr.Diff</c>'s job, composed on top of
 /// this service so that <c>CodeReviewr.Git</c> never references <c>CodeReviewr.Diff</c>.
 /// </summary>
-public sealed class GitDiffRawService(IGitProcessRunner runner, IRepositoryGate gate) : IGitDiffRawService
+public sealed class GitDiffRawService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitDiffRawService
 {
     public Task<string> GetPatchAsync(
         string repositoryPath,
         FilePath path,
-        DiffTarget target,
+        DiffScope scope,
         DiffOptions options,
         CancellationToken ct = default)
     {
-        var args = GitDiffArgumentBuilder.BuildPatchArgs(target, options, path);
+        var args = GitDiffArgumentBuilder.BuildPatchArgs(scope, options, path);
 
-        return gate.RunReadAsync(async token =>
+        return gates.For(repositoryPath).RunReadAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var result = await runner.RunAsync(repositoryPath, args, options: null, token).ConfigureAwait(false);
@@ -33,13 +34,13 @@ public sealed class GitDiffRawService(IGitProcessRunner runner, IRepositoryGate 
 
     public Task<IReadOnlyList<(FilePath Path, ContentId OldOid, ContentId NewOid, ChangeKind Kind)>> GetRawFileListAsync(
         string repositoryPath,
-        DiffTarget target,
+        DiffScope scope,
         DiffOptions options,
         CancellationToken ct = default)
     {
-        var args = GitDiffArgumentBuilder.BuildRawArgs(target, options, path: null);
+        var args = GitDiffArgumentBuilder.BuildRawArgs(scope, options, path: null);
 
-        return gate.RunReadAsync(async token =>
+        return gates.For(repositoryPath).RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(repositoryPath, args, options: null, token).ConfigureAwait(false);
             return ParseRaw(result.Stdout);

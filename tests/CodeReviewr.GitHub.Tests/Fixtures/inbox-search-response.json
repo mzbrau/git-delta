@@ -1,0 +1,54 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 1,
+      "nodes": [
+        {
+          "id": "PR_kwDOABC123",
+          "number": 42,
+          "title": "Fix inbox parsing",
+          "url": "https://github.com/octo/repo/pull/42",
+          "isDraft": false,
+          "createdAt": "2026-01-10T08:00:00Z",
+          "updatedAt": "2026-01-15T10:30:00Z",
+          "reviewDecision": "REVIEW_REQUIRED",
+          "baseRefName": "main",
+          "headRefName": "feature/inbox",
+          "changedFiles": 3,
+          "baseRefOid": "abc123base",
+          "headRefOid": "def456head",
+          "author": {
+            "login": "octocat",
+            "avatarUrl": "https://avatars.githubusercontent.com/u/1"
+          },
+          "repository": {
+            "id": "R_kgDOABC",
+            "name": "repo",
+            "nameWithOwner": "octo/repo",
+            "owner": {
+              "login": "octo"
+            },
+            "url": "https://github.com/octo/repo"
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "oid": "def456head"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "extensions": {
+    "rateLimit": {
+      "limit": 5000,
+      "remaining": 4999,
+      "used": 1,
+      "resetAt": "2026-01-15T12:00:00Z"
+    }
+  }
+}

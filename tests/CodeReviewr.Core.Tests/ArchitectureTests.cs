@@ -6,12 +6,15 @@ namespace CodeReviewr.Core.Tests;
 public sealed class ArchitectureTests
 {
     [Test]
-    public void Core_Git_Diff_Must_Not_Reference_Avalonia()
+    public void Core_Git_Diff_GitHub_Review_Persistence_Must_Not_Reference_Avalonia()
     {
         var result = Types.InAssemblies([
                 typeof(FilePath).Assembly,
                 typeof(CodeReviewr.Git.GitProcessRunner).Assembly,
                 typeof(CodeReviewr.Diff.PatchParser).Assembly,
+                typeof(CodeReviewr.GitHub.GitHubClient).Assembly,
+                typeof(CodeReviewr.Review.RepositoryLocator).Assembly,
+                typeof(CodeReviewr.Persistence.PlatformTokenStore).Assembly,
             ])
             .ShouldNot()
             .HaveDependencyOn("Avalonia")

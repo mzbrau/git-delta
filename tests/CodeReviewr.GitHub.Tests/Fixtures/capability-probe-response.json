@@ -1,0 +1,11 @@
+{
+  "data": {
+    "__type": {
+      "fields": [
+        { "name": "addComment" },
+        { "name": "markFileAsViewed" },
+        { "name": "createPullRequest" }
+      ]
+    }
+  }
+}

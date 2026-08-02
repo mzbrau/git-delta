@@ -27,7 +27,7 @@ public sealed record DiffHunk(
     IReadOnlyList<DiffLine> Lines);
 
 public sealed record FileDiff(
-    DiffTarget Target,
+    DiffScope Scope,
     FilePath OldPath,
     FilePath NewPath,
     ChangeKind Change,

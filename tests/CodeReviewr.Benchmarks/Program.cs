@@ -51,5 +51,5 @@ public class DiffBenchmarks
     [Benchmark]
     public async Task DiffGeneration() =>
         await _sp.GetRequiredService<IGitDiffService>()
-            .GetDiffAsync(_repo, _file, DiffTarget.IndexToWorktree, DiffOptions.Default);
+            .GetWorkingCopyDiffAsync(_repo, _file, DiffTarget.IndexToWorktree, DiffOptions.Default);
 }
