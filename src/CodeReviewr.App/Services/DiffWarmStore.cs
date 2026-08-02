@@ -329,5 +329,5 @@ public sealed record DiffWarmEntry(FileDiff Diff, DateTimeOffset CompletedAt, bo
 public readonly record struct DiffWarmKey(
     string Scope,
     string Path,
-    DiffTarget Target,
+    DiffScope DiffScope,
     DiffOptions Options);

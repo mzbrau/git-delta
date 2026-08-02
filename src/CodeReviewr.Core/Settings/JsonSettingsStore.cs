@@ -103,5 +103,11 @@ public sealed class JsonSettingsStore : ISettingsStore
         NavigatorCollapsed = s.NavigatorCollapsed,
         SimulateSlowGit = s.SimulateSlowGit,
         DiffPrefetchConcurrency = s.DiffPrefetchConcurrency,
+        DevelopmentFolder = s.DevelopmentFolder,
+        RepositoryScanDepth = s.RepositoryScanDepth,
+        RepositoryScanIgnore = [.. s.RepositoryScanIgnore],
+        EnterpriseHostUrls = [.. s.EnterpriseHostUrls],
+        Accounts = [.. s.Accounts],
+        RepositoryBindings = [.. s.RepositoryBindings],
     };
 }

@@ -6,6 +6,8 @@
         xmlns:core="using:CodeReviewr.Core"
         xmlns:icons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:svc="using:CodeReviewr.App.Services"
+        xmlns:gh="using:CodeReviewr.GitHub"
+        xmlns:review="using:CodeReviewr.Review"
         x:Class="CodeReviewr.App.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         x:Name="RootWindow"
@@ -377,35 +379,105 @@
                 <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                         Padding="12,4" Click="OnTogglePullRequests" Margin="0,8,0,0">
                   <StackPanel Orientation="Horizontal" Spacing="8">
-                    <icons:MaterialIcon Kind="{Binding WorkingCopy.PullRequestsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                    <icons:MaterialIcon Kind="{Binding Review.PullRequestsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                         Width="14" Height="14" />
                     <icons:MaterialIcon Kind="SourcePull" Width="14" Height="14" Opacity="0.7" />
                     <TextBlock Text="PULL REQUESTS" FontWeight="SemiBold" FontSize="11"
                                Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
                   </StackPanel>
                 </Button>
-                <StackPanel IsVisible="{Binding WorkingCopy.PullRequestsExpanded}" Spacing="1">
+                <StackPanel IsVisible="{Binding Review.PullRequestsExpanded}" Spacing="1">
                   <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                          Padding="28,4,12,4" Click="OnTogglePrRequested">
+                          Padding="28,4,12,4" Click="OnToggleNeedsMyReview">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                      <icons:MaterialIcon Kind="{Binding WorkingCopy.PrRequestedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                      <icons:MaterialIcon Kind="{Binding Review.NeedsMyReviewExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                           Width="12" Height="12" />
-                      <TextBlock Text="Requested" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
+                      <TextBlock Text="Needs my review" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
                     </StackPanel>
                   </Button>
-                  <TextBlock Text="No pull requests" FontSize="11" Opacity="0.45" Margin="48,2,12,6"
-                             IsVisible="{Binding WorkingCopy.PrRequestedExpanded}" />
+                  <ListBox ItemsSource="{Binding Review.NeedsMyReview}"
+                           IsVisible="{Binding Review.NeedsMyReviewExpanded}"
+                           SelectionMode="Single"
+                           SelectedItem="{Binding Review.SelectedPullRequest}"
+                           SelectionChanged="OnPullRequestSelectionChanged"
+                           Margin="36,0,8,4">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="gh:PullRequestSummary">
+                        <StackPanel Spacing="2" Margin="0,4">
+                          <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" FontSize="12" />
+                          <TextBlock Text="{Binding NameWithOwner}" FontSize="10" Opacity="0.6" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
                   <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                          Padding="28,4,12,4" Click="OnTogglePrRaised">
+                          Padding="28,4,12,4" Click="OnToggleReviewed">
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                      <icons:MaterialIcon Kind="{Binding WorkingCopy.PrRaisedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                      <icons:MaterialIcon Kind="{Binding Review.ReviewedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                           Width="12" Height="12" />
-                      <TextBlock Text="Raised" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
+                      <TextBlock Text="Reviewed" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
                     </StackPanel>
                   </Button>
-                  <TextBlock Text="No pull requests" FontSize="11" Opacity="0.45" Margin="48,2,12,6"
-                             IsVisible="{Binding WorkingCopy.PrRaisedExpanded}" />
+                  <ListBox ItemsSource="{Binding Review.Reviewed}"
+                           IsVisible="{Binding Review.ReviewedExpanded}"
+                           SelectionMode="Single"
+                           SelectedItem="{Binding Review.SelectedPullRequest}"
+                           SelectionChanged="OnPullRequestSelectionChanged"
+                           Margin="36,0,8,4">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="gh:PullRequestSummary">
+                        <StackPanel Spacing="2" Margin="0,4">
+                          <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" FontSize="12" />
+                          <TextBlock Text="{Binding NameWithOwner}" FontSize="10" Opacity="0.6" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Padding="28,4,12,4" Click="OnToggleMyPullRequests">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <icons:MaterialIcon Kind="{Binding Review.MyPullRequestsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                          Width="12" Height="12" />
+                      <TextBlock Text="My pull requests" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
+                    </StackPanel>
+                  </Button>
+                  <ListBox ItemsSource="{Binding Review.MyPullRequests}"
+                           IsVisible="{Binding Review.MyPullRequestsExpanded}"
+                           SelectionMode="Single"
+                           SelectedItem="{Binding Review.SelectedPullRequest}"
+                           SelectionChanged="OnPullRequestSelectionChanged"
+                           Margin="36,0,8,4">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="gh:PullRequestSummary">
+                        <StackPanel Spacing="2" Margin="0,4">
+                          <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" FontSize="12" />
+                          <TextBlock Text="{Binding NameWithOwner}" FontSize="10" Opacity="0.6" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
                 </StackPanel>
+                <ItemsControl ItemsSource="{Binding GitHubAccounts}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="core:GitHubAccountSettings">
+                      <Border Padding="28,4,12,4" Margin="0,4,0,0"
+                              IsVisible="{Binding NeedsReauth}"
+                              Background="{DynamicResource ForgeBannerBrush}">
+                        <StackPanel Spacing="4">
+                          <TextBlock FontSize="11" TextWrapping="Wrap">
+                            <Run Text="{Binding Login}" FontWeight="SemiBold" />
+                            <Run Text=" on " />
+                            <Run Text="{Binding Host}" />
+                            <Run Text=" needs re-authentication." />
+                          </TextBlock>
+                          <Button Classes="Link" Content="Open settings"
+                                  Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).OpenSettingsCommand}"
+                                  FontSize="11" HorizontalAlignment="Left" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
               </StackPanel>
             </ScrollViewer>
           </DockPanel>
@@ -419,7 +491,7 @@
         <Border Grid.Column="2" Background="{DynamicResource ForgeBackgroundBrush}"
                 BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0"
                 ClipToBounds="True"
-                IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                IsVisible="{Binding ShowFileStatusPane}">
           <DockPanel>
             <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
                     Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
@@ -429,7 +501,7 @@
 
             <Border DockPanel.Dock="Top" Padding="8,6"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1"
-                    IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                    IsVisible="{Binding ShowFileStatusPane}">
               <Grid>
                 <TextBox Classes="Forge" Text="{Binding WorkingCopy.FileFilter}"
                          PlaceholderText="Filter files…" Padding="8,6,28,6" />
@@ -748,14 +820,117 @@
           </DockPanel>
         </Border>
 
+        <!-- Pull request file list -->
+        <Border Grid.Column="2" Background="{DynamicResource ForgeBackgroundBrush}"
+                BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0"
+                ClipToBounds="True"
+                IsVisible="{Binding ShowPullRequestPane}">
+          <DockPanel>
+            <Border DockPanel.Dock="Top" MinHeight="40" Padding="16,8"
+                    Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <StackPanel Spacing="4">
+                <DockPanel>
+                  <Button DockPanel.Dock="Right" Classes="Ghost" Content="File status"
+                          Command="{Binding ReturnToFileStatusCommand}" FontSize="11" />
+                  <TextBlock Text="Pull request files" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </DockPanel>
+                <TextBlock Text="{Binding Review.ProgressSummary}" FontSize="10" Opacity="0.75"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+            <Border DockPanel.Dock="Top" Padding="8,6"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <Grid>
+                <TextBox x:Name="PrFileFilterBox" Classes="Forge" Text="{Binding Review.FileFilter}"
+                         PlaceholderText="Filter files…" Padding="8,6,28,6" />
+                <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
+                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
+                        Command="{Binding Review.ClearFileFilterCommand}"
+                        IsVisible="{Binding Review.HasFileFilter}"
+                        ToolTip.Tip="Clear filter">
+                  <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                </Button>
+              </Grid>
+            </Border>
+            <Border DockPanel.Dock="Top" Padding="8,4"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <WrapPanel Orientation="Horizontal">
+                <ComboBox SelectedItem="{Binding Review.FilterViewed}" MinWidth="100" FontSize="11" Margin="0,0,6,4">
+                  <core:ViewedFilter>All</core:ViewedFilter>
+                  <core:ViewedFilter>Viewed</core:ViewedFilter>
+                  <core:ViewedFilter>NotViewed</core:ViewedFilter>
+                </ComboBox>
+                <CheckBox Content="Stale" IsChecked="{Binding Review.FilterStale}" FontSize="11" Margin="0,0,8,4" />
+                <CheckBox Content="Commented" IsChecked="{Binding Review.FilterCommented}" FontSize="11" Margin="0,0,8,4" />
+                <CheckBox Content="Unresolved" IsChecked="{Binding Review.FilterUnresolved}" FontSize="11" Margin="0,0,8,4" />
+              </WrapPanel>
+            </Border>
+            <Border DockPanel.Dock="Bottom" Padding="12" MaxHeight="180"
+                    Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0">
+              <StackPanel Spacing="6">
+                <TextBlock Text="Local notes" FontSize="11" FontWeight="SemiBold" />
+                <TextBox Text="{Binding Review.LocalNotes}" AcceptsReturn="True"
+                         MinHeight="56" FontSize="11"
+                         PlaceholderText="Private notes (never synced)" />
+                <TextBlock Text="Viewed state is local-only on this GitHub instance."
+                           FontSize="10" Opacity="0.7"
+                           IsVisible="{Binding Review.ViewedIsLocalOnly}" />
+                <TextBlock Text="Offline — changes will sync when connected."
+                           FontSize="10" Foreground="{DynamicResource ForgeStatusDeletedBrush}"
+                           IsVisible="{Binding Review.IsOffline}" />
+              </StackPanel>
+            </Border>
+            <ScrollViewer>
+              <StackPanel>
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="12,8" Command="{Binding Review.SelectConversationCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <icons:MaterialIcon Kind="ForumOutline" Width="16" Height="16" />
+                    <TextBlock Text="Conversation" FontWeight="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                  </StackPanel>
+                </Button>
+                <ListBox ItemsSource="{Binding Review.FilteredPrFiles}"
+                         SelectedItem="{Binding Review.SelectedFile}"
+                         SelectionMode="Single"
+                         Margin="0">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FileItemViewModel">
+                      <Border Padding="8,4">
+                        <DockPanel>
+                          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                            <icons:MaterialIcon Kind="Eye" Width="12" Height="12" Opacity="0.6"
+                                                IsVisible="{Binding IsViewed}" ToolTip.Tip="Viewed" />
+                            <Border CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                    Background="{DynamicResource ForgePrimaryContainerBrush}"
+                                    IsVisible="{Binding UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
+                              <TextBlock Text="{Binding UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
+                            </Border>
+                            <Border CornerRadius="2" Padding="4,1"
+                                    Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
+                              <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold" />
+                            </Border>
+                          </StackPanel>
+                          <TextBlock Text="{Binding Path}" Classes="MonoPath" TextTrimming="CharacterEllipsis" />
+                        </DockPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </StackPanel>
+            </ScrollViewer>
+          </DockPanel>
+        </Border>
+
         <GridSplitter Grid.Column="3" Width="4" ResizeDirection="Columns"
                       Background="{DynamicResource ForgeOutlineVariantBrush}"
                       DragCompleted="OnColumnSplitterDragCompleted"
-                      IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                      IsVisible="{Binding ShowFileStatusPane}" />
 
         <!-- Diff pane (File Status / Stash) -->
         <DockPanel Grid.Column="4" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
-                   IsVisible="{Binding WorkingCopy.IsHistoryMode, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                   IsVisible="{Binding ShowFileStatusPane}">
           <Border DockPanel.Dock="Top" MinHeight="52" Padding="12,6"
                   Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
@@ -866,6 +1041,8 @@
                                  CanStageLines="{Binding WorkingCopy.CanStageLines}"
                                  CanUnstageLines="{Binding WorkingCopy.CanUnstageLines}"
                                  CanDiscardLines="{Binding WorkingCopy.CanDiscardLines}"
+                                 LeftSyntaxTokens="{Binding WorkingCopy.LeftSyntaxTokens}"
+                                 RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
                                  RowHeight="20"
                                  IsVisible="{Binding WorkingCopy.IsImagePreview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
 
@@ -913,6 +1090,187 @@
                        IsVisible="{Binding WorkingCopy.DiffOverlayMessage, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
                        HorizontalAlignment="Center" VerticalAlignment="Center"
                        FontSize="14" Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+          </Panel>
+        </DockPanel>
+
+        <!-- Diff pane (Pull request) -->
+        <DockPanel Grid.Column="4" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                   IsVisible="{Binding ShowPullRequestPane}">
+          <Border DockPanel.Dock="Top" Padding="12,8"
+                  Background="{DynamicResource ForgeBannerBrush}"
+                  IsVisible="{Binding Review.HeadHasMoved}">
+            <TextBlock Text="{Binding Review.HeadMovedBanner}" TextWrapping="Wrap" FontSize="12" />
+          </Border>
+          <Border DockPanel.Dock="Top" MinHeight="52" Padding="12,6"
+                  Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                  BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Classes="Ghost" Content="Approve"
+                        Command="{Binding Review.SubmitApproveCommand}"
+                        IsEnabled="{Binding Review.IsSubmittingReview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                <Button Classes="Ghost" Content="Comment"
+                        Command="{Binding Review.SubmitCommentReviewCommand}"
+                        IsEnabled="{Binding Review.IsSubmittingReview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                <Button Classes="Ghost" Content="Request changes"
+                        Command="{Binding Review.SubmitRequestChangesCommand}"
+                        IsEnabled="{Binding Review.IsSubmittingReview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                <CheckBox Content="Ignore whitespace"
+                          IsChecked="{Binding Review.IgnoreWhitespace}"
+                          FontSize="11" VerticalAlignment="Center" />
+                <ComboBox SelectedItem="{Binding Review.ViewMode}" MinWidth="120">
+                  <core:DiffViewMode>SideBySide</core:DiffViewMode>
+                  <core:DiffViewMode>Unified</core:DiffViewMode>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center"
+                          IsVisible="{Binding Review.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                <TextBlock Text="{Binding Review.SelectedFile.Path}" FontWeight="SemiBold"
+                           Classes="MonoPath" TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding Review.FileThreadSummary}" FontSize="11" Opacity="0.75"
+                           IsVisible="{Binding Review.FileThreadSummary, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+              </StackPanel>
+              <TextBlock Text="Conversation" FontWeight="SemiBold" VerticalAlignment="Center"
+                         IsVisible="{Binding Review.IsConversationSelected}" />
+            </DockPanel>
+          </Border>
+          <Panel ClipToBounds="True">
+            <ScrollViewer IsVisible="{Binding Review.IsConversationSelected}">
+              <StackPanel Spacing="12" Margin="16">
+                <StackPanel Spacing="4">
+                  <TextBlock Text="Description" FontWeight="SemiBold" />
+                  <controls:MarkdownView Markdown="{Binding Review.PullRequestBody}" />
+                </StackPanel>
+                <StackPanel Spacing="4">
+                  <TextBlock Text="Status" FontWeight="SemiBold" />
+                  <TextBlock FontSize="12">
+                    <Run Text="Review decision: " />
+                    <Run Text="{Binding Review.ReviewDecision}" FontWeight="SemiBold" />
+                  </TextBlock>
+                  <TextBlock FontSize="12">
+                    <Run Text="Checks: " />
+                    <Run Text="{Binding Review.CheckRollupState}" FontWeight="SemiBold" />
+                  </TextBlock>
+                  <TextBlock Text="{Binding Review.MergeStateSummary}" FontSize="12" />
+                  <ItemsControl ItemsSource="{Binding Review.StatusChecks}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="gh:StatusCheckItem">
+                        <TextBlock FontSize="11" Margin="0,2">
+                          <Run Text="{Binding Name}" FontWeight="SemiBold" />
+                          <Run Text=" — " />
+                          <Run Text="{Binding State}" />
+                        </TextBlock>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+                <StackPanel Spacing="4">
+                  <TextBlock Text="Timeline" FontWeight="SemiBold" />
+                  <ItemsControl ItemsSource="{Binding Review.Timeline}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="gh:PullRequestTimelineEntry">
+                        <Border Padding="0,6" BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
+                                BorderThickness="0,0,0,1">
+                          <StackPanel Spacing="4">
+                            <TextBlock FontSize="11" Opacity="0.75">
+                              <Run Text="{Binding AuthorLogin}" FontWeight="SemiBold" />
+                              <Run Text=" · " />
+                              <Run Text="{Binding Kind}" />
+                              <Run Text="{Binding ReviewState, StringFormat=' · {0}'}" />
+                            </TextBlock>
+                            <controls:MarkdownView Markdown="{Binding Body}" />
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </StackPanel>
+            </ScrollViewer>
+            <DockPanel IsVisible="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+              <Border DockPanel.Dock="Bottom" Padding="12,8"
+                      Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0">
+                <StackPanel Spacing="6">
+                  <TextBlock Text="Draft comment" FontSize="11" FontWeight="SemiBold" />
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="Primary" Content="Add"
+                            Command="{Binding Review.AddCommentCommand}" Margin="8,0,0,0" />
+                    <TextBox x:Name="PrCommentDraftBox" Text="{Binding Review.NewCommentBody}" AcceptsReturn="True" MinHeight="40" />
+                  </DockPanel>
+                  <TextBox Text="{Binding Review.SubmitReviewBody}" PlaceholderText="Optional review summary"
+                           FontSize="11" />
+                </StackPanel>
+              </Border>
+              <Border DockPanel.Dock="Bottom" MaxHeight="180" Padding="8"
+                      Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
+                      IsVisible="{Binding Review.UnplaceableThreads.Count, Converter={x:Static conv:ForgeConverters.IsPositive}}">
+                <DockPanel>
+                  <TextBlock DockPanel.Dock="Top" Text="Unplaceable comments" FontWeight="SemiBold" Margin="0,0,0,4" />
+                  <ScrollViewer>
+                    <ItemsControl ItemsSource="{Binding Review.UnplaceableThreads}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="review:ReviewThread">
+                          <Border Padding="0,4" BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
+                                  BorderThickness="0,0,0,1">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="{Binding ContextLines}" FontFamily="{DynamicResource ForgeCodeFont}"
+                                         FontSize="11" TextWrapping="Wrap" />
+                              <ItemsControl ItemsSource="{Binding Comments}">
+                                <ItemsControl.ItemTemplate>
+                                  <DataTemplate x:DataType="review:ReviewComment">
+                                    <controls:MarkdownView Markdown="{Binding Body}" />
+                                  </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+              <Border DockPanel.Dock="Right" Width="280" Padding="8"
+                      Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0"
+                      IsVisible="{Binding Review.SelectedThread, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                <DockPanel>
+                  <TextBlock DockPanel.Dock="Top" Text="Thread" FontWeight="SemiBold" Margin="0,0,0,6" />
+                  <ScrollViewer>
+                    <ItemsControl ItemsSource="{Binding Review.SelectedThread.Comments}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="review:ReviewComment">
+                          <StackPanel Spacing="4" Margin="0,0,0,8">
+                            <TextBlock FontSize="11" Opacity="0.7">
+                              <Run Text="{Binding AuthorLogin}" FontWeight="SemiBold" />
+                              <Run Text=" · " />
+                              <Run Text="{Binding CreatedAt}" />
+                            </TextBlock>
+                            <controls:MarkdownView Markdown="{Binding Body}" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+              <controls:DiffViewer Rows="{Binding Review.DiffRows}"
+                                   ViewMode="{Binding Review.ViewMode}"
+                                   EmptyMessage="{Binding Review.DiffEmptyMessage}"
+                                   Annotations="{Binding Review.DiffAnnotations}"
+                                   SelectedAnnotation="{Binding Review.SelectedAnnotation}"
+                                   CanStageLines="False"
+                                   CanUnstageLines="False"
+                                   CanDiscardLines="False"
+                                   RowHeight="20" />
+            </DockPanel>
+            <Border Background="#80060e20"
+                    IsVisible="{Binding Review.IsLoadingDiff}">
+              <ProgressBar Width="36" Height="36" IsIndeterminate="True"
+                           HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
           </Panel>
         </DockPanel>
 
@@ -1236,6 +1594,8 @@
                                      CanStageLines="False"
                                      CanUnstageLines="False"
                                      CanDiscardLines="False"
+                                     LeftSyntaxTokens="{Binding WorkingCopy.LeftSyntaxTokens}"
+                                     RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
                                      RowHeight="20" />
                 <Border Background="#80060e20"
                         IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
@@ -1287,6 +1647,67 @@
             <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
           </DockPanel>
           <StackPanel Spacing="16">
+            <StackPanel Spacing="4">
+              <TextBlock Text="DEVELOPMENT" Classes="PanelHeader" Opacity="0.7" />
+              <TextBox Classes="Forge" Text="{Binding DevelopmentFolder}"
+                       PlaceholderText="Development folder path" />
+            </StackPanel>
+            <StackPanel Spacing="4">
+              <TextBlock Text="GITHUB ACCOUNTS" Classes="PanelHeader" Opacity="0.7" />
+              <TextBox Classes="Forge" Text="{Binding NewGitHubHost}" PlaceholderText="Host (github.com)" />
+              <TextBox Classes="Forge" Text="{Binding NewGitHubToken}" PasswordChar="•"
+                       PlaceholderText="Personal access token" />
+              <Button Classes="Primary" Content="Add GitHub account"
+                      Command="{Binding AddGitHubAccountCommand}" HorizontalAlignment="Left" />
+              <ItemsControl ItemsSource="{Binding GitHubAccounts}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="core:GitHubAccountSettings">
+                    <StackPanel Spacing="4" Margin="0,4">
+                      <DockPanel>
+                        <Button DockPanel.Dock="Right" Classes="Ghost" Content="Remove"
+                                Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).RemoveGitHubAccountCommand}"
+                                CommandParameter="{Binding}" FontSize="11" />
+                        <TextBlock VerticalAlignment="Center">
+                          <Run Text="{Binding Login}" FontWeight="SemiBold" />
+                          <Run Text=" on " />
+                          <Run Text="{Binding Host}" />
+                        </TextBlock>
+                      </DockPanel>
+                      <Border Padding="8" Background="{DynamicResource ForgeBannerBrush}"
+                              IsVisible="{Binding NeedsReauth}">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="Token expired — paste a new token to re-authenticate." FontSize="11" />
+                          <TextBox Classes="Forge" Text="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).ReauthToken}"
+                                   PasswordChar="•" PlaceholderText="New personal access token" />
+                          <Button Classes="Primary" Content="Re-authenticate"
+                                  Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).ReauthGitHubAccountCommand}"
+                                  CommandParameter="{Binding}" HorizontalAlignment="Left" />
+                        </StackPanel>
+                      </Border>
+                    </StackPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+            <StackPanel Spacing="4">
+              <TextBlock Text="ENTERPRISE HOSTS" Classes="PanelHeader" Opacity="0.7" />
+              <TextBox Classes="Forge" Text="{Binding NewEnterpriseHost}"
+                       PlaceholderText="https://github.example.com" />
+              <Button Classes="Ghost" Content="Add enterprise host"
+                      Command="{Binding AddEnterpriseHostCommand}" HorizontalAlignment="Left" />
+              <ItemsControl ItemsSource="{Binding EnterpriseHostUrls}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="x:String">
+                    <DockPanel Margin="0,2">
+                      <Button DockPanel.Dock="Right" Classes="Ghost" Content="Remove"
+                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).RemoveEnterpriseHostCommand}"
+                              CommandParameter="{Binding}" FontSize="11" />
+                      <TextBlock Text="{Binding}" FontSize="12" VerticalAlignment="Center" />
+                    </DockPanel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
             <StackPanel Spacing="4">
               <TextBlock Text="THEME" Classes="PanelHeader" Opacity="0.7" />
               <ComboBox SelectedItem="{Binding Theme}" HorizontalAlignment="Stretch">

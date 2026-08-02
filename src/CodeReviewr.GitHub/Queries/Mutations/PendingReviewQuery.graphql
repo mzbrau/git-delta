@@ -1,0 +1,20 @@
+query PendingReviewQuery($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      id
+      headRefOid
+      viewerReviewThreads: reviewThreads(first: 1) {
+        totalCount
+      }
+      reviews(last: 10, states: [PENDING]) {
+        nodes {
+          id
+          state
+          author {
+            login
+          }
+        }
+      }
+    }
+  }
+}

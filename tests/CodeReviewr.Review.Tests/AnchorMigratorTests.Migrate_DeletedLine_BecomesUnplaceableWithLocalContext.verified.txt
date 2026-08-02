@@ -1,0 +1,7 @@
+﻿{
+  IsUnplaceable: true,
+  ContextLines:
+  keep
+> remove-me
+  tail
+}

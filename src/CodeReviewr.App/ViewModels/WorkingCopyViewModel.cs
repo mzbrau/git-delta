@@ -33,6 +33,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly IConfirmDialog _confirm;
     private readonly IStashDialog _stashDialog;
     private readonly IIntraLineDiffer _intraLine;
+    private readonly ISyntaxTokenService? _syntaxTokens;
     private readonly IGitProcessRunner _runner;
     private readonly GitRepositoryWatcher _watcher;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -84,7 +85,8 @@ public partial class WorkingCopyViewModel : ObservableObject
         IStashDialog stashDialog,
         IIntraLineDiffer intraLine,
         IGitProcessRunner runner,
-        GitRepositoryWatcher watcher)
+        GitRepositoryWatcher watcher,
+        ISyntaxTokenService? syntaxTokens = null)
     {
         _statusService = statusService;
         _diffService = diffService;
@@ -102,6 +104,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         _confirm = confirm;
         _stashDialog = stashDialog;
         _intraLine = intraLine;
+        _syntaxTokens = syntaxTokens;
         _runner = runner;
         _watcher = watcher;
         _warmStore = new DiffWarmStore(DiffWarmStore.ClampConcurrency(settings.Current.DiffPrefetchConcurrency));
@@ -200,6 +203,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private bool _isSingleImagePreview;
     [ObservableProperty] private Bitmap? _imageBefore;
     [ObservableProperty] private Bitmap? _imageAfter;
+    [ObservableProperty] private FileSyntaxTokens? _leftSyntaxTokens;
+    [ObservableProperty] private FileSyntaxTokens? _rightSyntaxTokens;
 
     /// <summary>Raised after the VM restores selection following a list rebuild so the view can rebind ListBoxes.</summary>
     public event Action? SelectionSyncRequested;
@@ -1478,7 +1483,7 @@ public partial class WorkingCopyViewModel : ObservableObject
                     key,
                     target,
                     force: false,
-                    factory: token => _diffService.GetDiffAsync(_repoPath, file.Path, target, options, token),
+                    factory: token => _diffService.GetDiffAsync(_repoPath, file.Path, target.AsWorkingCopy(), options, token),
                     ct);
             }
 
@@ -1538,16 +1543,16 @@ public partial class WorkingCopyViewModel : ObservableObject
             IsLoadingDiff = false;
             IsDiffRefreshing = true;
             ApplyDiffCacheState(altEntry with { IsStale = true });
-            await PresentDiffAsync(file, altEntry.Diff with { Target = target }, target, ct);
+            await PresentDiffAsync(file, altEntry.Diff with { Scope = target.AsWorkingCopy() }, target, ct);
         }
         else if (HasPaintedDiffForPath(file.Path.Value))
         {
             // Keep whatever is already on screen for this path until the new target arrives.
             IsLoadingDiff = false;
             IsDiffRefreshing = true;
-            if (_currentDiff is not null && _currentDiff.Target != target)
+            if (_currentDiff is not null && _currentDiff.Scope.WorkingCopyTargetOrNull() != target)
             {
-                _currentDiff = _currentDiff with { Target = target };
+                _currentDiff = _currentDiff with { Scope = target.AsWorkingCopy() };
                 OnPropertyChanged(nameof(CanStageLines));
                 OnPropertyChanged(nameof(CanUnstageLines));
                 OnPropertyChanged(nameof(CanDiscardLines));
@@ -1588,7 +1593,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     /// </summary>
     private bool TryGetAlternateTargetWarmEntry(DiffWarmKey key, out DiffWarmEntry? entry)
     {
-        foreach (var alt in AlternateDiffTargets(key.Target))
+        foreach (var alt in AlternateDiffScopes(key.DiffScope))
         {
             var altKey = new DiffWarmKey(key.Scope, key.Path, alt, key.Options);
             if (_warmStore.TryGetCompleted(altKey, out entry) && entry is not null)
@@ -1597,6 +1602,15 @@ public partial class WorkingCopyViewModel : ObservableObject
 
         entry = null;
         return false;
+    }
+
+    private static IEnumerable<DiffScope> AlternateDiffScopes(DiffScope scope)
+    {
+        if (scope is not DiffScope.WorkingCopy wc)
+            yield break;
+
+        foreach (var alt in AlternateDiffTargets(wc.Target))
+            yield return alt.AsWorkingCopy();
     }
 
     private static IEnumerable<DiffTarget> AlternateDiffTargets(DiffTarget target) =>
@@ -1665,7 +1679,7 @@ public partial class WorkingCopyViewModel : ObservableObject
                 fsKey,
                 target,
                 force: true,
-                factory: token => _diffService.GetDiffAsync(_repoPath, file.Path, target, fsOptions, token),
+                factory: token => _diffService.GetDiffAsync(_repoPath, file.Path, target.AsWorkingCopy(), fsOptions, token),
                 ct);
         }
         catch (OperationCanceledException) { }
@@ -1831,12 +1845,14 @@ public partial class WorkingCopyViewModel : ObservableObject
 
         if (IsImagePath(file.Path.Value))
         {
+            ClearSyntaxTokens();
             await LoadImagePreviewAsync(file, _currentDiff, target, ct);
             DiffRows.Clear();
             DiffEmptyMessage = "";
         }
         else if (_currentDiff.IsBinary)
         {
+            ClearSyntaxTokens();
             DiffRows.Clear();
             DiffEmptyMessage = "Binary file";
             IsImagePreview = false;
@@ -1845,6 +1861,8 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             DiffEmptyMessage = "Select a file to view its diff";
             ProjectRows(_currentDiff);
+            // Tokenise once per selected FileDiff; view-mode switches reuse these tokens.
+            await LoadSyntaxTokensAsync(file, _currentDiff, target, ct);
         }
 
         OnPropertyChanged(nameof(CanStageLines));
@@ -1852,14 +1870,104 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(CanDiscardLines));
     }
 
+    private void ClearSyntaxTokens()
+    {
+        LeftSyntaxTokens = null;
+        RightSyntaxTokens = null;
+    }
+
+    private async Task LoadSyntaxTokensAsync(
+        FileItemViewModel file,
+        FileDiff diff,
+        DiffTarget target,
+        CancellationToken ct)
+    {
+        if (_syntaxTokens is null || _repoPath is null)
+        {
+            ClearSyntaxTokens();
+            return;
+        }
+
+        try
+        {
+            var leftText = await ReadSideTextAsync(diff.OldContent, file, target, sideIsNew: false, ct)
+                .ConfigureAwait(false);
+            var rightText = await ReadSideTextAsync(diff.NewContent, file, target, sideIsNew: true, ct)
+                .ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
+
+            FileSyntaxTokens? left = null;
+            FileSyntaxTokens? right = null;
+            if (leftText is not null)
+            {
+                left = await _syntaxTokens.TokeniseAsync(diff.OldContent, file.Path, leftText, ct)
+                    .ConfigureAwait(false);
+            }
+
+            if (rightText is not null)
+            {
+                right = await _syntaxTokens.TokeniseAsync(diff.NewContent, file.Path, rightText, ct)
+                    .ConfigureAwait(false);
+            }
+
+            LeftSyntaxTokens = left;
+            RightSyntaxTokens = right;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            ClearSyntaxTokens();
+        }
+    }
+
+    private async Task<string?> ReadSideTextAsync(
+        ContentId content,
+        FileItemViewModel file,
+        DiffTarget target,
+        bool sideIsNew,
+        CancellationToken ct)
+    {
+        if (_repoPath is null) return null;
+
+        if (sideIsNew
+            && (target is DiffTarget.IndexToWorktree or DiffTarget.HeadToWorktree
+                || file.Kind == ChangeKind.Untracked))
+        {
+            var worktreePath = System.IO.Path.Combine(
+                _repoPath,
+                file.Path.Value.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            if (System.IO.File.Exists(worktreePath))
+            {
+                var bytes = await System.IO.File.ReadAllBytesAsync(worktreePath, ct).ConfigureAwait(false);
+                return DecodeUtf8(bytes);
+            }
+        }
+
+        if (content.IsEmpty) return null;
+        var blob = await _objects.ReadBlobAsync(_repoPath, content, ct).ConfigureAwait(false);
+        return DecodeUtf8(blob);
+    }
+
+    private static string? DecodeUtf8(byte[]? bytes)
+    {
+        if (bytes is null || bytes.Length == 0) return null;
+        // Skip UTF-8 BOM if present.
+        var offset = bytes is [0xEF, 0xBB, 0xBF, ..] ? 3 : 0;
+        return System.Text.Encoding.UTF8.GetString(bytes, offset, bytes.Length - offset);
+    }
+
     private static DiffWarmKey FileStatusWarmKey(FilePath path, DiffTarget target, DiffOptions options) =>
-        new("fs", path.Value, target, options);
+        new("fs", path.Value, target.AsWorkingCopy(), options);
 
     private static DiffWarmKey HistoryWarmKey(string oid, FilePath path, DiffOptions options) =>
-        new($"hist:{oid}", path.Value, DiffTarget.HeadToWorktree, options);
+        new($"hist:{oid}", path.Value, DiffTarget.HeadToWorktree.AsWorkingCopy(), options);
 
     private static DiffWarmKey StashWarmKey(int index, FilePath path, DiffOptions options) =>
-        new($"stash:{index}", path.Value, DiffTarget.HeadToWorktree, options);
+        new($"stash:{index}", path.Value, DiffTarget.HeadToWorktree.AsWorkingCopy(), options);
 
     private void ScheduleFileStatusPrefetch()
     {
@@ -1894,7 +2002,7 @@ public partial class WorkingCopyViewModel : ObservableObject
                 var diffTarget = target;
                 pending.Add(_warmStore.GetOrStart(
                     key,
-                    token => _diffService.GetDiffAsync(repoPath, filePath, diffTarget, options, token)));
+                    token => _diffService.GetDiffAsync(repoPath, filePath, diffTarget.AsWorkingCopy(), options, token)));
             }
 
             if (pending.Count > 0)
@@ -2407,7 +2515,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task StageHunkAsync()
     {
         if (_currentDiff is null || _repoPath is null || SelectedHunkIndex < 0) return;
-        if (_currentDiff.Target != DiffTarget.IndexToWorktree) return;
+        if (_currentDiff.Scope is not DiffScope.WorkingCopy { Target: DiffTarget.IndexToWorktree }) return;
         await ApplyHunkPatchAsync(SelectedHunkIndex, stage: true);
     }
 
@@ -2415,7 +2523,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task UnstageHunkAsync()
     {
         if (_currentDiff is null || _repoPath is null || SelectedHunkIndex < 0) return;
-        if (_currentDiff.Target != DiffTarget.HeadToIndex) return;
+        if (_currentDiff.Scope is not DiffScope.WorkingCopy { Target: DiffTarget.HeadToIndex }) return;
         await ApplyHunkPatchAsync(SelectedHunkIndex, stage: false);
     }
 
@@ -2475,7 +2583,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task StageSelectedLinesAsync(IReadOnlyList<LineSelection>? lines)
     {
         if (lines is null || lines.Count == 0 || _currentDiff is null || _repoPath is null) return;
-        if (_currentDiff.Target != DiffTarget.IndexToWorktree) return;
+        if (_currentDiff.Scope is not DiffScope.WorkingCopy { Target: DiffTarget.IndexToWorktree }) return;
         var path = _currentDiff.NewPath;
         try
         {
@@ -2505,7 +2613,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task UnstageSelectedLinesAsync(IReadOnlyList<LineSelection>? lines)
     {
         if (lines is null || lines.Count == 0 || _currentDiff is null || _repoPath is null) return;
-        if (_currentDiff.Target != DiffTarget.HeadToIndex) return;
+        if (_currentDiff.Scope is not DiffScope.WorkingCopy { Target: DiffTarget.HeadToIndex }) return;
         var path = _currentDiff.NewPath;
         try
         {
@@ -2523,10 +2631,10 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
 
     public bool CanStageLines =>
-        _currentDiff?.Target == DiffTarget.IndexToWorktree;
+        _currentDiff?.Scope is DiffScope.WorkingCopy { Target: DiffTarget.IndexToWorktree };
 
     public bool CanUnstageLines =>
-        _currentDiff?.Target == DiffTarget.HeadToIndex;
+        _currentDiff?.Scope is DiffScope.WorkingCopy { Target: DiffTarget.HeadToIndex };
 
     /// <summary>True when the open diff is a worktree diff (stage and discard line/hunk ops apply).</summary>
     public bool CanDiscardLines => CanStageLines;
@@ -2614,7 +2722,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task DiscardHunkAsync()
     {
         if (_currentDiff is null || _repoPath is null || SelectedHunkIndex < 0) return;
-        if (_currentDiff.Target != DiffTarget.IndexToWorktree) return;
+        if (_currentDiff.Scope is not DiffScope.WorkingCopy { Target: DiffTarget.IndexToWorktree }) return;
 
         var hunkIndex = SelectedHunkIndex;
         var path = _currentDiff.NewPath;
@@ -2642,7 +2750,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task DiscardSelectedLinesAsync(IReadOnlyList<LineSelection>? lines)
     {
         if (lines is null || lines.Count == 0 || _currentDiff is null || _repoPath is null) return;
-        if (_currentDiff.Target != DiffTarget.IndexToWorktree) return;
+        if (_currentDiff.Scope is not DiffScope.WorkingCopy { Target: DiffTarget.IndexToWorktree }) return;
 
         var path = _currentDiff.NewPath;
         try
@@ -3038,6 +3146,11 @@ public partial class FileItemViewModel : ObservableObject
 
     [ObservableProperty] private bool _hasCachedDiff;
     [ObservableProperty] private bool _isDiffStale;
+    [ObservableProperty] private int _unresolvedThreadCount;
+    [ObservableProperty] private bool _isViewed;
+    [ObservableProperty] private bool _isViewedPending;
+    [ObservableProperty] private bool _hasCommentThreads;
+    [ObservableProperty] private bool _hasStaleThreads;
 
     public string StatusBadge => Kind switch
     {

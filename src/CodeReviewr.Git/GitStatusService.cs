@@ -11,10 +11,12 @@ namespace CodeReviewr.Git;
 /// merge/rebase/cherry-pick/revert state from the filesystem, independent of conflicted files,
 /// so a paused rebase with a clean index is still reported honestly.
 /// </summary>
-public sealed class GitStatusService(IGitProcessRunner runner, IRepositoryGate gate) : IGitStatusService
+public sealed class GitStatusService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitStatusService
 {
-    public Task<RepositoryStatus> GetStatusAsync(string repositoryPath, CancellationToken ct = default) =>
-        gate.RunReadAsync(async token =>
+    public Task<RepositoryStatus> GetStatusAsync(string repositoryPath, CancellationToken ct = default)
+    {
+        var gate = gates.For(repositoryPath);
+        return gate.RunReadAsync(async token =>
         {
             // Captured at the start of the guarded read window: this is the epoch this status
             // is guaranteed to be at least as fresh as. Capturing it any later would let a
@@ -40,4 +42,5 @@ public sealed class GitStatusService(IGitProcessRunner runner, IRepositoryGate g
                 parsed.CurrentBranch,
                 epochAtStart);
         }, ct);
+    }
 }

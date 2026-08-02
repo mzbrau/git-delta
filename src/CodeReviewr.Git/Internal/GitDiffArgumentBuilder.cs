@@ -1,4 +1,5 @@
 using CodeReviewr.Core;
+using CodeReviewr.Core.Diff;
 
 namespace CodeReviewr.Git.Internal;
 
@@ -9,40 +10,57 @@ namespace CodeReviewr.Git.Internal;
 /// </summary>
 internal static class GitDiffArgumentBuilder
 {
-    public static List<string> BuildPatchArgs(DiffTarget target, DiffOptions options, FilePath? path)
+    public static List<string> BuildPatchArgs(DiffScope scope, DiffOptions options, FilePath? path)
     {
-        var args = BuildCommonArgs(target, options);
+        var args = BuildCommonArgs(scope, options);
         args.Add("--no-color");
         args.Add("--no-ext-diff");
         AppendPathspec(args, path);
         return args;
     }
 
-    public static List<string> BuildRawArgs(DiffTarget target, DiffOptions options, FilePath? path)
+    public static List<string> BuildRawArgs(DiffScope scope, DiffOptions options, FilePath? path)
     {
-        var args = BuildCommonArgs(target, options);
+        var args = BuildCommonArgs(scope, options);
         args.Add("--raw");
         args.Add("-z");
         AppendPathspec(args, path);
         return args;
     }
 
-    private static List<string> BuildCommonArgs(DiffTarget target, DiffOptions options)
+    public static List<string> BuildPatchArgs(DiffTarget target, DiffOptions options, FilePath? path) =>
+        BuildPatchArgs(target.AsWorkingCopy(), options, path);
+
+    public static List<string> BuildRawArgs(DiffTarget target, DiffOptions options, FilePath? path) =>
+        BuildRawArgs(target.AsWorkingCopy(), options, path);
+
+    private static List<string> BuildCommonArgs(DiffScope scope, DiffOptions options)
     {
         var args = new List<string> { "diff" };
 
-        switch (target)
+        switch (scope)
         {
-            case DiffTarget.IndexToWorktree:
+            case DiffScope.WorkingCopy wc:
+                switch (wc.Target)
+                {
+                    case DiffTarget.IndexToWorktree:
+                        break;
+                    case DiffTarget.HeadToIndex:
+                        args.Add("--cached");
+                        break;
+                    case DiffTarget.HeadToWorktree:
+                        args.Add("HEAD");
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(scope), wc.Target, null);
+                }
+
                 break;
-            case DiffTarget.HeadToIndex:
-                args.Add("--cached");
-                break;
-            case DiffTarget.HeadToWorktree:
-                args.Add("HEAD");
+            case DiffScope.Revisions rev:
+                args.Add($"{rev.Base.Value}...{rev.Head.Value}");
                 break;
             default:
-                throw new ArgumentOutOfRangeException(nameof(target), target, null);
+                throw new ArgumentOutOfRangeException(nameof(scope), scope, null);
         }
 
         args.Add($"--diff-algorithm={options.Algorithm}");

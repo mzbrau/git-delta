@@ -10,13 +10,19 @@ namespace CodeReviewr.Diff;
 /// </summary>
 public static class UntrackedFileDiff
 {
-    public static FileDiff Create(FilePath path, string content, DiffTarget target = DiffTarget.IndexToWorktree)
+    public static FileDiff Create(FilePath path, string content, DiffTarget target = DiffTarget.IndexToWorktree) =>
+        Create(path, content, target.AsWorkingCopy());
+
+    public static FileDiff Create(FilePath path, byte[] bytes, DiffTarget target = DiffTarget.IndexToWorktree) =>
+        Create(path, bytes, target.AsWorkingCopy());
+
+    public static FileDiff Create(FilePath path, string content, DiffScope scope)
     {
         ArgumentNullException.ThrowIfNull(content);
-        return Create(path, Encoding.UTF8.GetBytes(content), target);
+        return Create(path, Encoding.UTF8.GetBytes(content), scope);
     }
 
-    public static FileDiff Create(FilePath path, byte[] bytes, DiffTarget target = DiffTarget.IndexToWorktree)
+    public static FileDiff Create(FilePath path, byte[] bytes, DiffScope scope)
     {
         ArgumentNullException.ThrowIfNull(bytes);
 
@@ -26,7 +32,7 @@ public static class UntrackedFileDiff
         if (isBinary)
         {
             return new FileDiff(
-                target,
+                scope,
                 path,
                 path,
                 ChangeKind.Untracked,
@@ -42,7 +48,7 @@ public static class UntrackedFileDiff
         if (lines.Count == 0)
         {
             return new FileDiff(
-                target,
+                scope,
                 path,
                 path,
                 ChangeKind.Untracked,
@@ -56,7 +62,7 @@ public static class UntrackedFileDiff
         var header = $"@@ -0,0 +1,{lines.Count} @@";
         var hunk = new DiffHunk(0, 0, 1, lines.Count, header, lines);
         return new FileDiff(
-            target,
+            scope,
             path,
             path,
             ChangeKind.Untracked,

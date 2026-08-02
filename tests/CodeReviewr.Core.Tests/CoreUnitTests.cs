@@ -12,7 +12,7 @@ public sealed class MemoryDiffCacheTests
     {
         var cache = new MemoryDiffCache();
         var key = new FileDiffKey(ContentId.FromSha("a".PadRight(40, '0')), ContentId.FromSha("b".PadRight(40, '0')), DiffOptions.Default);
-        var diff = new FileDiff(DiffTarget.IndexToWorktree, FilePath.From("a.txt"), FilePath.From("a.txt"),
+        var diff = new FileDiff(DiffTarget.IndexToWorktree.AsWorkingCopy(), FilePath.From("a.txt"), FilePath.From("a.txt"),
             ChangeKind.Modified, key.OldContent, key.NewContent, false, [], "");
         cache.Set(key, diff);
         Assert.That(cache.TryGet(key, out var got), Is.True);

@@ -110,7 +110,7 @@ public sealed class DiscardRestoreTests
         var diffs = sp.GetRequiredService<IGitDiffService>();
         var discard = sp.GetRequiredService<IGitDiscardService>();
 
-        var diff = await diffs.GetDiffAsync(path, FilePath.From("multi.txt"), DiffTarget.IndexToWorktree, DiffOptions.Default);
+        var diff = await diffs.GetWorkingCopyDiffAsync(path, FilePath.From("multi.txt"), DiffTarget.IndexToWorktree, DiffOptions.Default);
         Assert.That(diff.Hunks.Count, Is.GreaterThanOrEqualTo(2));
 
         var patch = PatchSynthesizer.SynthesizeHunks(diff, [0]);
@@ -120,7 +120,7 @@ public sealed class DiscardRestoreTests
         Assert.That(after, Does.Contain("line5"));
         Assert.That(after, Does.Contain("LINE30"));
 
-        var remaining = await diffs.GetDiffAsync(path, FilePath.From("multi.txt"), DiffTarget.IndexToWorktree, DiffOptions.Default);
+        var remaining = await diffs.GetWorkingCopyDiffAsync(path, FilePath.From("multi.txt"), DiffTarget.IndexToWorktree, DiffOptions.Default);
         Assert.That(remaining.Hunks, Is.Not.Empty);
         Assert.That(remaining.Hunks.Count, Is.LessThan(diff.Hunks.Count));
     }

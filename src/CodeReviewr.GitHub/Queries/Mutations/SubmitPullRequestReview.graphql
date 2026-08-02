@@ -1,0 +1,8 @@
+mutation SubmitPullRequestReview($input: SubmitPullRequestReviewInput!) {
+  submitPullRequestReview(input: $input) {
+    pullRequestReview {
+      id
+      state
+    }
+  }
+}

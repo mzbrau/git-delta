@@ -26,6 +26,7 @@ public partial class MainWindow : Window
         Activated += OnActivated;
         Closing += OnClosing;
         DataContextChanged += OnDataContextChanged;
+        KeyDown += OnWindowKeyDown;
     }
 
     private MainWindowViewModel Vm => (MainWindowViewModel)DataContext!;
@@ -33,7 +34,7 @@ public partial class MainWindow : Window
     private void OnActivated(object? sender, EventArgs e)
     {
         if (DataContext is MainWindowViewModel vm)
-            vm.WorkingCopy.NotifyWindowActivated();
+            vm.NotifyWindowActivated();
     }
 
     private void OnDataContextChanged(object? sender, EventArgs e)
@@ -51,6 +52,95 @@ public partial class MainWindow : Window
             vm.GitConsole.LinesUpdated += ScrollGitConsoleToEnd;
             _gitConsoleSubscribed = true;
         }
+
+        vm.Review.FocusCommentDraftRequested += FocusPrCommentDraft;
+        vm.Review.FocusFileFilterRequested += FocusPrFileFilter;
+    }
+
+    private void FocusPrCommentDraft()
+    {
+        if (this.FindControl<TextBox>("PrCommentDraftBox") is { } box)
+        {
+            box.Focus();
+            box.CaretIndex = box.Text?.Length ?? 0;
+        }
+    }
+
+    private void FocusPrFileFilter()
+    {
+        if (this.FindControl<TextBox>("PrFileFilterBox") is { } box)
+        {
+            box.Focus();
+            box.SelectAll();
+        }
+    }
+
+    private void OnWindowKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.Review.IsPullRequestMode)
+            return;
+
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.Enter)
+        {
+            e.Handled = true;
+            _ = vm.Review.SubmitCommentShortcutCommand.ExecuteAsync(null);
+            return;
+        }
+
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.F)
+        {
+            e.Handled = true;
+            vm.Review.RequestFileFilterFocusCommand.Execute(null);
+            return;
+        }
+
+        if (e.KeyModifiers != KeyModifiers.None)
+            return;
+
+        if (IsTextEntryFocused())
+            return;
+
+        switch (e.Key)
+        {
+            case Key.J:
+            case Key.Down:
+                e.Handled = true;
+                vm.Review.SelectNextFileCommand.Execute(null);
+                break;
+            case Key.K:
+            case Key.Up:
+                e.Handled = true;
+                vm.Review.SelectPreviousFileCommand.Execute(null);
+                break;
+            case Key.V:
+                e.Handled = true;
+                _ = vm.Review.ToggleSelectedViewedCommand.ExecuteAsync(null);
+                break;
+            case Key.N:
+                e.Handled = true;
+                vm.Review.SelectNextThreadCommand.Execute(null);
+                break;
+            case Key.P:
+                e.Handled = true;
+                vm.Review.SelectPreviousThreadCommand.Execute(null);
+                break;
+            case Key.C:
+                e.Handled = true;
+                vm.Review.FocusCommentDraftCommand.Execute(null);
+                break;
+            case Key.Oem2:
+                e.Handled = true;
+                vm.Review.RequestFileFilterFocusCommand.Execute(null);
+                break;
+        }
+    }
+
+    private bool IsTextEntryFocused()
+    {
+        if (TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not Control focused)
+            return false;
+
+        return focused is TextBox or AutoCompleteBox;
     }
 
     private void ScrollGitConsoleToEnd()
@@ -76,6 +166,7 @@ public partial class MainWindow : Window
 
         // Defer repo open so the window can paint first.
         Dispatcher.UIThread.Post(() => _ = Vm.TryOpenLastRepositoryAsync(), DispatcherPriority.Background);
+        Dispatcher.UIThread.Post(() => _ = Vm.Review.RefreshInboxCommand.ExecuteAsync(null), DispatcherPriority.Background);
     }
 
     private void ApplyColumnWidths()
@@ -128,13 +219,23 @@ public partial class MainWindow : Window
         Vm.WorkingCopy.StashesExpanded = !Vm.WorkingCopy.StashesExpanded;
 
     private void OnTogglePullRequests(object? sender, RoutedEventArgs e) =>
-        Vm.WorkingCopy.PullRequestsExpanded = !Vm.WorkingCopy.PullRequestsExpanded;
+        Vm.Review.PullRequestsExpanded = !Vm.Review.PullRequestsExpanded;
 
-    private void OnTogglePrRequested(object? sender, RoutedEventArgs e) =>
-        Vm.WorkingCopy.PrRequestedExpanded = !Vm.WorkingCopy.PrRequestedExpanded;
+    private void OnToggleNeedsMyReview(object? sender, RoutedEventArgs e) =>
+        Vm.Review.NeedsMyReviewExpanded = !Vm.Review.NeedsMyReviewExpanded;
 
-    private void OnTogglePrRaised(object? sender, RoutedEventArgs e) =>
-        Vm.WorkingCopy.PrRaisedExpanded = !Vm.WorkingCopy.PrRaisedExpanded;
+    private void OnToggleReviewed(object? sender, RoutedEventArgs e) =>
+        Vm.Review.ReviewedExpanded = !Vm.Review.ReviewedExpanded;
+
+    private void OnToggleMyPullRequests(object? sender, RoutedEventArgs e) =>
+        Vm.Review.MyPullRequestsExpanded = !Vm.Review.MyPullRequestsExpanded;
+
+    private void OnPullRequestSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ListBox list) return;
+        if (list.SelectedItem is CodeReviewr.GitHub.PullRequestSummary summary)
+            _ = Vm.Review.SelectPullRequestCommand.ExecuteAsync(summary);
+    }
 
     private void OnToggleStaged(object? sender, RoutedEventArgs e) =>
         Vm.WorkingCopy.StagedExpanded = !Vm.WorkingCopy.StagedExpanded;

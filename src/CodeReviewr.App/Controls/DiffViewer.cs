@@ -47,6 +47,18 @@ public sealed class DiffViewer : Control
     public static readonly StyledProperty<bool> CanDiscardLinesProperty =
         AvaloniaProperty.Register<DiffViewer, bool>(nameof(CanDiscardLines));
 
+    public static readonly StyledProperty<FileSyntaxTokens?> LeftSyntaxTokensProperty =
+        AvaloniaProperty.Register<DiffViewer, FileSyntaxTokens?>(nameof(LeftSyntaxTokens));
+
+    public static readonly StyledProperty<FileSyntaxTokens?> RightSyntaxTokensProperty =
+        AvaloniaProperty.Register<DiffViewer, FileSyntaxTokens?>(nameof(RightSyntaxTokens));
+
+    public static readonly StyledProperty<IReadOnlyList<IDiffAnnotation>?> AnnotationsProperty =
+        AvaloniaProperty.Register<DiffViewer, IReadOnlyList<IDiffAnnotation>?>(nameof(Annotations));
+
+    public static readonly StyledProperty<IDiffAnnotation?> SelectedAnnotationProperty =
+        AvaloniaProperty.Register<DiffViewer, IDiffAnnotation?>(nameof(SelectedAnnotation));
+
     private const double GutterWidth = 40;
     private const double HunkButtonWidth = 64;
     private const double HunkButtonGap = 6;
@@ -59,12 +71,14 @@ public sealed class DiffViewer : Control
     private bool _draggingMinimap;
     private INotifyCollectionChanged? _rowsNotify;
     private readonly List<HunkButtonHit> _hunkButtons = [];
+    private readonly List<AnnotationHit> _annotationHits = [];
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
 
     private enum HunkButtonAction { Stage, Unstage, Discard }
 
     private readonly record struct HunkButtonHit(Rect Bounds, int HunkIndex, HunkButtonAction Action);
+    private readonly record struct AnnotationHit(Rect Bounds, IDiffAnnotation Annotation);
 
     public IReadOnlyList<DiffRow>? Rows
     {
@@ -114,6 +128,30 @@ public sealed class DiffViewer : Control
         set => SetValue(CanDiscardLinesProperty, value);
     }
 
+    public FileSyntaxTokens? LeftSyntaxTokens
+    {
+        get => GetValue(LeftSyntaxTokensProperty);
+        set => SetValue(LeftSyntaxTokensProperty, value);
+    }
+
+    public FileSyntaxTokens? RightSyntaxTokens
+    {
+        get => GetValue(RightSyntaxTokensProperty);
+        set => SetValue(RightSyntaxTokensProperty, value);
+    }
+
+    public IReadOnlyList<IDiffAnnotation>? Annotations
+    {
+        get => GetValue(AnnotationsProperty);
+        set => SetValue(AnnotationsProperty, value);
+    }
+
+    public IDiffAnnotation? SelectedAnnotation
+    {
+        get => GetValue(SelectedAnnotationProperty);
+        set => SetValue(SelectedAnnotationProperty, value);
+    }
+
     public int? SelectedHunkIndex
     {
         get
@@ -128,7 +166,8 @@ public sealed class DiffViewer : Control
     {
         AffectsRender<DiffViewer>(
             RowsProperty, ViewModeProperty, ShowWhitespaceProperty, RowHeightProperty,
-            EmptyMessageProperty, CanStageLinesProperty, CanUnstageLinesProperty, CanDiscardLinesProperty);
+            EmptyMessageProperty, CanStageLinesProperty, CanUnstageLinesProperty, CanDiscardLinesProperty,
+            LeftSyntaxTokensProperty, RightSyntaxTokensProperty, AnnotationsProperty, SelectedAnnotationProperty);
         FocusableProperty.OverrideDefaultValue<DiffViewer>(true);
     }
 
@@ -162,7 +201,9 @@ public sealed class DiffViewer : Control
                  || change.Property == EmptyMessageProperty
                  || change.Property == CanStageLinesProperty
                  || change.Property == CanUnstageLinesProperty
-                 || change.Property == CanDiscardLinesProperty)
+                 || change.Property == CanDiscardLinesProperty
+                 || change.Property == AnnotationsProperty
+                 || change.Property == SelectedAnnotationProperty)
         {
             InvalidateVisual();
         }
@@ -215,6 +256,7 @@ public sealed class DiffViewer : Control
     public override void Render(DrawingContext context)
     {
         _hunkButtons.Clear();
+        _annotationHits.Clear();
         var rows = Rows;
         var bounds = Bounds;
         using var clip = context.PushClip(new Rect(bounds.Size));
@@ -293,14 +335,24 @@ public sealed class DiffViewer : Control
                         DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines — click to expand",
                             contentLeft + GutterWidth + 8, y, muted);
                     else if (!row.LeftText.IsEmpty)
-                        DrawText(context, FormatText(row.LeftText), contentLeft + GutterWidth + 8 - _scrollX, y, TextBrush(leftKind, contextText));
+                    {
+                        var x = contentLeft + GutterWidth + 8 - _scrollX;
+                        DrawIntraLineHighlights(context, FormatText(row.LeftText), row.LeftIntraLine, x, y, rowH, removedAccent);
+                        DrawSyntaxOrPlainText(context, FormatText(row.LeftText), x, y,
+                            TextBrush(leftKind, contextText), LeftSyntaxTokens, row.OldLineNumber);
+                    }
                 }
 
                 using (context.PushClip(new Rect(midX, 0, bounds.Width - midX, bounds.Height)))
                 {
                     DrawGutter(context, row.NewLineNumber, midX, y);
                     if (row.Kind is not DiffRowKind.HunkHeader and not DiffRowKind.Collapsed && !row.RightText.IsEmpty)
-                        DrawText(context, FormatText(row.RightText), midX + GutterWidth + 8 - _scrollX, y, TextBrush(rightKind, contextText));
+                    {
+                        var x = midX + GutterWidth + 8 - _scrollX;
+                        DrawIntraLineHighlights(context, FormatText(row.RightText), row.RightIntraLine, x, y, rowH, addedAccent);
+                        DrawSyntaxOrPlainText(context, FormatText(row.RightText), x, y,
+                            TextBrush(rightKind, contextText), RightSyntaxTokens, row.NewLineNumber);
+                    }
                 }
             }
             else
@@ -330,8 +382,83 @@ public sealed class DiffViewer : Control
                     DiffRowKind.Removed => "-",
                     _ => " ",
                 };
-                DrawText(context, prefix + FormatText(text), contentLeft + GutterWidth * 2 + 8 - _scrollX, y, TextBrush(row.Kind, contextText));
+                var formatted = FormatText(text);
+                var lineText = prefix + formatted;
+                var x = contentLeft + GutterWidth * 2 + 8 - _scrollX;
+                var intra = row.Kind == DiffRowKind.Removed ? row.LeftIntraLine : row.RightIntraLine;
+                var accent = row.Kind == DiffRowKind.Added ? addedAccent : removedAccent;
+                // Offset highlights by the +/- prefix width.
+                var prefixWidth = MeasureWidth(prefix);
+                DrawIntraLineHighlights(context, formatted, intra, x + prefixWidth, y, rowH, accent);
+                DrawText(context, prefix, x, y, TextBrush(row.Kind, contextText));
+                var tokens = row.Kind == DiffRowKind.Removed ? LeftSyntaxTokens : RightSyntaxTokens;
+                var lineNo = row.Kind == DiffRowKind.Removed ? row.OldLineNumber : row.NewLineNumber;
+                if (row.Kind == DiffRowKind.Context)
+                {
+                    tokens = RightSyntaxTokens ?? LeftSyntaxTokens;
+                    lineNo = row.NewLineNumber ?? row.OldLineNumber;
+                }
+
+                DrawSyntaxOrPlainText(context, formatted, x + prefixWidth, y,
+                    TextBrush(row.Kind, contextText), tokens, lineNo);
             }
+
+            DrawAnnotationMarkers(context, row, contentLeft, midX, y, rowH, bounds.Width);
+        }
+    }
+
+    private void DrawAnnotationMarkers(
+        DrawingContext context,
+        DiffRow row,
+        double contentLeft,
+        double midX,
+        double y,
+        double rowH,
+        double boundsWidth)
+    {
+        var annotations = Annotations;
+        if (annotations is null || annotations.Count == 0)
+            return;
+
+        var markerBrush = Brush("ForgePrimaryBrush", Brushes.SteelBlue);
+        var outdatedBrush = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
+        var selectedBrush = Brush("ForgeSecondaryBrush", Brushes.Orange);
+
+        foreach (var annotation in annotations)
+        {
+            var range = annotation.Range;
+            var startLine = range.Start.Line;
+            var endLine = range.End.Line;
+            var matches = false;
+
+            if (range.Start.Side == DiffSide.Old)
+            {
+                if (row.OldLineNumber is { } oldLine &&
+                    oldLine >= Math.Min(startLine, endLine) &&
+                    oldLine <= Math.Max(startLine, endLine))
+                    matches = true;
+            }
+            else if (row.NewLineNumber is { } newLine &&
+                     newLine >= Math.Min(startLine, endLine) &&
+                     newLine <= Math.Max(startLine, endLine))
+            {
+                matches = true;
+            }
+
+            if (!matches) continue;
+
+            var gutterX = range.Start.Side == DiffSide.Old
+                ? (ViewMode == DiffViewMode.SideBySide ? contentLeft : contentLeft)
+                : (ViewMode == DiffViewMode.SideBySide ? midX : contentLeft + GutterWidth);
+
+            var isOutdated = annotation is ReviewThreadAnnotation { IsOutdated: true };
+            var fill = SelectedAnnotation == annotation
+                ? selectedBrush
+                : isOutdated ? outdatedBrush : markerBrush;
+
+            var dot = new Rect(gutterX + 4, y + (rowH - 8) / 2, 8, 8);
+            context.FillRectangle(fill, dot, 4);
+            _annotationHits.Add(new AnnotationHit(dot, annotation));
         }
     }
 
@@ -467,6 +594,92 @@ public sealed class DiffViewer : Control
         ctx.DrawText(ft, new Point(x, y + (RowHeight - ft.Height) / 2));
     }
 
+    private double MeasureWidth(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return 0;
+        var ft = new FormattedText(
+            text,
+            System.Globalization.CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight,
+            _typeface,
+            12,
+            Brushes.Transparent);
+        return ft.Width;
+    }
+
+    private void DrawIntraLineHighlights(
+        DrawingContext ctx,
+        string text,
+        IReadOnlyList<CharSpan>? spans,
+        double x,
+        double y,
+        double rowH,
+        IBrush accent)
+    {
+        if (spans is null || spans.Count == 0 || string.IsNullOrEmpty(text))
+            return;
+
+        // Semi-transparent accent under changed substrings.
+        var highlight = accent is ISolidColorBrush solid
+            ? (IBrush)new SolidColorBrush(Color.FromArgb(0x55, solid.Color.R, solid.Color.G, solid.Color.B))
+            : accent;
+
+        foreach (var span in spans)
+        {
+            if (span.Length <= 0 || span.Start < 0 || span.Start >= text.Length)
+                continue;
+            var len = Math.Min(span.Length, text.Length - span.Start);
+            if (len <= 0) continue;
+            var before = text[..span.Start];
+            var mid = text.Substring(span.Start, len);
+            var left = x + MeasureWidth(before);
+            var width = MeasureWidth(mid);
+            if (width <= 0) continue;
+            ctx.FillRectangle(highlight, new Rect(left, y, width, rowH));
+        }
+    }
+
+    private void DrawSyntaxOrPlainText(
+        DrawingContext ctx,
+        string text,
+        double x,
+        double y,
+        IBrush fallback,
+        FileSyntaxTokens? tokens,
+        int? oneBasedLine)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        if (tokens is null || oneBasedLine is null)
+        {
+            DrawText(ctx, text, x, y, fallback);
+            return;
+        }
+
+        var spans = tokens.ForLine(oneBasedLine.Value);
+        if (spans.Count == 0)
+        {
+            DrawText(ctx, text, x, y, fallback);
+            return;
+        }
+
+        // Paint default text first, then overwrite token segments with scoped colors.
+        DrawText(ctx, text, x, y, fallback);
+        foreach (var span in spans)
+        {
+            if (span.Length <= 0 || span.Start < 0 || span.Start >= text.Length)
+                continue;
+            var len = Math.Min(span.Length, text.Length - span.Start);
+            if (len <= 0) continue;
+            var color = SyntaxScopePalette.BrushForScope(span.Scope, ActualThemeVariant);
+            if (color is null) continue;
+            var before = text[..span.Start];
+            var mid = text.Substring(span.Start, len);
+            DrawText(ctx, mid, x + MeasureWidth(before), y, color);
+        }
+    }
+
     private IBrush RowBrush(DiffRowKind kind, bool selected) =>
         selected ? Brush("ForgeDiffSelectionFillBrush", Brushes.SlateBlue)
         : kind switch
@@ -568,6 +781,14 @@ public sealed class DiffViewer : Control
                         break;
                 }
             }
+            e.Handled = true;
+            return;
+        }
+
+        foreach (var hit in _annotationHits)
+        {
+            if (!hit.Bounds.Contains(pos)) continue;
+            SelectedAnnotation = hit.Annotation;
             e.Handled = true;
             return;
         }

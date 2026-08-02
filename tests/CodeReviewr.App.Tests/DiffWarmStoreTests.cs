@@ -9,7 +9,7 @@ namespace CodeReviewr.App.Tests;
 public sealed class DiffWarmStoreTests
 {
     private static DiffWarmKey Key(string path = "a.txt") =>
-        new("fs", path, DiffTarget.IndexToWorktree, DiffOptions.Default);
+        new("fs", path, DiffTarget.IndexToWorktree.AsWorkingCopy(), DiffOptions.Default);
 
     private static FileDiff SampleDiff(string path = "a.txt") =>
         UntrackedFileDiff.Create(FilePath.From(path), "hello\n");
@@ -91,7 +91,7 @@ public sealed class DiffWarmStoreTests
     {
         using var store = new DiffWarmStore();
         var fs = Key("a.txt");
-        var hist = new DiffWarmKey("hist:abc", "a.txt", DiffTarget.HeadToWorktree, DiffOptions.Default);
+        var hist = new DiffWarmKey("hist:abc", "a.txt", DiffTarget.HeadToWorktree.AsWorkingCopy(), DiffOptions.Default);
         await store.GetOrStart(fs, _ => Task.FromResult(SampleDiff()));
         await store.GetOrStart(hist, _ => Task.FromResult(SampleDiff()));
 

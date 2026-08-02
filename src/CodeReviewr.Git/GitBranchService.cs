@@ -5,12 +5,12 @@ using CodeReviewr.Git.Internal;
 namespace CodeReviewr.Git;
 
 /// <summary>Branch listing, checkout, create/delete/rename, and fetch.</summary>
-public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGate gate) : IGitBranchService
+public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitBranchService
 {
     private const string FieldSeparator = "\u0001";
 
     public Task<IReadOnlyList<BranchInfo>> ListBranchesAsync(string repositoryPath, CancellationToken ct = default) =>
-        gate.RunReadAsync(async token =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
         {
             var format = string.Join(FieldSeparator, "%(refname)", "%(HEAD)", "%(upstream:short)", "%(objectname)");
             var result = await runner.RunAsync(
@@ -23,7 +23,7 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGate g
         }, ct);
 
     public Task CheckoutAsync(string repositoryPath, string branch, CancellationToken ct = default) =>
-        gate.RunWorktreeWriteAsync(
+        gates.For(repositoryPath).RunWorktreeWriteAsync(
             token => runner.RunAsync(repositoryPath, ["checkout", branch], options: null, token),
             ct);
 
@@ -31,28 +31,28 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGate g
     {
         if (checkout)
         {
-            return gate.RunWorktreeWriteAsync(
+            return gates.For(repositoryPath).RunWorktreeWriteAsync(
                 token => runner.RunAsync(repositoryPath, ["checkout", "-b", name], options: null, token),
                 ct);
         }
 
-        return gate.RunIndexWriteAsync(
+        return gates.For(repositoryPath).RunIndexWriteAsync(
             token => runner.RunAsync(repositoryPath, ["branch", "--", name], options: null, token),
             ct);
     }
 
     public Task DeleteBranchAsync(string repositoryPath, string name, bool force, CancellationToken ct = default) =>
-        gate.RunIndexWriteAsync(
+        gates.For(repositoryPath).RunIndexWriteAsync(
             token => runner.RunAsync(repositoryPath, ["branch", force ? "-D" : "-d", "--", name], options: null, token),
             ct);
 
     public Task RenameBranchAsync(string repositoryPath, string oldName, string newName, CancellationToken ct = default) =>
-        gate.RunIndexWriteAsync(
+        gates.For(repositoryPath).RunIndexWriteAsync(
             token => runner.RunAsync(repositoryPath, ["branch", "-m", oldName, newName], options: null, token),
             ct);
 
     public Task FetchAsync(string repositoryPath, CancellationToken ct = default) =>
-        gate.RunNetworkAsync(
+        gates.For(repositoryPath).RunNetworkAsync(
             token => runner.RunAsync(
                 repositoryPath,
                 ["fetch", "--prune"],

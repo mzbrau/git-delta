@@ -86,7 +86,7 @@ public sealed class StagingRoundTripTests
         var staging = sp.GetRequiredService<IGitStagingService>();
         var status = sp.GetRequiredService<IGitStatusService>();
 
-        var worktreeDiff = await diffs.GetDiffAsync(path, FilePath.From("multi.txt"), DiffTarget.IndexToWorktree, DiffOptions.Default);
+        var worktreeDiff = await diffs.GetWorkingCopyDiffAsync(path, FilePath.From("multi.txt"), DiffTarget.IndexToWorktree, DiffOptions.Default);
         Assert.That(worktreeDiff.Hunks.Count, Is.GreaterThanOrEqualTo(2));
 
         var patch = PatchSynthesizer.SynthesizeHunks(worktreeDiff, [0]);
@@ -96,7 +96,7 @@ public sealed class StagingRoundTripTests
         Assert.That(mid.Staged.Any(s => s.Path.Value == "multi.txt"), Is.True);
         Assert.That(mid.Unstaged.Any(s => s.Path.Value == "multi.txt"), Is.True);
 
-        var stagedDiff = await diffs.GetDiffAsync(path, FilePath.From("multi.txt"), DiffTarget.HeadToIndex, DiffOptions.Default);
+        var stagedDiff = await diffs.GetWorkingCopyDiffAsync(path, FilePath.From("multi.txt"), DiffTarget.HeadToIndex, DiffOptions.Default);
         Assert.That(stagedDiff.Hunks, Is.Not.Empty);
 
         var unstagePatch = PatchSynthesizer.SynthesizeHunks(stagedDiff, [0]);
@@ -121,7 +121,7 @@ public sealed class StagingRoundTripTests
         var diffs = sp.GetRequiredService<IGitDiffService>();
         var staging = sp.GetRequiredService<IGitStagingService>();
 
-        var diff = await diffs.GetDiffAsync(path, FilePath.From("a.txt"), DiffTarget.IndexToWorktree, DiffOptions.Default);
+        var diff = await diffs.GetWorkingCopyDiffAsync(path, FilePath.From("a.txt"), DiffTarget.IndexToWorktree, DiffOptions.Default);
         var removed = diff.Hunks[0].Lines
             .Select((l, i) => (l, i))
             .First(x => x.l.Kind == DiffLineKind.Removed);

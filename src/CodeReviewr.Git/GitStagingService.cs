@@ -12,7 +12,7 @@ namespace CodeReviewr.Git;
 /// reimplementing them. Hunk/line subset synthesis lives in `CodeReviewr.Diff`; this service
 /// only applies whatever patch text it is given.
 /// </summary>
-public sealed class GitStagingService(IGitProcessRunner runner, IRepositoryGate gate) : IGitStagingService
+public sealed class GitStagingService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitStagingService
 {
     public Task StageFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default) =>
         StageFilesAsync(repositoryPath, [path], ct);
@@ -45,7 +45,7 @@ public sealed class GitStagingService(IGitProcessRunner runner, IRepositoryGate 
         RunIndexWrite(repositoryPath, ["apply", "--cached", "--reverse", "--whitespace=nowarn", "-"], patch, ct);
 
     private Task RunIndexWrite(string repositoryPath, IReadOnlyList<string> args, string? stdin, CancellationToken ct) =>
-        gate.RunIndexWriteAsync(async token =>
+        gates.For(repositoryPath).RunIndexWriteAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var options = stdin is null ? null : new GitProcessOptions { StdinText = stdin };

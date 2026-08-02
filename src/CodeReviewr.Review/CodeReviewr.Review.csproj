@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>CodeReviewr.Review</RootNamespace>
+    <AssemblyName>CodeReviewr.Review</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeReviewr.Review.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\CodeReviewr.Core\CodeReviewr.Core.csproj" />
+    <ProjectReference Include="..\CodeReviewr.Diff\CodeReviewr.Diff.csproj" />
+    <ProjectReference Include="..\CodeReviewr.Git\CodeReviewr.Git.csproj" />
+    <ProjectReference Include="..\CodeReviewr.GitHub\CodeReviewr.GitHub.csproj" />
+    <ProjectReference Include="..\CodeReviewr.Persistence\CodeReviewr.Persistence.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

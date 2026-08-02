@@ -13,7 +13,7 @@ namespace CodeReviewr.Diff;
 /// Content identity for the cache key comes from the raw diff itself: the patch's own
 /// <c>index &lt;old&gt;..&lt;new&gt;</c> header line, extracted by <see cref="PatchParser"/>. Because the
 /// cache is keyed purely by (old content, new content, options), requests for different
-/// <see cref="DiffTarget"/>s that happen to describe identical content collapse onto the same cache
+/// <see cref="DiffScope"/>s that happen to describe identical content collapse onto the same cache
 /// entry for free, exactly as Plan.md's "Target and caching" section describes.
 /// </summary>
 public sealed class GitDiffService : IGitDiffService
@@ -32,15 +32,15 @@ public sealed class GitDiffService : IGitDiffService
     public async Task<FileDiff> GetDiffAsync(
         string repositoryPath,
         FilePath path,
-        DiffTarget target,
+        DiffScope scope,
         DiffOptions options,
         CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
         try
         {
-            var rawPatch = await _rawService.GetPatchAsync(repositoryPath, path, target, options, ct).ConfigureAwait(false);
-            var parsed = PatchParser.Parse(rawPatch, target);
+            var rawPatch = await _rawService.GetPatchAsync(repositoryPath, path, scope, options, ct).ConfigureAwait(false);
+            var parsed = PatchParser.Parse(rawPatch, scope);
 
             var key = new FileDiffKey(parsed.OldContent, parsed.NewContent, options);
             if (_cache.TryGet(key, out var cached) && cached is not null)
@@ -58,8 +58,8 @@ public sealed class GitDiffService : IGitDiffService
 
     public Task<IReadOnlyList<(FilePath Path, ContentId OldOid, ContentId NewOid, ChangeKind Kind)>> GetRawDiffAsync(
         string repositoryPath,
-        DiffTarget target,
+        DiffScope scope,
         DiffOptions options,
         CancellationToken ct = default) =>
-        _rawService.GetRawFileListAsync(repositoryPath, target, options, ct);
+        _rawService.GetRawFileListAsync(repositoryPath, scope, options, ct);
 }

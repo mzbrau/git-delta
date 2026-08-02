@@ -5,7 +5,7 @@ using CodeReviewr.Core.Abstractions;
 namespace CodeReviewr.Git;
 
 /// <summary>Commit history listing and per-file commit diffs.</summary>
-public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGate gate) : IGitHistoryService
+public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitHistoryService
 {
     // Record = RS (\x1e), field = US (\x1f). Body may contain newlines; it must not contain RS/US.
     private const string LogFormat =
@@ -19,7 +19,7 @@ public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGate 
         int skip,
         int take,
         CancellationToken ct = default) =>
-        gate.RunReadAsync(async token =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
         {
             if (take <= 0)
                 return (IReadOnlyList<CommitInfo>)Array.Empty<CommitInfo>();
@@ -42,7 +42,7 @@ public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGate 
         string repositoryPath,
         string oid,
         CancellationToken ct = default) =>
-        gate.RunReadAsync(async token =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                 repositoryPath,
@@ -60,7 +60,7 @@ public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGate 
         FilePath path,
         DiffOptions options,
         CancellationToken ct = default) =>
-        gate.RunReadAsync(async token =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
         {
             // `git show` handles root commits; `--format=` suppresses the commit header.
             var args = new List<string>

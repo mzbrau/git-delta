@@ -1,0 +1,8 @@
+﻿{
+  IsOutdated: true,
+  IsUnplaceable: false,
+  Line: 3,
+  Side: New,
+  StartLine: 3,
+  EndLine: 3
+}

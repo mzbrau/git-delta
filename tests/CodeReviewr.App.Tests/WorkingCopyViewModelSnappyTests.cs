@@ -92,7 +92,7 @@ public sealed class WorkingCopyViewModelSnappyTests
         {
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
                 .Returns(Status([Unstaged("a.txt")]));
-            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffTarget>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
                 .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
 
             var vm = CreateVm();
@@ -139,7 +139,7 @@ public sealed class WorkingCopyViewModelSnappyTests
             _diff.GetDiffAsync(
                     repo,
                     Arg.Any<FilePath>(),
-                    Arg.Any<DiffTarget>(),
+                    Arg.Any<DiffScope>(),
                     Arg.Any<DiffOptions>(),
                     Arg.Any<CancellationToken>())
                 .Returns(async ci =>
@@ -188,7 +188,7 @@ public sealed class WorkingCopyViewModelSnappyTests
         {
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
                 .Returns(Status([Unstaged("a.txt")]));
-            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffTarget>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
                 .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
 
             var vm = CreateVm();
@@ -214,7 +214,7 @@ public sealed class WorkingCopyViewModelSnappyTests
         {
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
                 .Returns(Status([Unstaged("a.txt")], epoch: 1));
-            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffTarget>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
                 .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
 
             var vm = CreateVm();
@@ -229,7 +229,7 @@ public sealed class WorkingCopyViewModelSnappyTests
             var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
                 .Returns(Status([Unstaged("a.txt")], epoch: 2));
-            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffTarget>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
                 .Returns(async ci =>
                 {
                     started.TrySetResult();
@@ -264,7 +264,7 @@ public sealed class WorkingCopyViewModelSnappyTests
         {
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
                 .Returns(Status([Unstaged("a.txt")], epoch: 1));
-            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffTarget>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
                 .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
 
             var vm = CreateVm();
@@ -296,7 +296,7 @@ public sealed class WorkingCopyViewModelSnappyTests
         {
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
                 .Returns(Status([Unstaged("a.txt")]));
-            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffTarget>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
                 .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
 
             var vm = CreateVm();
@@ -310,7 +310,7 @@ public sealed class WorkingCopyViewModelSnappyTests
             await _diff.Received().GetDiffAsync(
                 repo,
                 Arg.Is<FilePath>(p => p.Value == "a.txt"),
-                Arg.Any<DiffTarget>(),
+                Arg.Any<DiffScope>(),
                 Arg.Any<DiffOptions>(),
                 Arg.Any<CancellationToken>());
         }
@@ -329,8 +329,8 @@ public sealed class WorkingCopyViewModelSnappyTests
         {
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
                 .Returns(Status([Unstaged("a.txt")], epoch: 1));
-            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffTarget>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
-                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value, ci.ArgAt<DiffTarget>(2)));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value, ci.ArgAt<DiffScope>(2).WorkingCopyTargetOrNull() ?? DiffTarget.IndexToWorktree));
 
             var vm = CreateVm();
             await vm.OpenAsync(repo);
@@ -344,12 +344,12 @@ public sealed class WorkingCopyViewModelSnappyTests
             var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
                 .Returns(StatusWithStaged([Staged("a.txt")], epoch: 2));
-            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffTarget>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
                 .Returns(async ci =>
                 {
                     started.TrySetResult();
                     await release.Task;
-                    return DiffFor(ci.ArgAt<FilePath>(1).Value, ci.ArgAt<DiffTarget>(2));
+                    return DiffFor(ci.ArgAt<FilePath>(1).Value, ci.ArgAt<DiffScope>(2).WorkingCopyTargetOrNull() ?? DiffTarget.IndexToWorktree);
                 });
 
             var stageTask = vm.StageFileCommand.ExecuteAsync(file);

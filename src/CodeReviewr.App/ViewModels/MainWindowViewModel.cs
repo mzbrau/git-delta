@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.Input;
 using CodeReviewr.App.Services;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
+using CodeReviewr.GitHub;
 
 namespace CodeReviewr.App.ViewModels;
 
@@ -15,21 +16,31 @@ public partial class MainWindowViewModel : ObservableObject
 
     private readonly ISettingsStore _settings;
     private readonly NotificationService _notifications;
+    private readonly IAccountService _accounts;
     private double _expandedNavigatorWidth;
 
     public MainWindowViewModel(
         WorkingCopyViewModel workingCopy,
+        ReviewViewModel review,
         DiagnosticsOverlayViewModel diagnostics,
         GitConsoleViewModel gitConsole,
         ISettingsStore settings,
-        NotificationService notifications)
+        NotificationService notifications,
+        IAccountService accounts)
     {
         WorkingCopy = workingCopy;
+        Review = review;
         Diagnostics = diagnostics;
         GitConsole = gitConsole;
         _settings = settings;
         _notifications = notifications;
+        _accounts = accounts;
         RecentRepositories = new(_settings.Current.RecentRepositories);
+        DevelopmentFolder = _settings.Current.DevelopmentFolder ?? "";
+        GitHubAccounts = new(_settings.Current.Accounts);
+        EnterpriseHostUrls = new(_settings.Current.EnterpriseHostUrls);
+        NewGitHubHost = "github.com";
+        NewEnterpriseHost = "";
         DefaultDiffMode = _settings.Current.DefaultDiffMode;
         _theme = string.IsNullOrWhiteSpace(_settings.Current.Theme) ? "System" : _settings.Current.Theme;
         _simulateSlowGit = _settings.Current.SimulateSlowGit;
@@ -38,6 +49,24 @@ public partial class MainWindowViewModel : ObservableObject
                 ? DiffWarmStore.DefaultConcurrency
                 : _settings.Current.DiffPrefetchConcurrency);
         WorkingCopy.SetDiffPrefetchConcurrency(_diffPrefetchConcurrency);
+
+        WorkingCopy.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(WorkingCopyViewModel.IsHistoryMode))
+            {
+                OnPropertyChanged(nameof(ShowFileStatusPane));
+                OnPropertyChanged(nameof(ShowPullRequestPane));
+            }
+        };
+        Review.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(ReviewViewModel.IsPullRequestMode)
+                or nameof(ReviewViewModel.WorkspaceMode))
+            {
+                OnPropertyChanged(nameof(ShowFileStatusPane));
+                OnPropertyChanged(nameof(ShowPullRequestPane));
+            }
+        };
 
         _expandedNavigatorWidth = Math.Max(MinNavigatorWidth, _settings.Current.NavigatorWidth);
         _navigatorWidth = _settings.Current.NavigatorCollapsed
@@ -50,9 +79,20 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     public WorkingCopyViewModel WorkingCopy { get; }
+    public ReviewViewModel Review { get; }
     public DiagnosticsOverlayViewModel Diagnostics { get; }
     public GitConsoleViewModel GitConsole { get; }
     public NotificationService Notifications => _notifications;
+
+    public System.Collections.ObjectModel.ObservableCollection<GitHubAccountSettings> GitHubAccounts { get; }
+    public System.Collections.ObjectModel.ObservableCollection<string> EnterpriseHostUrls { get; }
+
+    [ObservableProperty] private string _developmentFolder = "";
+    [ObservableProperty] private string _newGitHubHost = "github.com";
+    [ObservableProperty] private string _newGitHubToken = "";
+    [ObservableProperty] private string _newEnterpriseHost = "";
+    [ObservableProperty] private string _reauthToken = "";
+    [ObservableProperty] private GitHubAccountSettings? _reauthAccount;
 
     [ObservableProperty] private GitExecutableInfo? _gitInfo;
     [ObservableProperty] private string _statusText = "Ready";
@@ -73,6 +113,8 @@ public partial class MainWindowViewModel : ObservableObject
 
     public GridLength NavigatorColumnWidth => new(NavigatorWidth);
     public GridLength FileListColumnWidth => new(FileListWidth);
+    public bool ShowFileStatusPane => !WorkingCopy.IsHistoryMode && !Review.IsPullRequestMode;
+    public bool ShowPullRequestPane => Review.IsPullRequestMode;
 
     partial void OnNavigatorWidthChanged(double value) => OnPropertyChanged(nameof(NavigatorColumnWidth));
     partial void OnFileListWidthChanged(double value) => OnPropertyChanged(nameof(FileListColumnWidth));
@@ -245,5 +287,142 @@ public partial class MainWindowViewModel : ObservableObject
         _settings.Update(s => s.DiffPrefetchConcurrency = clamped);
         _ = _settings.SaveAsync();
         WorkingCopy.SetDiffPrefetchConcurrency(clamped);
+    }
+
+    partial void OnDevelopmentFolderChanged(string value)
+    {
+        _settings.Update(s => s.DevelopmentFolder = string.IsNullOrWhiteSpace(value) ? null : value.Trim());
+        _ = _settings.SaveAsync();
+    }
+
+    [RelayCommand]
+    private async Task AddGitHubAccountAsync()
+    {
+        if (string.IsNullOrWhiteSpace(NewGitHubToken))
+        {
+            _notifications.Error("Paste a personal access token to add an account.");
+            return;
+        }
+
+        try
+        {
+            var account = await _accounts.AddAccountAsync(NewGitHubHost, NewGitHubToken);
+            RefreshAccountCollections();
+            NewGitHubToken = "";
+            _notifications.Info($"Added GitHub account {account.Login} on {account.Host}.");
+            await Review.RefreshInboxCommand.ExecuteAsync(null);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to add GitHub account: {ex.Message}",
+                () => _ = AddGitHubAccountAsync());
+        }
+    }
+
+    [RelayCommand]
+    private async Task ReauthGitHubAccountAsync(GitHubAccountSettings? account)
+    {
+        if (account is null) return;
+
+        ReauthAccount = account;
+        if (string.IsNullOrWhiteSpace(ReauthToken))
+        {
+            _notifications.Error("Paste a new token to re-authenticate.");
+            return;
+        }
+
+        try
+        {
+            await _accounts.ReauthAccountAsync(account.Host, account.Login, ReauthToken);
+            RefreshAccountCollections();
+            ReauthToken = "";
+            ReauthAccount = null;
+            _notifications.Info($"Re-authenticated {account.Login} on {account.Host}.");
+            await Review.RefreshInboxCommand.ExecuteAsync(null);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to re-authenticate: {ex.Message}",
+                () => _ = ReauthGitHubAccountAsync(account));
+        }
+    }
+
+    [RelayCommand]
+    private void BeginReauth(GitHubAccountSettings? account)
+    {
+        ReauthAccount = account;
+        ReauthToken = "";
+    }
+
+    [RelayCommand]
+    private void AddEnterpriseHost()
+    {
+        var host = NewEnterpriseHost.Trim();
+        if (string.IsNullOrWhiteSpace(host))
+            return;
+
+        if (EnterpriseHostUrls.Any(h => string.Equals(h, host, StringComparison.OrdinalIgnoreCase)))
+        {
+            NewEnterpriseHost = "";
+            return;
+        }
+
+        EnterpriseHostUrls.Add(host);
+        NewEnterpriseHost = "";
+        _settings.Update(s =>
+        {
+            if (!s.EnterpriseHostUrls.Any(h => string.Equals(h, host, StringComparison.OrdinalIgnoreCase)))
+                s.EnterpriseHostUrls.Add(host);
+        });
+        _ = _settings.SaveAsync();
+    }
+
+    [RelayCommand]
+    private void RemoveEnterpriseHost(string? host)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return;
+
+        EnterpriseHostUrls.Remove(host);
+        _settings.Update(s =>
+            s.EnterpriseHostUrls.RemoveAll(h => string.Equals(h, host, StringComparison.OrdinalIgnoreCase)));
+        _ = _settings.SaveAsync();
+    }
+
+    private void RefreshAccountCollections()
+    {
+        GitHubAccounts.Clear();
+        foreach (var existing in _accounts.ListAccounts())
+            GitHubAccounts.Add(existing);
+    }
+
+    [RelayCommand]
+    private async Task RemoveGitHubAccountAsync(GitHubAccountSettings? account)
+    {
+        if (account is null) return;
+
+        try
+        {
+            await _accounts.RemoveAccountAsync(account.Host, account.Login);
+            RefreshAccountCollections();
+            await Review.RefreshInboxCommand.ExecuteAsync(null);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to remove GitHub account: {ex.Message}",
+                () => _ = RemoveGitHubAccountAsync(account));
+        }
+    }
+
+    public void NotifyWindowActivated()
+    {
+        WorkingCopy.NotifyWindowActivated();
+        Review.NotifyWindowActivated();
+    }
+
+    [RelayCommand]
+    private void ReturnToFileStatus()
+    {
+        Review.ClearPullRequestMode();
+        WorkingCopy.SelectFileStatusCommand.Execute(null);
     }
 }

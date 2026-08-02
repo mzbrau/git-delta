@@ -1,0 +1,87 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "id": "PR_kwDOABC123",
+        "number": 42,
+        "title": "Fix inbox parsing",
+        "url": "https://github.com/octo/repo/pull/42",
+        "isDraft": false,
+        "updatedAt": "2026-01-15T10:30:00Z",
+        "reviewDecision": "REVIEW_REQUIRED",
+        "mergeable": true,
+        "mergeStateStatus": "CLEAN",
+        "baseRefName": "main",
+        "headRefName": "feature/inbox",
+        "changedFiles": 1,
+        "baseRefOid": "abc123base000000000000000000000000000000",
+        "headRefOid": "def456head000000000000000000000000000000",
+        "body": "## Summary\n\nFixes parsing.",
+        "author": {
+          "login": "octocat",
+          "avatarUrl": "https://avatars.githubusercontent.com/u/1"
+        },
+        "repository": {
+          "id": "R_kgDOABC",
+          "name": "repo",
+          "nameWithOwner": "octo/repo",
+          "owner": { "login": "octo" },
+          "url": "https://github.com/octo/repo"
+        },
+        "comments": {
+          "nodes": [
+            {
+              "author": { "login": "reviewer" },
+              "body": "Looks good overall.",
+              "createdAt": "2026-01-14T09:00:00Z",
+              "url": "https://github.com/octo/repo/issues/42#issuecomment-1"
+            }
+          ]
+        },
+        "reviews": {
+          "nodes": [
+            {
+              "author": { "login": "reviewer" },
+              "body": "Please address the nits.",
+              "state": "CHANGES_REQUESTED",
+              "submittedAt": "2026-01-15T08:00:00Z",
+              "url": "https://github.com/octo/repo/pull/42#pullrequestreview-1"
+            }
+          ]
+        },
+        "commits": {
+          "nodes": [
+            {
+              "commit": {
+                "oid": "def456head000000000000000000000000000000",
+                "statusCheckRollup": {
+                  "state": "SUCCESS",
+                  "contexts": {
+                    "nodes": [
+                      {
+                        "__typename": "CheckRun",
+                        "name": "build",
+                        "detailsUrl": "https://github.com/octo/repo/actions/runs/1",
+                        "conclusion": "SUCCESS"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "files": {
+          "nodes": [
+            {
+              "path": "src/Foo.cs",
+              "changeType": "MODIFIED",
+              "additions": 2,
+              "deletions": 1
+            }
+          ]
+        }
+      }
+    }
+  }
+}

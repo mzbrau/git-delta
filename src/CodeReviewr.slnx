@@ -4,6 +4,9 @@
     <Project Path="CodeReviewr.Core/CodeReviewr.Core.csproj" />
     <Project Path="CodeReviewr.Diff/CodeReviewr.Diff.csproj" />
     <Project Path="CodeReviewr.Git/CodeReviewr.Git.csproj" />
+    <Project Path="CodeReviewr.GitHub/CodeReviewr.GitHub.csproj" />
+    <Project Path="CodeReviewr.Review/CodeReviewr.Review.csproj" />
+    <Project Path="CodeReviewr.Persistence/CodeReviewr.Persistence.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="../tests/CodeReviewr.App.Tests/CodeReviewr.App.Tests.csproj" />
@@ -11,6 +14,9 @@
     <Project Path="../tests/CodeReviewr.Core.Tests/CodeReviewr.Core.Tests.csproj" />
     <Project Path="../tests/CodeReviewr.Diff.Tests/CodeReviewr.Diff.Tests.csproj" />
     <Project Path="../tests/CodeReviewr.Git.Tests/CodeReviewr.Git.Tests.csproj" />
+    <Project Path="../tests/CodeReviewr.GitHub.Tests/CodeReviewr.GitHub.Tests.csproj" />
+    <Project Path="../tests/CodeReviewr.Review.Tests/CodeReviewr.Review.Tests.csproj" />
+    <Project Path="../tests/CodeReviewr.Persistence.Tests/CodeReviewr.Persistence.Tests.csproj" />
     <Project Path="../tests/CodeReviewr.IntegrationTests/CodeReviewr.IntegrationTests.csproj" />
     <Project Path="../tests/CodeReviewr.TestSupport/CodeReviewr.TestSupport.csproj" />
   </Folder>

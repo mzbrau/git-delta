@@ -7,12 +7,12 @@ using CodeReviewr.Git.Internal;
 namespace CodeReviewr.Git;
 
 /// <summary>Stash list, apply, push/pop, and per-file stash diffs.</summary>
-public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGate gate) : IGitStashService
+public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitStashService
 {
     private static readonly Regex StashRefIndex = new(@"^stash@\{(\d+)\}$", RegexOptions.Compiled);
 
     public Task<IReadOnlyList<StashInfo>> ListStashesAsync(string repositoryPath, CancellationToken ct = default) =>
-        gate.RunReadAsync(async token =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                 repositoryPath,
@@ -28,7 +28,7 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGate ga
         string? message,
         bool includeUntracked = false,
         CancellationToken ct = default) =>
-        gate.RunWorktreeWriteAsync(async token =>
+        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
             var args = new List<string> { "stash", "push" };
             if (includeUntracked)
@@ -43,7 +43,7 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGate ga
         }, ct);
 
     public Task ApplyStashAsync(string repositoryPath, int index, CancellationToken ct = default) =>
-        gate.RunWorktreeWriteAsync(
+        gates.For(repositoryPath).RunWorktreeWriteAsync(
             token => runner.RunAsync(
                 repositoryPath,
                 ["stash", "apply", $"stash@{{{index}}}"],
@@ -52,12 +52,12 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGate ga
             ct);
 
     public Task StashPopAsync(string repositoryPath, CancellationToken ct = default) =>
-        gate.RunWorktreeWriteAsync(
+        gates.For(repositoryPath).RunWorktreeWriteAsync(
             token => runner.RunAsync(repositoryPath, ["stash", "pop"], options: null, token),
             ct);
 
     public Task DropStashAsync(string repositoryPath, int index, CancellationToken ct = default) =>
-        gate.RunWorktreeWriteAsync(
+        gates.For(repositoryPath).RunWorktreeWriteAsync(
             token => runner.RunAsync(
                 repositoryPath,
                 ["stash", "drop", $"stash@{{{index}}}"],
@@ -69,7 +69,7 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGate ga
         string repositoryPath,
         int index,
         CancellationToken ct = default) =>
-        gate.RunReadAsync(async token =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
         {
             var stashRef = $"stash@{{{index}}}";
             var result = await runner.RunAsync(
@@ -105,7 +105,7 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGate ga
         FilePath path,
         DiffOptions options,
         CancellationToken ct = default) =>
-        gate.RunReadAsync(async token =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
         {
             // stash show does not reliably accept pathspecs; diff the WIP commit against its base.
             var stashRef = $"stash@{{{index}}}";
