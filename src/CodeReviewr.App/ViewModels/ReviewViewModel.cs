@@ -34,6 +34,7 @@ public partial class ReviewViewModel : ObservableObject
     private CancellationTokenSource? _diffCts;
     private CancellationTokenSource? _openCts;
     private CancellationTokenSource? _inboxCts;
+    private CancellationTokenSource? _markdownCts;
     private ReviewSession? _session;
     private FileDiff? _currentDiff;
     private IReadOnlyList<ReviewThread> _allThreads = [];
@@ -292,8 +293,13 @@ public partial class ReviewViewModel : ObservableObject
     partial void OnShowMarkdownPreviewChanged(bool value)
     {
         NotifyMarkdownPreviewStateChanged();
+        _markdownCts?.Cancel();
+        _markdownCts = null;
         if (value && SelectedFile is not null && _currentDiff is not null)
-            _ = LoadMarkdownPreviewTextAsync(SelectedFile, _currentDiff, CancellationToken.None);
+        {
+            _markdownCts = new CancellationTokenSource();
+            _ = LoadMarkdownPreviewTextAsync(SelectedFile, _currentDiff, _markdownCts.Token);
+        }
         else if (!value)
             MarkdownPreviewText = null;
     }
@@ -456,7 +462,7 @@ public partial class ReviewViewModel : ObservableObject
     [RelayCommand]
     private void ToggleShowMarkdownPreview()
     {
-        if (!IsMarkdownFile)
+        if (!CanShowMarkdownPreview)
             return;
         ShowMarkdownPreview = !ShowMarkdownPreview;
     }
@@ -1356,6 +1362,8 @@ public partial class ReviewViewModel : ObservableObject
     {
         _diffCts?.Cancel();
         _diffCts = new CancellationTokenSource();
+        _markdownCts?.Cancel();
+        _markdownCts = null;
         var ct = _diffCts.Token;
 
         if (file is null || _session is null)
@@ -1443,6 +1451,7 @@ public partial class ReviewViewModel : ObservableObject
                 text = DecodeUtf8(bytes);
             }
 
+            ct.ThrowIfCancellationRequested();
             await InvokeOnUiAsync(() => MarkdownPreviewText = text);
         }
         catch (OperationCanceledException)

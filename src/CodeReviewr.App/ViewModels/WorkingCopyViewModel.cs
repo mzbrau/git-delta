@@ -42,6 +42,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private CancellationTokenSource? _prefetchCts;
     private CancellationTokenSource? _historyCts;
     private CancellationTokenSource? _commitFilesCts;
+    private CancellationTokenSource? _markdownCts;
     private string? _cachedHistorySelectedPath;
     private string? _repoPath;
     private RepositoryStatus? _lastStatus;
@@ -831,8 +832,13 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnShowMarkdownPreviewChanged(bool value)
     {
         NotifyMarkdownPreviewStateChanged();
+        _markdownCts?.Cancel();
+        _markdownCts = null;
         if (value && SelectedFile is not null && _currentDiff is not null)
-            _ = LoadMarkdownPreviewTextAsync(SelectedFile, _currentDiff, _currentDiffTarget, CancellationToken.None);
+        {
+            _markdownCts = new CancellationTokenSource();
+            _ = LoadMarkdownPreviewTextAsync(SelectedFile, _currentDiff, _currentDiffTarget, _markdownCts.Token);
+        }
         else if (!value)
             MarkdownPreviewText = null;
     }
@@ -1595,6 +1601,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     {
         _diffCts?.Cancel();
         _diffCts = new CancellationTokenSource();
+        _markdownCts?.Cancel();
+        _markdownCts = null;
         var ct = _diffCts.Token;
 
         _expandedCollapses.Clear();
@@ -1836,6 +1844,8 @@ public partial class WorkingCopyViewModel : ObservableObject
 
         _diffCts?.Cancel();
         _diffCts = new CancellationTokenSource();
+        _markdownCts?.Cancel();
+        _markdownCts = null;
         var ct = _diffCts.Token;
         var file = SelectedFile;
 
@@ -2096,6 +2106,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             var text = await ReadSideTextAsync(diff.NewContent, file, target, sideIsNew: true, ct)
                 .ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
             await InvokeOnUiAsync(() => MarkdownPreviewText = text);
         }
         catch (OperationCanceledException)

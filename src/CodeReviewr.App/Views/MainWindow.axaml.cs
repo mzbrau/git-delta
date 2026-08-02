@@ -160,7 +160,8 @@ public partial class MainWindow : Window
         {
             hostHeight = preview.Bounds.Height;
             hostWidth = preview.Bounds.Width;
-            return preview.TryGetLineAnchorRect(side, line, out anchor);
+            if (preview.TryGetLineAnchorRect(side, line, out anchor))
+                return true;
         }
 
         if (this.FindControl<DiffViewer>("PrDiffViewer") is { } viewer)
