@@ -13,6 +13,9 @@ public sealed class KeychainTokenStore : ITokenStore
 
     public async Task SetTokenAsync(string host, string login, string token, CancellationToken ct = default)
     {
+        if (token.Contains('\r', StringComparison.Ordinal) || token.Contains('\n', StringComparison.Ordinal))
+            throw new ArgumentException("Token must not contain CR or LF characters.", nameof(token));
+
         // Write via `security -i` stdin so the token never appears on process argv / `ps`.
         var account = MemoryTokenStore.MakeKey(host, login);
         // Escape for security interactive command language: backslash and quotes.
@@ -87,9 +90,11 @@ public sealed class KeychainTokenStore : ITokenStore
         await process.StandardInput.WriteAsync(script.AsMemory(), ct).ConfigureAwait(false);
         process.StandardInput.Close();
 
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
         await process.WaitForExitAsync(ct).ConfigureAwait(false);
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
-        var stderr = await process.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
 
         return InterpretSecurityResult(process.ExitCode, stdout, stderr, allowNotFound);
     }
@@ -113,9 +118,11 @@ public sealed class KeychainTokenStore : ITokenStore
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start security process.");
 
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
         await process.WaitForExitAsync(ct).ConfigureAwait(false);
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
-        var stderr = await process.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
 
         return InterpretSecurityResult(process.ExitCode, stdout, stderr, allowNotFound);
     }

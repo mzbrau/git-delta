@@ -126,6 +126,8 @@ public sealed class GitProcessRunner : IGitProcessRunner
         catch (OperationCanceledException) when (
             options.MaxStdoutBytes is { } maxLimit
             && Interlocked.Read(ref stdoutBytes) > maxLimit
+            && limitCts?.IsCancellationRequested == true
+            && timeoutCts?.IsCancellationRequested != true
             && !ct.IsCancellationRequested)
         {
             throw new DiffTooLargeException(maxLimit, Interlocked.Read(ref stdoutBytes));
