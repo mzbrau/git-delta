@@ -27,6 +27,8 @@ public partial class ReviewViewModel : ObservableObject
     private readonly ISettingsStore _settings;
     private readonly NotificationService _notifications;
     private readonly IIntraLineDiffer _intraLine;
+    private readonly IGitObjectReader _objects;
+    private readonly ISyntaxTokenService? _syntaxTokens;
     private readonly List<PendingReviewMutation> _pending = [];
     private CancellationTokenSource? _diffCts;
     private CancellationTokenSource? _openCts;
@@ -47,7 +49,9 @@ public partial class ReviewViewModel : ObservableObject
         IConfirmDialog confirm,
         ISettingsStore settings,
         NotificationService notifications,
-        IIntraLineDiffer intraLine)
+        IIntraLineDiffer intraLine,
+        IGitObjectReader objects,
+        ISyntaxTokenService? syntaxTokens = null)
     {
         _pullRequests = pullRequestService;
         _reviewService = reviewService;
@@ -59,6 +63,8 @@ public partial class ReviewViewModel : ObservableObject
         _settings = settings;
         _notifications = notifications;
         _intraLine = intraLine;
+        _objects = objects;
+        _syntaxTokens = syntaxTokens;
         ViewMode = settings.Current.DefaultDiffMode;
         _ignoreWhitespace = settings.Current.IgnoreWhitespace;
         _contextLines = settings.Current.ContextLines > 0 ? settings.Current.ContextLines : 3;
@@ -117,6 +123,8 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private string? _checkRollupState;
     [ObservableProperty] private string? _mergeStateSummary;
     [ObservableProperty] private bool _filterFocusRequested;
+    [ObservableProperty] private FileSyntaxTokens? _leftSyntaxTokens;
+    [ObservableProperty] private FileSyntaxTokens? _rightSyntaxTokens;
     [ObservableProperty] private int? _draftCommentLine;
     [ObservableProperty] private int? _draftCommentStartLine;
     [ObservableProperty] private string? _draftCommentSide;
@@ -935,6 +943,7 @@ public partial class ReviewViewModel : ObservableObject
                 DiffEmptyMessage = DiffRows.Count == 0 ? "No differences" : "";
             });
 
+            await LoadSyntaxTokensAsync(file, _currentDiff!, ct).ConfigureAwait(false);
             await UpdateThreadAnnotationsAsync(file, diff, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -942,9 +951,18 @@ public partial class ReviewViewModel : ObservableObject
             // A newer load or a filter rebuild owns the UI; do not overwrite DiffEmptyMessage
             // with "Select a file…" when the same file is still selected.
         }
+        catch (DiffTooLargeException ex)
+        {
+            DiffRows.Clear();
+            LeftSyntaxTokens = null;
+            RightSyntaxTokens = null;
+            DiffEmptyMessage = ex.Message;
+        }
         catch (Exception ex)
         {
             DiffRows.Clear();
+            LeftSyntaxTokens = null;
+            RightSyntaxTokens = null;
             DiffEmptyMessage = $"Failed to load diff: {ex.Message}";
         }
         finally
@@ -1080,6 +1098,74 @@ public partial class ReviewViewModel : ObservableObject
         {
             _notifications.Error($"Failed to save notes: {ex.Message}");
         }
+    }
+
+    private async Task LoadSyntaxTokensAsync(FileItemViewModel file, FileDiff diff, CancellationToken ct)
+    {
+        if (_syntaxTokens is null || _session is null)
+        {
+            await InvokeOnUiAsync(() =>
+            {
+                LeftSyntaxTokens = null;
+                RightSyntaxTokens = null;
+            });
+            return;
+        }
+
+        try
+        {
+            FileSyntaxTokens? left = null;
+            FileSyntaxTokens? right = null;
+
+            if (!diff.OldContent.IsEmpty)
+            {
+                var bytes = await _objects.ReadBlobAsync(_session.RepositoryPath, diff.OldContent, ct)
+                    .ConfigureAwait(false);
+                var text = DecodeUtf8(bytes);
+                if (text is not null)
+                {
+                    left = await _syntaxTokens.TokeniseAsync(diff.OldContent, file.Path, text, ct)
+                        .ConfigureAwait(false);
+                }
+            }
+
+            if (!diff.NewContent.IsEmpty)
+            {
+                var bytes = await _objects.ReadBlobAsync(_session.RepositoryPath, diff.NewContent, ct)
+                    .ConfigureAwait(false);
+                var text = DecodeUtf8(bytes);
+                if (text is not null)
+                {
+                    right = await _syntaxTokens.TokeniseAsync(diff.NewContent, file.Path, text, ct)
+                        .ConfigureAwait(false);
+                }
+            }
+
+            await InvokeOnUiAsync(() =>
+            {
+                LeftSyntaxTokens = left;
+                RightSyntaxTokens = right;
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            await InvokeOnUiAsync(() =>
+            {
+                LeftSyntaxTokens = null;
+                RightSyntaxTokens = null;
+            });
+        }
+    }
+
+    private static string? DecodeUtf8(byte[]? bytes)
+    {
+        if (bytes is null || bytes.Length == 0) return null;
+        var offset = bytes is [0xEF, 0xBB, 0xBF, ..] ? 3 : 0;
+        return System.Text.Encoding.UTF8.GetString(bytes, offset, bytes.Length - offset);
     }
 
     private DiffOptions BuildDiffOptions()

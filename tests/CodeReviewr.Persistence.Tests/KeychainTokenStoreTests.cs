@@ -5,6 +5,16 @@ namespace CodeReviewr.Persistence.Tests;
 
 public sealed class KeychainTokenStoreTests
 {
+    [TestCase("line1\nline2")]
+    [TestCase("line1\rline2")]
+    public void SetTokenAsync_TokenWithNewline_ThrowsArgumentException(string token)
+    {
+        var store = new KeychainTokenStore();
+
+        Assert.ThrowsAsync<ArgumentException>(async () =>
+            await store.SetTokenAsync("github.com", "user", token));
+    }
+
     [Test]
     public void InterpretSecurityResult_Success_ReturnsStdout()
     {

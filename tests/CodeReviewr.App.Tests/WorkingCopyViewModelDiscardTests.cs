@@ -43,11 +43,11 @@ public sealed class WorkingCopyViewModelDiscardTests
     private IGitStashService _stash = null!;
     private IGitHistoryService _history = null!;
     private ISettingsStore _settings = null!;
-    private IGitProcessRunner _runner = null!;
+    private IFsmonitorService _fsmonitor = null!;
     private NotificationService _notifications = null!;
     private AlwaysConfirmDialog _confirm = null!;
     private FakeStashDialog _stashDialog = null!;
-    private GitRepositoryWatcher _watcher = null!;
+    private IRepositoryWatcher _watcher = null!;
 
     [SetUp]
     public void SetUp()
@@ -63,12 +63,12 @@ public sealed class WorkingCopyViewModelDiscardTests
         _stash = Substitute.For<IGitStashService>();
         _history = Substitute.For<IGitHistoryService>();
         _settings = Substitute.For<ISettingsStore>();
-        _runner = Substitute.For<IGitProcessRunner>();
+        _fsmonitor = Substitute.For<IFsmonitorService>();
         _notifications = new NotificationService();
         _confirm = new AlwaysConfirmDialog();
         _stashDialog = new FakeStashDialog(
             new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true));
-        _watcher = new GitRepositoryWatcher();
+        _watcher = Substitute.For<IRepositoryWatcher>();
 
         _settings.Current.Returns(new AppSettings());
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -85,7 +85,7 @@ public sealed class WorkingCopyViewModelDiscardTests
 
     private WorkingCopyViewModel CreateVm(IConfirmDialog? confirm = null, IStashDialog? stashDialog = null) =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
-            _settings, _notifications, confirm ?? _confirm, stashDialog ?? _stashDialog, new IntraLineDiffer(), _runner, _watcher);
+            _settings, _notifications, confirm ?? _confirm, stashDialog ?? _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher);
 
     private static StatusEntry Unstaged(string path, ChangeKind kind = ChangeKind.Modified) =>
         new(FilePath.From(path), null, kind, IsStaged: false, IsUnstaged: true, IsConflicted: false);
@@ -172,7 +172,7 @@ public sealed class WorkingCopyViewModelDiscardTests
 
             var vm = new WorkingCopyViewModel(
                 _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
-                _settings, _notifications, confirm, _stashDialog, new IntraLineDiffer(), _runner, _watcher);
+                _settings, _notifications, confirm, _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher);
             await vm.OpenAsync(repo);
             vm.SetFileSelection([vm.UnstagedFiles[0]]);
 

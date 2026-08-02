@@ -15,6 +15,8 @@ public sealed class PlatformTokenStore : ITokenStore
         else if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             _inner = new CredentialManagerTokenStore();
         else
+            // Linux: no OS vault wired yet — tokens live in process memory only for the session.
+            // Documented limitation until libsecret (or equivalent) is added.
             _inner = new MemoryTokenStore();
     }
 

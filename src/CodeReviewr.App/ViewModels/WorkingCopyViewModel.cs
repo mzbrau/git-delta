@@ -11,7 +11,6 @@ using CodeReviewr.Core.Abstractions;
 using CodeReviewr.Core.Diagnostics;
 using CodeReviewr.Core.Diff;
 using CodeReviewr.Diff;
-using CodeReviewr.Git;
 
 namespace CodeReviewr.App.ViewModels;
 
@@ -34,8 +33,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly IStashDialog _stashDialog;
     private readonly IIntraLineDiffer _intraLine;
     private readonly ISyntaxTokenService? _syntaxTokens;
-    private readonly IGitProcessRunner _runner;
-    private readonly GitRepositoryWatcher _watcher;
+    private readonly IFsmonitorService _fsmonitor;
+    private readonly IRepositoryWatcher _watcher;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     private CancellationTokenSource? _diffCts;
@@ -84,8 +83,8 @@ public partial class WorkingCopyViewModel : ObservableObject
         IConfirmDialog confirm,
         IStashDialog stashDialog,
         IIntraLineDiffer intraLine,
-        IGitProcessRunner runner,
-        GitRepositoryWatcher watcher,
+        IFsmonitorService fsmonitor,
+        IRepositoryWatcher watcher,
         ISyntaxTokenService? syntaxTokens = null)
     {
         _statusService = statusService;
@@ -105,7 +104,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         _stashDialog = stashDialog;
         _intraLine = intraLine;
         _syntaxTokens = syntaxTokens;
-        _runner = runner;
+        _fsmonitor = fsmonitor;
         _watcher = watcher;
         _warmStore = new DiffWarmStore(DiffWarmStore.ClampConcurrency(settings.Current.DiffPrefetchConcurrency));
         ViewMode = settings.Current.DefaultDiffMode;
@@ -443,7 +442,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     private async Task EnableFsmonitorAsync()
     {
         if (_repoPath is null) return;
-        await new FsmonitorPrompt(_runner).EnableAsync(_repoPath);
+        await _fsmonitor.EnableAsync(_repoPath);
         _notifications.Info("core.fsmonitor enabled for this repository.");
     }
 
@@ -1369,7 +1368,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
 
     private string AbsolutePathFor(FileItemViewModel file) =>
-        Path.GetFullPath(Path.Combine(_repoPath!, file.Path.Value.Replace('/', Path.DirectorySeparatorChar)));
+        RepositoryPathResolver.ResolveUnderRoot(_repoPath!, file.Path);
 
     partial void OnViewModeChanged(DiffViewMode value)
     {
@@ -1459,9 +1458,7 @@ public partial class WorkingCopyViewModel : ObservableObject
                 ClearDiffCacheState();
                 IsLoadingDiff = true;
                 IsDiffRefreshing = false;
-                var fullPath = System.IO.Path.Combine(
-                    _repoPath,
-                    file.Path.Value.Replace('/', System.IO.Path.DirectorySeparatorChar));
+                var fullPath = RepositoryPathResolver.ResolveUnderRoot(_repoPath, file.Path);
                 if (!System.IO.File.Exists(fullPath))
                 {
                     diff = UntrackedFileDiff.Create(file.Path, string.Empty, target);
@@ -1490,6 +1487,17 @@ public partial class WorkingCopyViewModel : ObservableObject
             CodeReviewrMeters.DiffGenerationMs.Record(sw.Elapsed.TotalMilliseconds);
         }
         catch (OperationCanceledException) { }
+        catch (DiffTooLargeException ex)
+        {
+            SelectedAddedLines = 0;
+            SelectedRemovedLines = 0;
+            ClearImagePreview();
+            DiffRows.Clear();
+            _currentDiff = null;
+            ClearDiffCacheState();
+            DiffEmptyMessage = ex.Message;
+            _notifications.Error(ex.Message);
+        }
         catch (Exception ex)
         {
             SelectedAddedLines = 0;
@@ -1911,8 +1919,11 @@ public partial class WorkingCopyViewModel : ObservableObject
                     .ConfigureAwait(false);
             }
 
-            LeftSyntaxTokens = left;
-            RightSyntaxTokens = right;
+            await InvokeOnUiAsync(() =>
+            {
+                LeftSyntaxTokens = left;
+                RightSyntaxTokens = right;
+            });
         }
         catch (OperationCanceledException)
         {
@@ -1920,7 +1931,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch
         {
-            ClearSyntaxTokens();
+            await InvokeOnUiAsync(ClearSyntaxTokens);
         }
     }
 
@@ -1937,9 +1948,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             && (target is DiffTarget.IndexToWorktree or DiffTarget.HeadToWorktree
                 || file.Kind == ChangeKind.Untracked))
         {
-            var worktreePath = System.IO.Path.Combine(
-                _repoPath,
-                file.Path.Value.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            var worktreePath = RepositoryPathResolver.ResolveUnderRoot(_repoPath, file.Path);
             if (System.IO.File.Exists(worktreePath))
             {
                 var bytes = await System.IO.File.ReadAllBytesAsync(worktreePath, ct).ConfigureAwait(false);
@@ -2227,9 +2236,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         byte[]? afterBytes = null;
         byte[]? beforeBytes = null;
 
-        var worktreePath = System.IO.Path.Combine(
-            _repoPath!,
-            file.Path.Value.Replace('/', System.IO.Path.DirectorySeparatorChar));
+        var worktreePath = RepositoryPathResolver.ResolveUnderRoot(_repoPath!, file.Path);
 
         // After image: prefer worktree for worktree-facing targets; else NewContent blob.
         if (target is DiffTarget.IndexToWorktree or DiffTarget.HeadToWorktree

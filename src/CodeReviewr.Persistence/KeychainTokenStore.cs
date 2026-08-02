@@ -13,16 +13,16 @@ public sealed class KeychainTokenStore : ITokenStore
 
     public async Task SetTokenAsync(string host, string login, string token, CancellationToken ct = default)
     {
-        // -U updates if the item exists, otherwise creates it. No delete-first needed.
+        if (token.Contains('\r', StringComparison.Ordinal) || token.Contains('\n', StringComparison.Ordinal))
+            throw new ArgumentException("Token must not contain CR or LF characters.", nameof(token));
+
+        // Write via `security -i` stdin so the token never appears on process argv / `ps`.
         var account = MemoryTokenStore.MakeKey(host, login);
-        await RunSecurityAsync(
-            ct,
-            allowNotFound: false,
-            "add-generic-password",
-            "-a", account,
-            "-s", ServiceName,
-            "-w", token,
-            "-U").ConfigureAwait(false);
+        // Escape for security interactive command language: backslash and quotes.
+        var escaped = token.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+        var script =
+            $"add-generic-password -a \"{account}\" -s \"{ServiceName}\" -w \"{escaped}\" -U\n";
+        await RunSecurityInteractiveAsync(script, ct, allowNotFound: false).ConfigureAwait(false);
     }
 
     public async Task<string?> GetTokenAsync(string host, string login, CancellationToken ct = default)
@@ -68,6 +68,37 @@ public sealed class KeychainTokenStore : ITokenStore
         exitCode == ErrSecItemNotFound ||
         stderr.Contains("could not be found", StringComparison.OrdinalIgnoreCase);
 
+    private static async Task<string?> RunSecurityInteractiveAsync(
+        string script,
+        CancellationToken ct,
+        bool allowNotFound)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = "security",
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-i");
+
+        using var process = Process.Start(psi)
+            ?? throw new InvalidOperationException("Failed to start security process.");
+
+        await process.StandardInput.WriteAsync(script.AsMemory(), ct).ConfigureAwait(false);
+        process.StandardInput.Close();
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
+        await process.WaitForExitAsync(ct).ConfigureAwait(false);
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
+
+        return InterpretSecurityResult(process.ExitCode, stdout, stderr, allowNotFound);
+    }
+
     private static async Task<string?> RunSecurityAsync(
         CancellationToken ct,
         bool allowNotFound,
@@ -87,9 +118,11 @@ public sealed class KeychainTokenStore : ITokenStore
         using var process = Process.Start(psi)
             ?? throw new InvalidOperationException("Failed to start security process.");
 
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
         await process.WaitForExitAsync(ct).ConfigureAwait(false);
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct).ConfigureAwait(false);
-        var stderr = await process.StandardError.ReadToEndAsync(ct).ConfigureAwait(false);
+        var stdout = await stdoutTask.ConfigureAwait(false);
+        var stderr = await stderrTask.ConfigureAwait(false);
 
         return InterpretSecurityResult(process.ExitCode, stdout, stderr, allowNotFound);
     }

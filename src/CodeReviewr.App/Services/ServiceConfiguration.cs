@@ -39,6 +39,7 @@ public static class ServiceConfiguration
         services.AddCodeReviewrDiff();
         services.AddCodeReviewrGitHub();
         services.AddCodeReviewrReview();
+        services.AddSingleton<IAIReviewService>(_ => NullAIReviewService.Instance);
         services.AddSingleton<MainWindowViewModel>();
         services.AddTransient<WorkingCopyViewModel>();
         services.AddTransient<ReviewViewModel>();

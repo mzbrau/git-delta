@@ -12,7 +12,10 @@ namespace CodeReviewr.Git;
 /// patch into a canonical <c>FileDiff</c> is <c>CodeReviewr.Diff</c>'s job, composed on top of
 /// this service so that <c>CodeReviewr.Git</c> never references <c>CodeReviewr.Diff</c>.
 /// </summary>
-public sealed class GitDiffRawService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitDiffRawService
+public sealed class GitDiffRawService(
+    IGitProcessRunner runner,
+    IRepositoryGateProvider gates,
+    ISettingsStore? settings = null) : IGitDiffRawService
 {
     public Task<string> GetPatchAsync(
         string repositoryPath,
@@ -22,11 +25,13 @@ public sealed class GitDiffRawService(IGitProcessRunner runner, IRepositoryGateP
         CancellationToken ct = default)
     {
         var args = GitDiffArgumentBuilder.BuildPatchArgs(scope, options, path);
+        var maxBytes = settings?.Current.MaxDiffPatchBytes ?? 32 * 1024 * 1024;
+        var processOptions = new GitProcessOptions { MaxStdoutBytes = maxBytes };
 
         return gates.For(repositoryPath).RunReadAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
-            var result = await runner.RunAsync(repositoryPath, args, options: null, token).ConfigureAwait(false);
+            var result = await runner.RunAsync(repositoryPath, args, processOptions, token).ConfigureAwait(false);
             CodeReviewrMeters.DiffGenerationMs.Record(sw.Elapsed.TotalMilliseconds);
             return result.Stdout;
         }, ct);

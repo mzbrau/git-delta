@@ -22,6 +22,12 @@ public sealed class GitProcessOptions
     /// </summary>
     public PipeTarget? StdoutTarget { get; init; }
 
+    /// <summary>
+    /// When set, the process is cancelled and a <see cref="CodeReviewr.Core.DiffTooLargeException"/> is thrown
+    /// once buffered/streamed stdout exceeds this many bytes.
+    /// </summary>
+    public long? MaxStdoutBytes { get; init; }
+
     /// <summary>Hard timeout, primarily for network operations that could otherwise hang indefinitely.</summary>
     public TimeSpan? Timeout { get; init; }
 

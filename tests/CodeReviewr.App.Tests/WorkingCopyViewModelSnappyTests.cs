@@ -23,11 +23,11 @@ public sealed class WorkingCopyViewModelSnappyTests
     private IGitStashService _stash = null!;
     private IGitHistoryService _history = null!;
     private ISettingsStore _settings = null!;
-    private IGitProcessRunner _runner = null!;
+    private IFsmonitorService _fsmonitor = null!;
     private NotificationService _notifications = null!;
     private AlwaysConfirmDialog _confirm = null!;
     private FakeStashDialog _stashDialog = null!;
-    private GitRepositoryWatcher _watcher = null!;
+    private IRepositoryWatcher _watcher = null!;
 
     [SetUp]
     public void SetUp()
@@ -43,12 +43,12 @@ public sealed class WorkingCopyViewModelSnappyTests
         _stash = Substitute.For<IGitStashService>();
         _history = Substitute.For<IGitHistoryService>();
         _settings = Substitute.For<ISettingsStore>();
-        _runner = Substitute.For<IGitProcessRunner>();
+        _fsmonitor = Substitute.For<IFsmonitorService>();
         _notifications = new NotificationService();
         _confirm = new AlwaysConfirmDialog();
         _stashDialog = new FakeStashDialog(
             new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true));
-        _watcher = new GitRepositoryWatcher();
+        _watcher = Substitute.For<IRepositoryWatcher>();
 
         _settings.Current.Returns(new AppSettings());
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -66,7 +66,7 @@ public sealed class WorkingCopyViewModelSnappyTests
     private WorkingCopyViewModel CreateVm() =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
             _conflicts, _stash, _history, _settings, _notifications, _confirm, _stashDialog,
-            new IntraLineDiffer(), _runner, _watcher);
+            new IntraLineDiffer(), _fsmonitor, _watcher);
 
     private static StatusEntry Unstaged(string path) =>
         new(FilePath.From(path), null, ChangeKind.Modified, IsStaged: false, IsUnstaged: true, IsConflicted: false);

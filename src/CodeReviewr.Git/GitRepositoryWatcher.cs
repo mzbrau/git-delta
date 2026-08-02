@@ -1,10 +1,12 @@
+using CodeReviewr.Core.Abstractions;
+
 namespace CodeReviewr.Git;
 
 /// <summary>
 /// Watches .git only (plus optional bounded paths for the open file).
 /// Debounces bursts and raises RefreshRequested.
 /// </summary>
-public sealed class GitRepositoryWatcher : IDisposable
+public sealed class GitRepositoryWatcher : IRepositoryWatcher
 {
     private FileSystemWatcher? _gitWatcher;
     private FileSystemWatcher? _fileWatcher;
@@ -111,6 +113,14 @@ public sealed class GitRepositoryWatcher : IDisposable
 }
 
 /// <summary>Opt-in helper to enable core.fsmonitor in the user's repository config.</summary>
+public sealed class FsmonitorService(IGitProcessRunner runner) : IFsmonitorService
+{
+    public Task EnableAsync(string repositoryPath, CancellationToken ct = default) =>
+        runner.RunAsync(repositoryPath, ["config", "core.fsmonitor", "true"], ct: ct);
+}
+
+/// <summary>Opt-in helper to enable core.fsmonitor in the user's repository config.</summary>
+[Obsolete("Use FsmonitorService via IFsmonitorService.")]
 public sealed class FsmonitorPrompt(IGitProcessRunner runner)
 {
     public Task EnableAsync(string repositoryPath, CancellationToken ct = default) =>
