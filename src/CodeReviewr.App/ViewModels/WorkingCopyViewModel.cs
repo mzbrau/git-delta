@@ -216,6 +216,9 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private FileSyntaxTokens? _leftSyntaxTokens;
     [ObservableProperty] private FileSyntaxTokens? _rightSyntaxTokens;
 
+    /// <summary>Raised before File Status entry collections are cleared so the view can drop ListBox selection first.</summary>
+    public event Action? SelectionClearRequested;
+
     /// <summary>Raised after the VM restores selection following a list rebuild so the view can rebind ListBoxes.</summary>
     public event Action? SelectionSyncRequested;
 
@@ -237,6 +240,14 @@ public partial class WorkingCopyViewModel : ObservableObject
     }
 
     public string FullFileToggleLabel => ShowFullFile ? "Diff only" : "Full file";
+    public string FullFileToggleTooltip => ShowFullFile ? "Diff only" : "Full file";
+    public bool IsUnifiedView => ViewMode == DiffViewMode.Unified;
+    public bool IsSideBySideView => ViewMode == DiffViewMode.SideBySide;
+    public bool IsContextLines1 => ContextLines == 1;
+    public bool IsContextLines3 => ContextLines == 3;
+    public bool IsContextLines5 => ContextLines == 5;
+    public bool IsContextLines10 => ContextLines == 10;
+    public bool IsContextLines25 => ContextLines == 25;
 
     public string RevealInFileManagerLabel => FileManagerReveal.Label;
 
@@ -289,6 +300,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     public bool HasConflictedFiles => ConflictedFiles.Count > 0;
 
     public bool HasStagedFiles => StagedFiles.Count > 0;
+    public bool CanCommit =>
+        !IsCommitting && HasStagedFiles && !string.IsNullOrWhiteSpace(CommitMessage);
     public bool ShowCommitDock => IsFileStatusMode && HasStagedFiles;
     public bool ShowCommitDetailsDock => IsHistoryMode && SelectedCommit is not null;
     public bool ShowStashDetailsDock => IsStashMode && SelectedStash is not null;
@@ -323,6 +336,14 @@ public partial class WorkingCopyViewModel : ObservableObject
         SelectedCommit is { Decorations.Count: > 0 } c ? c.DecorationsDisplay : null;
 
     partial void OnCurrentBranchChanged(string? value) => OnPropertyChanged(nameof(CommitButtonLabel));
+    partial void OnIsCommittingChanged(bool value) => NotifyCanCommitChanged();
+    partial void OnCommitMessageChanged(string value) => NotifyCanCommitChanged();
+
+    private void NotifyCanCommitChanged()
+    {
+        OnPropertyChanged(nameof(CanCommit));
+        CommitCommand.NotifyCanExecuteChanged();
+    }
     partial void OnStagingDisabledReasonChanged(string? value) => OnPropertyChanged(nameof(DiffFooterText));
     partial void OnIsLoadingDiffChanged(bool value)
     {
@@ -393,6 +414,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnContextLinesChanged(int value)
     {
         OnPropertyChanged(nameof(ContextLinesIndex));
+        NotifyContextLineSelectionChanged();
         if (value <= 0) return;
         _settings.Update(s => s.ContextLines = value);
         _ = _settings.SaveAsync();
@@ -407,6 +429,7 @@ public partial class WorkingCopyViewModel : ObservableObject
     partial void OnShowFullFileChanged(bool value)
     {
         OnPropertyChanged(nameof(FullFileToggleLabel));
+        OnPropertyChanged(nameof(FullFileToggleTooltip));
         _expandedCollapses.Clear();
         _warmStore.InvalidateAll();
         _ = LoadDiffForSelectionAsync(SelectedFile);
@@ -584,6 +607,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         OnPropertyChanged(nameof(HasConflictedFiles));
         OnPropertyChanged(nameof(HasStagedFiles));
         OnPropertyChanged(nameof(ShowCommitDock));
+        NotifyCanCommitChanged();
 
         if (previousKeys.Count == 0) return;
 
@@ -615,6 +639,9 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     private void RebuildFileStatusEntries()
     {
+        // Clear ListBox selection before mutating ItemsSource-bound collections to avoid
+        // Avalonia InternalSelectionModel.CopyTo racing with Clear (Array.Copy ArgumentException).
+        SelectionClearRequested?.Invoke();
         FileListLayoutHelper.Rebuild(
             StagedFileEntries, StagedFiles, FileStatusListLayout, flatUsesFullPath: false, _fileStatusExpandState);
         FileListLayoutHelper.Rebuild(
@@ -1477,6 +1504,8 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     partial void OnViewModeChanged(DiffViewMode value)
     {
+        OnPropertyChanged(nameof(IsUnifiedView));
+        OnPropertyChanged(nameof(IsSideBySideView));
         if (_currentDiff is null) return;
         // Instant switch: recompute layout only — zero git, zero tokenize
         ProjectRows(_currentDiff);
@@ -1494,6 +1523,34 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleShowFullFile() => ShowFullFile = !ShowFullFile;
+
+    [RelayCommand]
+    private void ToggleIgnoreWhitespace() => IgnoreWhitespace = !IgnoreWhitespace;
+
+    [RelayCommand]
+    private void SetViewMode(DiffViewMode mode) => ViewMode = mode;
+
+    [RelayCommand]
+    private void SetContextLines(object? lines)
+    {
+        var value = lines switch
+        {
+            int i => i,
+            string s when int.TryParse(s, out var parsed) => parsed,
+            _ => -1,
+        };
+        if (value > 0)
+            ContextLines = value;
+    }
+
+    private void NotifyContextLineSelectionChanged()
+    {
+        OnPropertyChanged(nameof(IsContextLines1));
+        OnPropertyChanged(nameof(IsContextLines3));
+        OnPropertyChanged(nameof(IsContextLines5));
+        OnPropertyChanged(nameof(IsContextLines10));
+        OnPropertyChanged(nameof(IsContextLines25));
+    }
 
     public void ExpandCollapsedSection(int hunkIndex, int lineIndexInHunk)
     {
@@ -2900,29 +2957,50 @@ public partial class WorkingCopyViewModel : ObservableObject
         await RefreshAsync();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanCommit))]
     private async Task CommitAsync()
     {
-        if (_repoPath is null || string.IsNullOrWhiteSpace(CommitMessage)) return;
+        if (_repoPath is null || IsCommitting) return;
+        if (!HasStagedFiles || string.IsNullOrWhiteSpace(CommitMessage)) return;
+
+        // Snapshot inputs before awaiting so a concurrent caller cannot observe cleared state.
+        var message = CommitMessage;
+        var amend = AmendCommit;
+        var noVerify = NoVerify;
+        var pushAfter = PushAfterCommit;
+
         IsCommitting = true;
         HookOutput = "";
         try
         {
             var sw = Stopwatch.StartNew();
             var progress = new Progress<string>(line => HookOutput += line + Environment.NewLine);
-            await _commit.CommitAsync(_repoPath, CommitMessage, AmendCommit, NoVerify, progress);
+            try
+            {
+                await _commit.CommitAsync(_repoPath, message, amend, noVerify, progress);
+            }
+            catch (Exception ex)
+            {
+                _notifications.Error($"Commit failed: {ex.Message}", () => _ = CommitAsync());
+                return;
+            }
+
             CodeReviewrMeters.CommitMs.Record(sw.Elapsed.TotalMilliseconds);
             CommitMessage = "";
             AmendCommit = false;
-            await RefreshAsync();
-            if (_allHistoryCommits.Count > 0)
-                _ = SoftRefreshHistoryAsync();
-            if (PushAfterCommit)
-                await ExecutePushAsync();
-        }
-        catch (Exception ex)
-        {
-            _notifications.Error($"Commit failed: {ex.Message}", () => _ = CommitAsync());
+
+            try
+            {
+                await RefreshAsync();
+                if (_allHistoryCommits.Count > 0)
+                    _ = SoftRefreshHistoryAsync();
+                if (pushAfter)
+                    await ExecutePushAsync();
+            }
+            catch (Exception ex)
+            {
+                _notifications.Error($"Failed to refresh after commit: {ex.Message}");
+            }
         }
         finally
         {

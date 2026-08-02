@@ -29,6 +29,10 @@
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
+  <Style Selector="TextBlock.PrFileLabel.Unviewed">
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+
   <Style Selector="Button.Ghost">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="Transparent" />
@@ -75,6 +79,47 @@
   </Style>
   <Style Selector="Button.IconOnly:pointerover /template/ ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+  </Style>
+
+  <Style Selector="Button.ReviewAction">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceContainerHighBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgeOutlineVariantBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="8" />
+    <Setter Property="CornerRadius" Value="6" />
+    <Setter Property="Width" Value="34" />
+    <Setter Property="Height" Value="34" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+  </Style>
+  <Style Selector="Button.ReviewAction:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+  </Style>
+  <Style Selector="Button.ReviewAction.Pressed">
+    <Setter Property="Background" Value="{DynamicResource ForgePrimaryContainerBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgePrimaryBrush}" />
+  </Style>
+  <Style Selector="Button.ReviewAction.Approve">
+    <Setter Property="Foreground" Value="{DynamicResource ForgeStatusAddedBrush}" />
+  </Style>
+  <Style Selector="Button.ReviewAction.RequestChanges">
+    <Setter Property="Foreground" Value="{DynamicResource ForgeStatusRequestChangesBrush}" />
+  </Style>
+  <Style Selector="Button.ReviewAction.Approve.Pressed">
+    <Setter Property="Background" Value="{DynamicResource ForgeStatusAddedBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgeStatusAddedBrush}" />
+    <Setter Property="Foreground" Value="White" />
+  </Style>
+  <Style Selector="Button.ReviewAction.RequestChanges.Pressed">
+    <Setter Property="Background" Value="{DynamicResource ForgeStatusRequestChangesBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgeStatusRequestChangesBrush}" />
+    <Setter Property="Foreground" Value="White" />
+  </Style>
+  <Style Selector="Button.ReviewAction.Approve.Pressed:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeStatusAddedBrush}" />
+  </Style>
+  <Style Selector="Button.ReviewAction.RequestChanges.Pressed:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeStatusRequestChangesBrush}" />
   </Style>
 
   <!-- Selected nav item: raised surface + 3px primary left accent -->

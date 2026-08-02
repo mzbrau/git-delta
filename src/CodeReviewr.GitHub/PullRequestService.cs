@@ -117,6 +117,41 @@ public sealed class PullRequestService(
             InboxSection.MyPullRequests);
     }
 
+    public async Task<int> GetPendingReviewCommentCountAsync(
+        string host,
+        string accountLogin,
+        string owner,
+        string name,
+        int number,
+        CancellationToken ct = default)
+    {
+        var normalizedHost = GitHubClient.NormalizeHost(host);
+        var token = await tokenStore.GetTokenAsync(normalizedHost, accountLogin, ct)
+            .ConfigureAwait(false)
+            ?? throw new InvalidOperationException(
+                $"No token found for account {accountLogin} on {normalizedHost}.");
+
+        JsonElement data;
+        try
+        {
+            (data, _) = await gitHubClient.ExecuteAsync(
+                    normalizedHost,
+                    token,
+                    EmbeddedQueries.PendingReviewQuery,
+                    new { owner, name, number },
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (GitHubApiException ex) when (ex.StatusCode == 401)
+        {
+            await accountService.MarkNeedsReauthAsync(normalizedHost, accountLogin, ct)
+                .ConfigureAwait(false);
+            throw;
+        }
+
+        return PullRequestGraphQLParser.ParsePendingReviewCommentCount(data, accountLogin);
+    }
+
     private async Task<IReadOnlyList<PullRequestSummary>> SearchInboxSectionAsync(
         string host,
         string accountLogin,

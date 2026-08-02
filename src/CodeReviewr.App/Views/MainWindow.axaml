@@ -556,7 +556,8 @@
                          Text="{Binding WorkingCopy.CommitMessage}"
                          PlaceholderText="Commit message..." />
                 <Button Classes="Primary" Content="{Binding WorkingCopy.CommitButtonLabel}"
-                        Command="{Binding WorkingCopy.CommitCommand}" />
+                        Command="{Binding WorkingCopy.CommitCommand}"
+                        IsEnabled="{Binding WorkingCopy.CanCommit}" />
                 <StackPanel Orientation="Horizontal" Spacing="12">
                   <CheckBox Content="Amend" IsChecked="{Binding WorkingCopy.AmendCommit}" FontSize="11" />
                   <CheckBox Content="--no-verify" IsChecked="{Binding WorkingCopy.NoVerify}" FontSize="11" />
@@ -658,9 +659,6 @@
                 <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-                      <Button Classes="Link" Content="Discard"
-                              Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}"
-                              IsVisible="{Binding WorkingCopy.HasStagedSelection}" />
                       <Button Classes="Link" Content="Unstage Selected"
                               Command="{Binding WorkingCopy.UnstageSelectedCommand}"
                               IsVisible="{Binding WorkingCopy.HasStagedSelection}" />
@@ -751,9 +749,6 @@
                 <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-                      <Button Classes="Link" Content="Discard"
-                              Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}"
-                              IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
                       <Button Classes="Link" Content="Stage Selected"
                               Command="{Binding WorkingCopy.StageSelectedCommand}"
                               IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
@@ -918,8 +913,11 @@
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
               <StackPanel Spacing="4">
                 <DockPanel>
-                  <Button DockPanel.Dock="Right" Classes="Ghost" Content="File status"
-                          Command="{Binding ReturnToFileStatusCommand}" FontSize="11" />
+                  <Button DockPanel.Dock="Right" Classes="IconOnly" Width="28" Height="28" Padding="4"
+                          Command="{Binding Review.OpenPullRequestUrlCommand}"
+                          ToolTip.Tip="Open on GitHub">
+                    <icons:MaterialIcon Kind="Github" Width="18" Height="18" />
+                  </Button>
                   <TextBlock Text="Pull request files" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </DockPanel>
                 <TextBlock Text="{Binding Review.ProgressSummary}" FontSize="10" Opacity="0.75"
@@ -951,6 +949,49 @@
                     <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
                   </StackPanel>
                 </Button>
+                <Button DockPanel.Dock="Right" Classes="IconOnly" Width="28" Height="28" Padding="4"
+                        Margin="4,0,0,0" VerticalAlignment="Center"
+                        ToolTip.Tip="Filter files">
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="All files"
+                                Command="{Binding Review.SetFilterViewedCommand}"
+                                CommandParameter="{x:Static core:ViewedFilter.All}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsFilterViewedAll, Mode=OneWay}" />
+                      <MenuItem Header="Viewed"
+                                Command="{Binding Review.SetFilterViewedCommand}"
+                                CommandParameter="{x:Static core:ViewedFilter.Viewed}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsFilterViewedOnly, Mode=OneWay}" />
+                      <MenuItem Header="Not viewed"
+                                Command="{Binding Review.SetFilterViewedCommand}"
+                                CommandParameter="{x:Static core:ViewedFilter.NotViewed}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsFilterNotViewed, Mode=OneWay}" />
+                      <Separator />
+                      <MenuItem Header="Stale"
+                                Command="{Binding Review.ToggleFilterStaleCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding Review.FilterStale, Mode=OneWay}" />
+                      <MenuItem Header="Commented"
+                                Command="{Binding Review.ToggleFilterCommentedCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding Review.FilterCommented, Mode=OneWay}" />
+                      <MenuItem Header="Unresolved"
+                                Command="{Binding Review.ToggleFilterUnresolvedCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding Review.FilterUnresolved, Mode=OneWay}" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                  <Panel>
+                    <icons:MaterialIcon Kind="FilterVariant" Width="16" Height="16" />
+                    <Ellipse Width="6" Height="6" HorizontalAlignment="Right" VerticalAlignment="Top"
+                             Margin="0,-1,-1,0"
+                             Fill="{DynamicResource ForgePrimaryBrush}"
+                             IsVisible="{Binding Review.HasActivePrFilters}" />
+                  </Panel>
+                </Button>
                 <Grid>
                   <TextBox x:Name="PrFileFilterBox" Classes="Forge" Text="{Binding Review.FileFilter}"
                            PlaceholderText="Filter files…" Padding="8,6,28,6" />
@@ -963,19 +1004,6 @@
                   </Button>
                 </Grid>
               </DockPanel>
-            </Border>
-            <Border DockPanel.Dock="Top" Padding="8,4"
-                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-              <WrapPanel Orientation="Horizontal">
-                <ComboBox SelectedItem="{Binding Review.FilterViewed}" MinWidth="100" FontSize="11" Margin="0,0,6,4">
-                  <core:ViewedFilter>All</core:ViewedFilter>
-                  <core:ViewedFilter>Viewed</core:ViewedFilter>
-                  <core:ViewedFilter>NotViewed</core:ViewedFilter>
-                </ComboBox>
-                <CheckBox Content="Stale" IsChecked="{Binding Review.FilterStale}" FontSize="11" Margin="0,0,8,4" />
-                <CheckBox Content="Commented" IsChecked="{Binding Review.FilterCommented}" FontSize="11" Margin="0,0,8,4" />
-                <CheckBox Content="Unresolved" IsChecked="{Binding Review.FilterUnresolved}" FontSize="11" Margin="0,0,8,4" />
-              </WrapPanel>
             </Border>
             <Border DockPanel.Dock="Bottom" Padding="12" MaxHeight="180"
                     Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
@@ -1032,11 +1060,14 @@
                                 <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
                               </Border>
                               <Border CornerRadius="2" Padding="4,1"
-                                      Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
-                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold" />
+                                      Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
+                                           Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
                               </Border>
                             </StackPanel>
-                            <TextBlock Text="{Binding Label}" Classes="MonoPath" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding Label}" Classes="MonoPath PrFileLabel"
+                                       Classes.Unviewed="{Binding File.IsViewed, Converter={x:Static conv:ForgeConverters.InvertBool}}"
+                                       TextTrimming="CharacterEllipsis" />
                           </DockPanel>
                         </Border>
                       </Panel>
@@ -1060,43 +1091,71 @@
                   Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
             <DockPanel>
-              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <Button Classes="IconOnly"
                         Command="{Binding WorkingCopy.ForceRefreshDiffCommand}"
                         ToolTip.Tip="Refresh diff"
                         IsVisible="{Binding WorkingCopy.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                   <icons:MaterialIcon Kind="Refresh" Width="16" Height="16" />
                 </Button>
-                <CheckBox Content="Ignore whitespace"
-                          IsChecked="{Binding WorkingCopy.IgnoreWhitespace}"
-                          FontSize="11" VerticalAlignment="Center" />
-                <ToggleButton Content="{Binding WorkingCopy.FullFileToggleLabel}"
-                              IsChecked="{Binding WorkingCopy.ShowFullFile}"
-                              FontSize="11" Padding="8,4" />
-                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
-                            IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
-                  <TextBlock Text="Context" FontSize="11" VerticalAlignment="Center"
-                             Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                  <ComboBox ItemsSource="{Binding WorkingCopy.ContextLineOptions}"
-                            SelectedIndex="{Binding WorkingCopy.ContextLinesIndex}"
-                            MinWidth="56" FontSize="11" />
-                </StackPanel>
-                <ComboBox SelectedItem="{Binding WorkingCopy.ViewMode}" MinWidth="120">
-                  <core:DiffViewMode>SideBySide</core:DiffViewMode>
-                  <core:DiffViewMode>Unified</core:DiffViewMode>
-                </ComboBox>
-                <Button Classes="Link" Content="Discard"
-                        Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}"
-                        IsVisible="{Binding WorkingCopy.CanDiscardSelection}"
-                        FontSize="11" VerticalAlignment="Center" />
-                <Button Classes="IconOnly">
+                <Button Classes="ReviewAction"
+                        Classes.Pressed="{Binding WorkingCopy.ShowFullFile}"
+                        Command="{Binding WorkingCopy.ToggleShowFullFileCommand}"
+                        ToolTip.Tip="{Binding WorkingCopy.FullFileToggleTooltip}">
+                  <icons:MaterialIcon Kind="FileDocumentOutline" Width="18" Height="18" />
+                </Button>
+                <Border Width="1" Height="22" Margin="2,0"
+                        Background="{DynamicResource ForgeOutlineVariantBrush}" />
+                <Button Classes="IconOnly" ToolTip.Tip="Diff options">
                   <Button.Flyout>
                     <MenuFlyout Placement="BottomEdgeAlignedRight">
                       <MenuItem Header="Combined review"
-                                Command="{Binding WorkingCopy.ToggleCombinedReviewCommand}" />
-                      <MenuItem Header="Stage hunk" Command="{Binding WorkingCopy.StageHunkCommand}" />
-                      <MenuItem Header="Unstage hunk" Command="{Binding WorkingCopy.UnstageHunkCommand}" />
-                      <MenuItem Header="Discard hunk" Command="{Binding WorkingCopy.DiscardHunkCommand}" />
+                                Command="{Binding WorkingCopy.ToggleCombinedReviewCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding WorkingCopy.IsCombinedReviewMode, Mode=OneWay}" />
+                      <MenuItem Header="Ignore whitespace"
+                                Command="{Binding WorkingCopy.ToggleIgnoreWhitespaceCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding WorkingCopy.IgnoreWhitespace, Mode=OneWay}" />
+                      <MenuItem Header="Context"
+                                IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                        <MenuItem Header="1"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="1"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines1, Mode=OneWay}" />
+                        <MenuItem Header="3"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="3"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines3, Mode=OneWay}" />
+                        <MenuItem Header="5"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="5"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines5, Mode=OneWay}" />
+                        <MenuItem Header="10"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="10"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines10, Mode=OneWay}" />
+                        <MenuItem Header="25"
+                                  Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                  CommandParameter="25"
+                                  ToggleType="Radio"
+                                  IsChecked="{Binding WorkingCopy.IsContextLines25, Mode=OneWay}" />
+                      </MenuItem>
+                      <Separator />
+                      <MenuItem Header="Unified"
+                                Command="{Binding WorkingCopy.SetViewModeCommand}"
+                                CommandParameter="{x:Static core:DiffViewMode.Unified}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding WorkingCopy.IsUnifiedView, Mode=OneWay}" />
+                      <MenuItem Header="Side by side"
+                                Command="{Binding WorkingCopy.SetViewModeCommand}"
+                                CommandParameter="{x:Static core:DiffViewMode.SideBySide}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding WorkingCopy.IsSideBySideView, Mode=OneWay}" />
                       <Separator />
                       <MenuItem Header="Discard file(s)"
                                 Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
@@ -1230,38 +1289,134 @@
                   Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
             <DockPanel>
-              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <Button Classes="Ghost" Content="Approve"
-                        Command="{Binding Review.SubmitApproveCommand}"
-                        IsEnabled="{Binding Review.IsSubmittingReview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
-                <Button Classes="Ghost" Content="Comment"
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button Classes="ReviewAction"
+                        Command="{Binding Review.UnmarkSelectedViewedCommand}"
+                        IsEnabled="{Binding Review.SelectedFile.IsViewed}"
+                        ToolTip.Tip="Mark as not viewed">
+                  <icons:MaterialIcon Kind="EyeOffOutline" Width="18" Height="18" />
+                </Button>
+                <Button Classes="ReviewAction"
+                        Classes.Pressed="{Binding Review.ShowFullFile}"
+                        Command="{Binding Review.ToggleShowFullFileCommand}"
+                        ToolTip.Tip="{Binding Review.FullFileToggleTooltip}">
+                  <icons:MaterialIcon Kind="FileDocumentOutline" Width="18" Height="18" />
+                </Button>
+                <Border Width="1" Height="22" Margin="2,0"
+                        Background="{DynamicResource ForgeOutlineVariantBrush}" />
+                <ItemsControl ItemsSource="{Binding Review.Reviewers}"
+                              IsVisible="{Binding Review.HasReviewers}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Horizontal" Spacing="4" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ReviewerStatusItem">
+                      <Panel Width="28" Height="28" ToolTip.Tip="{Binding Tooltip}">
+                        <Border Width="24" Height="24" CornerRadius="12"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Background="{DynamicResource ForgeSurfaceContainerHighBrush}"
+                                ClipToBounds="True">
+                          <Panel>
+                            <TextBlock Text="{Binding Initials}" FontSize="9" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                       IsVisible="{Binding HasAvatar, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                            <Image Source="{Binding Avatar}" Stretch="UniformToFill"
+                                   IsVisible="{Binding HasAvatar}" />
+                          </Panel>
+                        </Border>
+                        <Border Width="12" Height="12" CornerRadius="6"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Margin="0,-1,-1,0"
+                                IsVisible="{Binding ShowApprovedBadge}"
+                                Background="{DynamicResource ForgeStatusAddedBrush}">
+                          <icons:MaterialIcon Kind="Check" Width="8" Height="8"
+                                              Foreground="White"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Border Width="12" Height="12" CornerRadius="6"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Margin="0,-1,-1,0"
+                                IsVisible="{Binding ShowChangesRequestedBadge}"
+                                Background="{DynamicResource ForgeStatusRequestChangesBrush}">
+                          <icons:MaterialIcon Kind="Minus" Width="8" Height="8"
+                                              Foreground="White"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                      </Panel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Button Classes="ReviewAction"
                         Command="{Binding Review.SubmitCommentReviewCommand}"
-                        IsEnabled="{Binding Review.IsSubmittingReview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
-                <Button Classes="Ghost" Content="Request changes"
+                        IsEnabled="{Binding Review.CanSubmitPendingComments}"
+                        ToolTip.Tip="{Binding Review.PendingCommentsTooltip}">
+                  <Panel>
+                    <icons:MaterialIcon Kind="MessageOutline" Width="18" Height="18" />
+                    <Border MinWidth="14" Height="14" CornerRadius="7" Padding="3,0"
+                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="10,-6,-6,0"
+                            Background="{DynamicResource ForgePrimaryBrush}"
+                            IsVisible="{Binding Review.HasPendingComments}">
+                      <TextBlock Text="{Binding Review.PendingCommentCount}" FontSize="9" FontWeight="Bold"
+                                 Foreground="{DynamicResource ForgeOnPrimaryBrush}"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                  </Panel>
+                </Button>
+
+                <Button Classes="ReviewAction RequestChanges"
+                        Classes.Pressed="{Binding Review.HasRequestedChanges}"
                         Command="{Binding Review.SubmitRequestChangesCommand}"
-                        IsEnabled="{Binding Review.IsSubmittingReview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
-                <CheckBox Content="Ignore whitespace"
-                          IsChecked="{Binding Review.IgnoreWhitespace}"
-                          FontSize="11" VerticalAlignment="Center" />
-                <ComboBox SelectedItem="{Binding Review.ViewMode}" MinWidth="120">
-                  <core:DiffViewMode>SideBySide</core:DiffViewMode>
-                  <core:DiffViewMode>Unified</core:DiffViewMode>
-                </ComboBox>
+                        IsEnabled="{Binding Review.CanSubmitVerdict}"
+                        ToolTip.Tip="{Binding Review.RequestChangesTooltip}">
+                  <icons:MaterialIcon Kind="MinusCircle" Width="18" Height="18" />
+                </Button>
+
+                <Button Classes="ReviewAction Approve"
+                        Classes.Pressed="{Binding Review.HasApproved}"
+                        Command="{Binding Review.SubmitApproveCommand}"
+                        IsEnabled="{Binding Review.CanSubmitVerdict}"
+                        ToolTip.Tip="{Binding Review.ApproveTooltip}">
+                  <icons:MaterialIcon Kind="CheckCircle" Width="18" Height="18" />
+                </Button>
+
+                <Button Classes="IconOnly" ToolTip.Tip="Diff options">
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="Ignore whitespace"
+                                Command="{Binding Review.ToggleIgnoreWhitespaceCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding Review.IgnoreWhitespace, Mode=OneWay}" />
+                      <Separator />
+                      <MenuItem Header="Unified"
+                                Command="{Binding Review.SetViewModeCommand}"
+                                CommandParameter="{x:Static core:DiffViewMode.Unified}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsUnifiedView, Mode=OneWay}" />
+                      <MenuItem Header="Side by side"
+                                Command="{Binding Review.SetViewModeCommand}"
+                                CommandParameter="{x:Static core:DiffViewMode.SideBySide}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsSideBySideView, Mode=OneWay}" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                  <icons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
+                </Button>
               </StackPanel>
               <!-- Fill remaining width so path TextTrimming gets a finite measure and cannot paint over actions -->
               <Panel ClipToBounds="True">
                 <TextBlock Text="Conversation" FontWeight="SemiBold" VerticalAlignment="Center"
                            IsVisible="{Binding Review.IsConversationSelected}" />
-                <DockPanel IsVisible="{Binding Review.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
-                  <TextBlock DockPanel.Dock="Right"
-                             Text="{Binding Review.FileThreadSummary}" FontSize="11" Opacity="0.75"
-                             Margin="10,0,0,0" VerticalAlignment="Center"
-                             IsVisible="{Binding Review.FileThreadSummary, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+                <Panel IsVisible="{Binding Review.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                   <TextBlock Text="{Binding Review.SelectedFile.Path}" FontWeight="SemiBold"
                              Classes="MonoPath" TextTrimming="CharacterEllipsis"
                              VerticalAlignment="Center"
                              ToolTip.Tip="{Binding Review.SelectedFile.Path}" />
-                </DockPanel>
+                </Panel>
               </Panel>
             </DockPanel>
           </Border>
@@ -1287,6 +1442,9 @@
                         CornerRadius="8" Padding="12">
                   <StackPanel Spacing="10">
                     <TextBlock Text="STATUS" Classes="PanelHeader" Opacity="0.7" />
+                    <TextBlock Text="{Binding Review.ConversationThreadSummary}" FontSize="12"
+                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                               IsVisible="{Binding Review.ConversationThreadSummary, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
                     <DockPanel>
                       <TextBlock DockPanel.Dock="Left" Text="Decision" Width="72" FontSize="12"
                                  VerticalAlignment="Center"
@@ -1396,16 +1554,7 @@
                             Command="{Binding Review.AddCommentCommand}" Margin="8,0,0,0" />
                     <TextBox x:Name="PrCommentDraftBox" Text="{Binding Review.NewCommentBody}" AcceptsReturn="True" MinHeight="40" />
                   </DockPanel>
-                  <TextBox Text="{Binding Review.SubmitReviewBody}" PlaceholderText="Optional review summary"
-                           FontSize="11" />
                 </StackPanel>
-              </Border>
-              <Border DockPanel.Dock="Bottom" Padding="12,8"
-                      Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
-                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
-                      IsVisible="{Binding Review.HasDraftCommentAnchor}">
-                <TextBox Text="{Binding Review.SubmitReviewBody}" PlaceholderText="Optional review summary"
-                         FontSize="11" />
               </Border>
               <Border DockPanel.Dock="Bottom" MaxHeight="180" Padding="8"
                       Background="{DynamicResource ForgeSurfaceContainerBrush}"
@@ -1557,9 +1706,12 @@
                       <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                         <Button DockPanel.Dock="Right" Classes="Ghost" Content="Close" FontSize="11"
                                 Command="{Binding Review.ClearExpandedThreadCommand}" Margin="8,0,0,0" />
-                        <TextBlock Text="Thread" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource ForgePrimaryBrush}"
-                                   VerticalAlignment="Center" />
+                        <StackPanel Spacing="2" VerticalAlignment="Center">
+                          <TextBlock Text="Thread" FontSize="11" FontWeight="SemiBold"
+                                     Foreground="{DynamicResource ForgePrimaryBrush}" />
+                          <TextBlock Text="Not yet synced to GitHub" FontSize="10" Opacity="0.65"
+                                     IsVisible="{Binding Review.IsSelectedThreadPendingSync}" />
+                        </StackPanel>
                       </DockPanel>
                       <ScrollViewer MaxHeight="220">
                         <ItemsControl ItemsSource="{Binding Review.SelectedThread.Comments}">
@@ -1877,31 +2029,74 @@
                       Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                       BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
                 <DockPanel>
-                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <Button Classes="IconOnly"
                             Command="{Binding WorkingCopy.ForceRefreshDiffCommand}"
                             ToolTip.Tip="Refresh diff"
                             IsVisible="{Binding WorkingCopy.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                       <icons:MaterialIcon Kind="Refresh" Width="16" Height="16" />
                     </Button>
-                    <CheckBox Content="Ignore whitespace"
-                              IsChecked="{Binding WorkingCopy.IgnoreWhitespace}"
-                              FontSize="11" VerticalAlignment="Center" />
-                    <ToggleButton Content="{Binding WorkingCopy.FullFileToggleLabel}"
-                                  IsChecked="{Binding WorkingCopy.ShowFullFile}"
-                                  FontSize="11" Padding="8,4" />
-                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
-                                IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
-                      <TextBlock Text="Context" FontSize="11" VerticalAlignment="Center"
-                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                      <ComboBox ItemsSource="{Binding WorkingCopy.ContextLineOptions}"
-                                SelectedIndex="{Binding WorkingCopy.ContextLinesIndex}"
-                                MinWidth="56" FontSize="11" />
-                    </StackPanel>
-                    <ComboBox SelectedItem="{Binding WorkingCopy.ViewMode}" MinWidth="120">
-                      <core:DiffViewMode>SideBySide</core:DiffViewMode>
-                      <core:DiffViewMode>Unified</core:DiffViewMode>
-                    </ComboBox>
+                    <Button Classes="ReviewAction"
+                            Classes.Pressed="{Binding WorkingCopy.ShowFullFile}"
+                            Command="{Binding WorkingCopy.ToggleShowFullFileCommand}"
+                            ToolTip.Tip="{Binding WorkingCopy.FullFileToggleTooltip}">
+                      <icons:MaterialIcon Kind="FileDocumentOutline" Width="18" Height="18" />
+                    </Button>
+                    <Border Width="1" Height="22" Margin="2,0"
+                            Background="{DynamicResource ForgeOutlineVariantBrush}" />
+                    <Button Classes="IconOnly" ToolTip.Tip="Diff options">
+                      <Button.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                          <MenuItem Header="Ignore whitespace"
+                                    Command="{Binding WorkingCopy.ToggleIgnoreWhitespaceCommand}"
+                                    ToggleType="CheckBox"
+                                    IsChecked="{Binding WorkingCopy.IgnoreWhitespace, Mode=OneWay}" />
+                          <MenuItem Header="Context"
+                                    IsEnabled="{Binding WorkingCopy.ShowFullFile, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                            <MenuItem Header="1"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="1"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines1, Mode=OneWay}" />
+                            <MenuItem Header="3"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="3"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines3, Mode=OneWay}" />
+                            <MenuItem Header="5"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="5"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines5, Mode=OneWay}" />
+                            <MenuItem Header="10"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="10"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines10, Mode=OneWay}" />
+                            <MenuItem Header="25"
+                                      Command="{Binding WorkingCopy.SetContextLinesCommand}"
+                                      CommandParameter="25"
+                                      ToggleType="Radio"
+                                      IsChecked="{Binding WorkingCopy.IsContextLines25, Mode=OneWay}" />
+                          </MenuItem>
+                          <Separator />
+                          <MenuItem Header="Unified"
+                                    Command="{Binding WorkingCopy.SetViewModeCommand}"
+                                    CommandParameter="{x:Static core:DiffViewMode.Unified}"
+                                    ToggleType="Radio"
+                                    IsChecked="{Binding WorkingCopy.IsUnifiedView, Mode=OneWay}" />
+                          <MenuItem Header="Side by side"
+                                    Command="{Binding WorkingCopy.SetViewModeCommand}"
+                                    CommandParameter="{x:Static core:DiffViewMode.SideBySide}"
+                                    ToggleType="Radio"
+                                    IsChecked="{Binding WorkingCopy.IsSideBySideView, Mode=OneWay}" />
+                          <Separator />
+                          <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                    Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
+                        </MenuFlyout>
+                      </Button.Flyout>
+                      <icons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
+                    </Button>
                   </StackPanel>
                   <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center"
                               IsVisible="{Binding WorkingCopy.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">

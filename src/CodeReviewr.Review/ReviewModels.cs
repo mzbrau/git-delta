@@ -55,7 +55,8 @@ public sealed record ReviewThread(
     bool IsUnplaceable = false,
     string? ContextLines = null,
     ReviewThreadSubjectType SubjectType = ReviewThreadSubjectType.Line,
-    bool IsFileLevel = false)
+    bool IsFileLevel = false,
+    bool IsPendingSync = false)
 {
     /// <summary>Context shown for unplaceable threads: migrated snippet, else a short DiffHunk excerpt.</summary>
     public string? DisplayContext
@@ -104,9 +105,9 @@ public sealed record ResolveThreadPayload(string ThreadId);
 
 public sealed record UnresolveThreadPayload(string ThreadId);
 
-public sealed record MarkFileViewedPayload(string Path, string CommitOid);
+public sealed record MarkFileViewedPayload(string Path);
 
-public sealed record UnmarkFileViewedPayload(string Path, string CommitOid);
+public sealed record UnmarkFileViewedPayload(string Path);
 
 public sealed record SubmitReviewPayload(
     string Event,

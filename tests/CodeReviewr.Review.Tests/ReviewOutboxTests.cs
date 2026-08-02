@@ -107,6 +107,126 @@ public sealed class ReviewOutboxTests
     }
 
     [Test]
+    public async Task MarkFileViewed_WhenCapabilityTrue_WritesLocalAndEnqueues()
+    {
+        var tokenStore = Substitute.For<ITokenStore>();
+        tokenStore.GetTokenAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns("token");
+
+        var gitHub = Substitute.For<IGitHubClient>();
+        gitHub.ProbeCapabilitiesAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new GitHubCapabilities(MarkFileAsViewed: true));
+
+        var path = Path.Combine(Path.GetTempPath(), "CodeReviewr.Tests", Guid.NewGuid().ToString("N"), "durable.db");
+        var durable = new SqliteDurableUserStore(path);
+        durable.EnsureSchema();
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        var comments = new ReviewCommentService(
+            gitHub,
+            tokenStore,
+            new CapabilityCache(),
+            outbox,
+            durable,
+            new CommentAnchorMapper(
+                Substitute.For<IGitProcessRunner>(),
+                Substitute.For<IRepositoryGateProvider>(),
+                Substitute.For<IGitObjectReader>()));
+
+        var session = CreateSession();
+        await comments.MarkFileViewedAsync(session, new Core.FilePath("src/a.cs"));
+
+        await outbox.Received(1).EnqueueAsync(
+            Arg.Is<OutboxEntry>(e => e.Kind == OutboxKind.MarkFileViewed),
+            Arg.Any<CancellationToken>());
+        Assert.That(await durable.IsViewedAsync(session.Detail.Summary.NodeId, "src/a.cs"), Is.True);
+    }
+
+    [Test]
+    public async Task MarkFileViewed_Mutation_Omits_CommitOid()
+    {
+        string? requestBody = null;
+        var services = BuildServices(request =>
+        {
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            using var doc = JsonDocument.Parse(requestBody);
+            var query = doc.RootElement.GetProperty("query").GetString() ?? "";
+            return MutationSuccess(query);
+        });
+        await using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IDurableUserStore>().EnsureSchema();
+
+        var executor = provider.GetRequiredService<ReviewMutationExecutor>();
+        var entry = new OutboxEntry(
+            Guid.NewGuid().ToString("N"),
+            "github.com",
+            "dev",
+            "PR_NODE",
+            OutboxKind.MarkFileViewed,
+            JsonSerializer.Serialize(new OutboxPayloadEnvelope<MarkFileViewedPayload>(
+                "acme",
+                "demo",
+                1,
+                new MarkFileViewedPayload("src/a.cs")), ReviewJson.Options),
+            DateTimeOffset.UtcNow,
+            0,
+            null,
+            OutboxState.Pending);
+
+        await executor.ExecuteOutboxEntryAsync(entry, CancellationToken.None);
+
+        Assert.That(requestBody, Is.Not.Null);
+        using var body = JsonDocument.Parse(requestBody!);
+        Assert.That(body.RootElement.GetProperty("query").GetString(), Does.Contain("markFileAsViewed").IgnoreCase);
+        var input = body.RootElement.GetProperty("variables").GetProperty("input");
+        Assert.That(input.GetProperty("path").GetString(), Is.EqualTo("src/a.cs"));
+        Assert.That(input.GetProperty("pullRequestId").GetString(), Is.EqualTo("PR_NODE"));
+        Assert.That(input.TryGetProperty("commitOid", out _), Is.False);
+    }
+
+    [Test]
+    public async Task UnmarkFileViewed_Mutation_Omits_CommitOid()
+    {
+        string? requestBody = null;
+        var services = BuildServices(request =>
+        {
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            using var doc = JsonDocument.Parse(requestBody);
+            var query = doc.RootElement.GetProperty("query").GetString() ?? "";
+            return MutationSuccess(query);
+        });
+        await using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IDurableUserStore>().EnsureSchema();
+
+        var executor = provider.GetRequiredService<ReviewMutationExecutor>();
+        var entry = new OutboxEntry(
+            Guid.NewGuid().ToString("N"),
+            "github.com",
+            "dev",
+            "PR_NODE",
+            OutboxKind.UnmarkFileViewed,
+            JsonSerializer.Serialize(new OutboxPayloadEnvelope<UnmarkFileViewedPayload>(
+                "acme",
+                "demo",
+                1,
+                new UnmarkFileViewedPayload("src/a.cs")), ReviewJson.Options),
+            DateTimeOffset.UtcNow,
+            0,
+            null,
+            OutboxState.Pending);
+
+        await executor.ExecuteOutboxEntryAsync(entry, CancellationToken.None);
+
+        Assert.That(requestBody, Is.Not.Null);
+        using var body = JsonDocument.Parse(requestBody!);
+        Assert.That(body.RootElement.GetProperty("query").GetString(), Does.Contain("unmarkFileAsViewed").IgnoreCase);
+        var input = body.RootElement.GetProperty("variables").GetProperty("input");
+        Assert.That(input.GetProperty("path").GetString(), Is.EqualTo("src/a.cs"));
+        Assert.That(input.GetProperty("pullRequestId").GetString(), Is.EqualTo("PR_NODE"));
+        Assert.That(input.TryGetProperty("commitOid", out _), Is.False);
+    }
+
+    [Test]
     public async Task AddComment_CreatesPendingReviewWithoutEventPending()
     {
         var requests = new List<string>();
@@ -314,7 +434,7 @@ public sealed class ReviewOutboxTests
                         nameof(SubmitReviewEvent.Approve),
                         null,
                         "deadbeef"),
-                    OutboxKind.MarkFileViewed => (object)new MarkFileViewedPayload("src/a.cs", "deadbeef"),
+                    OutboxKind.MarkFileViewed => (object)new MarkFileViewedPayload("src/a.cs"),
                     _ => (object)new { body = marker },
                 }), ReviewJson.Options),
             DateTimeOffset.UtcNow,

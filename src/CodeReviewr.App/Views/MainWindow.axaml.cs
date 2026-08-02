@@ -45,6 +45,7 @@ public partial class MainWindow : Window
 
         if (!_selectionSyncSubscribed)
         {
+            vm.WorkingCopy.SelectionClearRequested += ClearFileStatusListSelection;
             vm.WorkingCopy.SelectionSyncRequested += ApplySelectionToListBoxes;
             _selectionSyncSubscribed = true;
         }
@@ -261,6 +262,8 @@ public partial class MainWindow : Window
             confirm.Owner = this;
         if (global::CodeReviewr.App.App.Services.GetService(typeof(AvaloniaStashDialog)) is AvaloniaStashDialog stashDialog)
             stashDialog.Owner = this;
+        if (global::CodeReviewr.App.App.Services.GetService(typeof(AvaloniaReviewSubmitDialog)) is AvaloniaReviewSubmitDialog reviewSubmit)
+            reviewSubmit.Owner = this;
 
         // Defer repo open so the window can paint first.
         Dispatcher.UIThread.Post(() => _ = Vm.TryOpenLastRepositoryAsync(), DispatcherPriority.Background);
@@ -478,6 +481,23 @@ public partial class MainWindow : Window
         CollectSelected(UnstagedFileList, selected);
         CollectSelected(ConflictedFileList, selected);
         Vm.WorkingCopy.SetFileSelection(selected);
+    }
+
+    private void ClearFileStatusListSelection()
+    {
+        _suppressSelectionSync = true;
+        try
+        {
+            StagedFileList.SelectedItems?.Clear();
+            UnstagedFileList.SelectedItems?.Clear();
+            ConflictedFileList.SelectedItems?.Clear();
+            if (this.FindControl<ListBox>("StashFileList") is { } stashFiles)
+                stashFiles.SelectedItems?.Clear();
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
     }
 
     private void ApplySelectionToListBoxes()

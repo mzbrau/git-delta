@@ -38,7 +38,9 @@ public sealed record PullRequestDetail(
     bool? Mergeable = null,
     string? MergeStateStatus = null,
     IReadOnlyList<StatusCheckItem>? StatusChecks = null,
-    IReadOnlyList<PullRequestTimelineEntry>? Timeline = null);
+    IReadOnlyList<PullRequestTimelineEntry>? Timeline = null,
+    IReadOnlyList<PullRequestReviewerStatus>? Reviewers = null,
+    string? ViewerReviewState = null);
 
 public sealed record PullRequestChangedFile(string Path, string ChangeType, int Additions, int Deletions);
 
@@ -51,3 +53,9 @@ public sealed record PullRequestTimelineEntry(
     DateTimeOffset CreatedAt,
     string? Url,
     string? ReviewState);
+
+/// <summary>Other reviewers for a PR (latest review state or outstanding review request).</summary>
+public sealed record PullRequestReviewerStatus(
+    string Login,
+    string? AvatarUrl,
+    string State);
