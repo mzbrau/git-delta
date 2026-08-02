@@ -127,20 +127,19 @@ internal sealed class ReviewCommentService(
         var host = GitHubClient.NormalizeHost(summary.Host);
         var capabilities = await GetCapabilitiesAsync(host, summary.AccountLogin, ct).ConfigureAwait(false);
 
+        // Always cache locally so UI / filters survive remote-only outbox writes.
+        await localViewedStore.SetViewedAsync(
+                summary.NodeId,
+                path.Value,
+                session.Head.Value,
+                DateTimeOffset.UtcNow,
+                ct)
+            .ConfigureAwait(false);
+
         if (capabilities.MarkFileAsViewed)
         {
-            var payload = Wrap(summary, new MarkFileViewedPayload(path.Value, session.Head.Value));
+            var payload = Wrap(summary, new MarkFileViewedPayload(path.Value));
             await outbox.EnqueueAsync(CreateEntry(summary, OutboxKind.MarkFileViewed, payload), ct)
-                .ConfigureAwait(false);
-        }
-        else
-        {
-            await localViewedStore.SetViewedAsync(
-                    summary.NodeId,
-                    path.Value,
-                    session.Head.Value,
-                    DateTimeOffset.UtcNow,
-                    ct)
                 .ConfigureAwait(false);
         }
     }
@@ -151,15 +150,13 @@ internal sealed class ReviewCommentService(
         var host = GitHubClient.NormalizeHost(summary.Host);
         var capabilities = await GetCapabilitiesAsync(host, summary.AccountLogin, ct).ConfigureAwait(false);
 
+        await localViewedStore.RemoveViewedAsync(summary.NodeId, path.Value, ct).ConfigureAwait(false);
+
         if (capabilities.MarkFileAsViewed)
         {
-            var payload = Wrap(summary, new UnmarkFileViewedPayload(path.Value, session.Head.Value));
+            var payload = Wrap(summary, new UnmarkFileViewedPayload(path.Value));
             await outbox.EnqueueAsync(CreateEntry(summary, OutboxKind.UnmarkFileViewed, payload), ct)
                 .ConfigureAwait(false);
-        }
-        else
-        {
-            await localViewedStore.RemoveViewedAsync(summary.NodeId, path.Value, ct).ConfigureAwait(false);
         }
     }
 

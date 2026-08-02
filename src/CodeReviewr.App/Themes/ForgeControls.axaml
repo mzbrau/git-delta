@@ -29,6 +29,10 @@
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
+  <Style Selector="TextBlock.PrFileLabel.Unviewed">
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+
   <Style Selector="Button.Ghost">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="Transparent" />
@@ -89,6 +93,11 @@
   </Style>
   <Style Selector="Button.ReviewAction:pointerover /template/ ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+  </Style>
+  <Style Selector="Button.ReviewAction.Pressed">
+    <Setter Property="Background" Value="{DynamicResource ForgePrimaryContainerBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgePrimaryBrush}" />
   </Style>
   <Style Selector="Button.ReviewAction.Approve">
     <Setter Property="Foreground" Value="{DynamicResource ForgeStatusAddedBrush}" />

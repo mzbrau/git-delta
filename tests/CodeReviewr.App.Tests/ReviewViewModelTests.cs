@@ -1,4 +1,5 @@
 using System.Collections.Specialized;
+using CodeReviewr.App.Controls;
 using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
@@ -346,6 +347,493 @@ public sealed class ReviewViewModelTests
         Assert.That(vm.SelectedFile!.Path.Value, Is.EqualTo(path.Value));
         Assert.That(vm.DiffEmptyMessage, Is.Not.EqualTo("Select a file to view its diff"));
         Assert.That(vm.DiffRows.Count, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public async Task SelectFile_Marks_Viewed_When_LocalCache_Has_Matching_Head()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var pathA = FilePath.From("src/a.cs");
+        var pathB = FilePath.From("src/b.cs");
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(pathA, ChangeKind.Modified), (pathB, ChangeKind.Modified)]);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(session, Arg.Any<FilePath>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var path = ci.ArgAt<FilePath>(1);
+                return new FileDiff(
+                    new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+                    path, path, ChangeKind.Modified,
+                    ContentId.Empty, ContentId.Empty, false, [], "");
+            });
+
+        var viewed = new List<LocalViewedEntry>();
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(true);
+        comments.ResolveAnchorsAsync(
+                session, Arg.Any<IReadOnlyList<ReviewThread>>(), Arg.Any<FilePath>(), Arg.Any<FileDiff>(),
+                Arg.Any<CancellationToken>())
+            .Returns([]);
+        comments.When(c => c.MarkFileViewedAsync(session, Arg.Any<FilePath>(), Arg.Any<CancellationToken>()))
+            .Do(ci =>
+            {
+                var path = ci.ArgAt<FilePath>(1).Value;
+                viewed.RemoveAll(e => e.Path == path);
+                viewed.Add(new LocalViewedEntry(summary.NodeId, path, sha, DateTimeOffset.UtcNow));
+            });
+        comments.When(c => c.UnmarkFileViewedAsync(session, Arg.Any<FilePath>(), Arg.Any<CancellationToken>()))
+            .Do(ci => viewed.RemoveAll(e => e.Path == ci.ArgAt<FilePath>(1).Value));
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns(_ => viewed.ToList());
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+
+        var vm = CreateViewModel(pullRequests, settings, reviewService, comments, outbox, durable);
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && vm.SelectedFile.IsViewed);
+
+        Assert.That(vm.SelectedFile!.Path.Value, Is.EqualTo(pathA.Value));
+        await comments.Received().MarkFileViewedAsync(session, pathA, Arg.Any<CancellationToken>());
+
+        // Selecting another unviewed file marks it; already-viewed file is not unmarked.
+        vm.SelectedFile = vm.FilteredPrFiles.First(f => f.Path.Value == pathB.Value);
+        await WaitUntilAsync(() => vm.SelectedFile!.IsViewed);
+        await comments.Received().MarkFileViewedAsync(session, pathB, Arg.Any<CancellationToken>());
+
+        var markCountForA = comments.ReceivedCalls()
+            .Count(c => c.GetMethodInfo().Name == nameof(IReviewCommentService.MarkFileViewedAsync)
+                        && Equals(c.GetArguments()[1], pathA));
+        vm.SelectedFile = vm.FilteredPrFiles.First(f => f.Path.Value == pathA.Value);
+        await WaitUntilAsync(() => vm.SelectedFile!.Path.Value == pathA.Value && vm.SelectedFile.IsViewed);
+        Assert.That(
+            comments.ReceivedCalls()
+                .Count(c => c.GetMethodInfo().Name == nameof(IReviewCommentService.MarkFileViewedAsync)
+                            && Equals(c.GetArguments()[1], pathA)),
+            Is.EqualTo(markCountForA));
+        await comments.DidNotReceive().UnmarkFileViewedAsync(session, pathA, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task SelectFile_Marks_Viewed_Keeps_Selected_Instance_When_Filter_All()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var pathA = FilePath.From("src/a.cs");
+        var pathB = FilePath.From("src/b.cs");
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(pathA, ChangeKind.Modified), (pathB, ChangeKind.Modified)]);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(session, Arg.Any<FilePath>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var path = ci.ArgAt<FilePath>(1);
+                return new FileDiff(
+                    new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+                    path, path, ChangeKind.Modified,
+                    ContentId.Empty, ContentId.Empty, false, [], "");
+            });
+
+        var viewed = new List<LocalViewedEntry>();
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(true);
+        comments.ResolveAnchorsAsync(
+                session, Arg.Any<IReadOnlyList<ReviewThread>>(), Arg.Any<FilePath>(), Arg.Any<FileDiff>(),
+                Arg.Any<CancellationToken>())
+            .Returns([]);
+        comments.When(c => c.MarkFileViewedAsync(session, Arg.Any<FilePath>(), Arg.Any<CancellationToken>()))
+            .Do(ci =>
+            {
+                var path = ci.ArgAt<FilePath>(1).Value;
+                viewed.RemoveAll(e => e.Path == path);
+                viewed.Add(new LocalViewedEntry(summary.NodeId, path, sha, DateTimeOffset.UtcNow));
+            });
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns(_ => viewed.ToList());
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+
+        var vm = CreateViewModel(pullRequests, settings, reviewService, comments, outbox, durable);
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && vm.SelectedFile.IsViewed);
+
+        Assert.That(vm.FilterViewed, Is.EqualTo(ViewedFilter.All));
+
+        var selectedBefore = vm.FilteredPrFiles.First(f => f.Path.Value == pathB.Value);
+        var entryBefore = vm.PrFileEntries.First(e => e.File == selectedBefore);
+        vm.SelectedFile = selectedBefore;
+        await WaitUntilAsync(() => vm.SelectedFile!.IsViewed && !vm.SelectedFile.IsViewedPending);
+
+        Assert.That(vm.SelectedFile, Is.SameAs(selectedBefore));
+        Assert.That(vm.PrFileEntries.First(e => e.File?.Path.Value == pathB.Value), Is.SameAs(entryBefore));
+        Assert.That(vm.FilteredPrFiles.Select(f => f.Path.Value).ToArray(),
+            Is.EqualTo(new[] { pathA.Value, pathB.Value }));
+    }
+
+    [Test]
+    public async Task NotViewed_Filter_Keeps_Selected_Sticky_Without_Cascade()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var pathA = FilePath.From("src/a.cs");
+        var pathB = FilePath.From("src/b.cs");
+        var pathC = FilePath.From("src/c.cs");
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(pathA, ChangeKind.Modified), (pathB, ChangeKind.Modified), (pathC, ChangeKind.Modified)]);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(session, Arg.Any<FilePath>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var path = ci.ArgAt<FilePath>(1);
+                return new FileDiff(
+                    new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+                    path, path, ChangeKind.Modified,
+                    ContentId.Empty, ContentId.Empty, false, [], "");
+            });
+
+        var viewed = new List<LocalViewedEntry>();
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(true);
+        comments.ResolveAnchorsAsync(
+                session, Arg.Any<IReadOnlyList<ReviewThread>>(), Arg.Any<FilePath>(), Arg.Any<FileDiff>(),
+                Arg.Any<CancellationToken>())
+            .Returns([]);
+        comments.When(c => c.MarkFileViewedAsync(session, Arg.Any<FilePath>(), Arg.Any<CancellationToken>()))
+            .Do(ci =>
+            {
+                var path = ci.ArgAt<FilePath>(1).Value;
+                viewed.RemoveAll(e => e.Path == path);
+                viewed.Add(new LocalViewedEntry(summary.NodeId, path, sha, DateTimeOffset.UtcNow));
+            });
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns(_ => viewed.ToList());
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+
+        var vm = CreateViewModel(pullRequests, settings, reviewService, comments, outbox, durable);
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && vm.SelectedFile.IsViewed);
+        Assert.That(vm.SelectedFile!.Path.Value, Is.EqualTo(pathA.Value));
+
+        vm.FilterViewed = ViewedFilter.NotViewed;
+        Assert.That(vm.SelectedFile!.Path.Value, Is.EqualTo(pathA.Value));
+        Assert.That(vm.FilteredPrFiles.Select(f => f.Path.Value).ToArray(),
+            Is.EqualTo(new[] { pathA.Value, pathB.Value, pathC.Value }));
+
+        vm.SelectedFile = vm.FilteredPrFiles.First(f => f.Path.Value == pathB.Value);
+        await WaitUntilAsync(() =>
+            vm.SelectedFile!.Path.Value == pathB.Value &&
+            vm.SelectedFile.IsViewed &&
+            !vm.SelectedFile.IsViewedPending);
+
+        Assert.That(vm.SelectedFile!.Path.Value, Is.EqualTo(pathB.Value));
+        Assert.That(vm.FilteredPrFiles.Select(f => f.Path.Value).ToArray(),
+            Is.EqualTo(new[] { pathB.Value, pathC.Value }));
+        await comments.DidNotReceive().MarkFileViewedAsync(session, pathC, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task UnmarkSelectedViewed_Clears_Viewed_State()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var path = FilePath.From("src/a.cs");
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(path, ChangeKind.Modified)]);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(session, path, Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            .Returns(new FileDiff(
+                new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+                path, path, ChangeKind.Modified,
+                ContentId.Empty, ContentId.Empty, false, [], ""));
+
+        var viewed = new List<LocalViewedEntry>();
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(true);
+        comments.ResolveAnchorsAsync(
+                session, Arg.Any<IReadOnlyList<ReviewThread>>(), path, Arg.Any<FileDiff>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        comments.When(c => c.MarkFileViewedAsync(session, path, Arg.Any<CancellationToken>()))
+            .Do(_ =>
+            {
+                viewed.RemoveAll(e => e.Path == path.Value);
+                viewed.Add(new LocalViewedEntry(summary.NodeId, path.Value, sha, DateTimeOffset.UtcNow));
+            });
+        comments.When(c => c.UnmarkFileViewedAsync(session, path, Arg.Any<CancellationToken>()))
+            .Do(_ => viewed.RemoveAll(e => e.Path == path.Value));
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns(_ => viewed.ToList());
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+
+        var vm = CreateViewModel(pullRequests, settings, reviewService, comments, outbox, durable);
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && vm.SelectedFile.IsViewed);
+
+        await vm.UnmarkSelectedViewedCommand.ExecuteAsync(null);
+        Assert.That(vm.SelectedFile!.IsViewed, Is.False);
+        await comments.Received().UnmarkFileViewedAsync(session, path, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task ToggleViewed_Persists_When_LocalCache_Has_Matching_Head()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var path = FilePath.From("src/a.cs");
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(path, ChangeKind.Modified)]);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(session, path, Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            .Returns(new FileDiff(
+                new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+                path, path, ChangeKind.Modified,
+                ContentId.Empty, ContentId.Empty, false, [], ""));
+
+        var viewed = new List<LocalViewedEntry>();
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(true);
+        comments.ResolveAnchorsAsync(
+                session, Arg.Any<IReadOnlyList<ReviewThread>>(), path, Arg.Any<FileDiff>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        comments.When(c => c.MarkFileViewedAsync(session, path, Arg.Any<CancellationToken>()))
+            .Do(_ =>
+            {
+                viewed.RemoveAll(e => e.Path == path.Value);
+                viewed.Add(new LocalViewedEntry(summary.NodeId, path.Value, sha, DateTimeOffset.UtcNow));
+            });
+        comments.When(c => c.UnmarkFileViewedAsync(session, path, Arg.Any<CancellationToken>()))
+            .Do(_ => viewed.RemoveAll(e => e.Path == path.Value));
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns(_ => viewed.ToList());
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+
+        var vm = CreateViewModel(pullRequests, settings, reviewService, comments, outbox, durable);
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && vm.SelectedFile.IsViewed);
+
+        // Toggle off, then on again.
+        await vm.ToggleViewedCommand.ExecuteAsync(vm.SelectedFile);
+        Assert.That(vm.SelectedFile!.IsViewed, Is.False);
+
+        await vm.ToggleViewedCommand.ExecuteAsync(vm.SelectedFile);
+        Assert.That(vm.SelectedFile.IsViewed, Is.True);
+
+        // Stale content_id (different head) must not count as viewed after refresh.
+        viewed.Clear();
+        viewed.Add(new LocalViewedEntry(summary.NodeId, path.Value, new string('b', 40), DateTimeOffset.UtcNow));
+        await vm.ToggleViewedCommand.ExecuteAsync(vm.SelectedFile);
+        Assert.That(vm.SelectedFile.IsViewed, Is.False);
+    }
+
+    [Test]
+    public async Task AddComment_Creates_Clickable_PendingSync_Annotation()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var path = FilePath.From("src/a.cs");
+        var content = ContentId.FromSha(new string('c', 40));
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(path, ChangeKind.Modified)]);
+
+        var hunk = new DiffHunk(
+            OldStart: 1, OldCount: 1, NewStart: 1, NewCount: 1,
+            Header: "@@ -1,1 +1,1 @@",
+            Lines:
+            [
+                new DiffLine(DiffLineKind.Removed, 1, null, "old\n".AsMemory()),
+                new DiffLine(DiffLineKind.Added, null, 1, "new\n".AsMemory()),
+            ]);
+        var fileDiff = new FileDiff(
+            new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+            path, path, ChangeKind.Modified,
+            content, content, false, [hunk], "");
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(session, path, Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            .Returns(fileDiff);
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+        comments.ResolveAnchorsAsync(
+                session,
+                Arg.Any<IReadOnlyList<ReviewThread>>(),
+                path,
+                Arg.Any<FileDiff>(),
+                Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var threads = ci.ArgAt<IReadOnlyList<ReviewThread>>(1);
+                return threads
+                    .Where(t => string.Equals(t.Path, path.Value, StringComparison.Ordinal))
+                    .Select(t => t.Anchor is not null
+                        ? t
+                        : t with
+                        {
+                            Side = DiffSide.New,
+                            Anchor = new AnnotationRange(
+                                new DiffAnchor(DiffSide.New, content, t.Line ?? 1),
+                                new DiffAnchor(DiffSide.New, content, t.Line ?? 1)),
+                        })
+                    .ToList();
+            });
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+
+        var vm = CreateViewModel(pullRequests, settings, reviewService, comments, outbox, durable);
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && !vm.IsLoadingDiff);
+
+        vm.BeginLineCommentCommand.Execute(new LineCommentRequest(DiffSide.New, 1, null));
+        vm.NewCommentBody = "needs a test";
+        await vm.AddCommentCommand.ExecuteAsync(null);
+
+        await WaitUntilAsync(() =>
+            vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Any());
+
+        var annotation = vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Single();
+        Assert.That(annotation.Thread.IsPendingSync, Is.True);
+        Assert.That(annotation.Thread.Comments[0].Body, Is.EqualTo("needs a test"));
+
+        vm.SelectedAnnotation = annotation;
+        Assert.That(vm.SelectedThread, Is.Not.Null);
+        Assert.That(vm.IsSelectedThreadPendingSync, Is.True);
+        Assert.That(vm.HasExpandedInlineThread, Is.True);
     }
 
     private static async Task<(ReviewViewModel Vm, IReviewCommentService Comments, ReviewSession Session)>

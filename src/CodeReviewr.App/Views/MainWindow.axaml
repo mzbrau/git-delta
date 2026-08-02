@@ -916,8 +916,11 @@
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
               <StackPanel Spacing="4">
                 <DockPanel>
-                  <Button DockPanel.Dock="Right" Classes="Ghost" Content="File status"
-                          Command="{Binding ReturnToFileStatusCommand}" FontSize="11" />
+                  <Button DockPanel.Dock="Right" Classes="IconOnly" Width="28" Height="28" Padding="4"
+                          Command="{Binding Review.OpenPullRequestUrlCommand}"
+                          ToolTip.Tip="Open on GitHub">
+                    <icons:MaterialIcon Kind="Github" Width="18" Height="18" />
+                  </Button>
                   <TextBlock Text="Pull request files" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </DockPanel>
                 <TextBlock Text="{Binding Review.ProgressSummary}" FontSize="10" Opacity="0.75"
@@ -949,6 +952,49 @@
                     <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
                   </StackPanel>
                 </Button>
+                <Button DockPanel.Dock="Right" Classes="IconOnly" Width="28" Height="28" Padding="4"
+                        Margin="4,0,0,0" VerticalAlignment="Center"
+                        ToolTip.Tip="Filter files">
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="All files"
+                                Command="{Binding Review.SetFilterViewedCommand}"
+                                CommandParameter="{x:Static core:ViewedFilter.All}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsFilterViewedAll, Mode=OneWay}" />
+                      <MenuItem Header="Viewed"
+                                Command="{Binding Review.SetFilterViewedCommand}"
+                                CommandParameter="{x:Static core:ViewedFilter.Viewed}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsFilterViewedOnly, Mode=OneWay}" />
+                      <MenuItem Header="Not viewed"
+                                Command="{Binding Review.SetFilterViewedCommand}"
+                                CommandParameter="{x:Static core:ViewedFilter.NotViewed}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsFilterNotViewed, Mode=OneWay}" />
+                      <Separator />
+                      <MenuItem Header="Stale"
+                                Command="{Binding Review.ToggleFilterStaleCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding Review.FilterStale, Mode=OneWay}" />
+                      <MenuItem Header="Commented"
+                                Command="{Binding Review.ToggleFilterCommentedCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding Review.FilterCommented, Mode=OneWay}" />
+                      <MenuItem Header="Unresolved"
+                                Command="{Binding Review.ToggleFilterUnresolvedCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding Review.FilterUnresolved, Mode=OneWay}" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                  <Panel>
+                    <icons:MaterialIcon Kind="FilterVariant" Width="16" Height="16" />
+                    <Ellipse Width="6" Height="6" HorizontalAlignment="Right" VerticalAlignment="Top"
+                             Margin="0,-1,-1,0"
+                             Fill="{DynamicResource ForgePrimaryBrush}"
+                             IsVisible="{Binding Review.HasActivePrFilters}" />
+                  </Panel>
+                </Button>
                 <Grid>
                   <TextBox x:Name="PrFileFilterBox" Classes="Forge" Text="{Binding Review.FileFilter}"
                            PlaceholderText="Filter files…" Padding="8,6,28,6" />
@@ -961,19 +1007,6 @@
                   </Button>
                 </Grid>
               </DockPanel>
-            </Border>
-            <Border DockPanel.Dock="Top" Padding="8,4"
-                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-              <WrapPanel Orientation="Horizontal">
-                <ComboBox SelectedItem="{Binding Review.FilterViewed}" MinWidth="100" FontSize="11" Margin="0,0,6,4">
-                  <core:ViewedFilter>All</core:ViewedFilter>
-                  <core:ViewedFilter>Viewed</core:ViewedFilter>
-                  <core:ViewedFilter>NotViewed</core:ViewedFilter>
-                </ComboBox>
-                <CheckBox Content="Stale" IsChecked="{Binding Review.FilterStale}" FontSize="11" Margin="0,0,8,4" />
-                <CheckBox Content="Commented" IsChecked="{Binding Review.FilterCommented}" FontSize="11" Margin="0,0,8,4" />
-                <CheckBox Content="Unresolved" IsChecked="{Binding Review.FilterUnresolved}" FontSize="11" Margin="0,0,8,4" />
-              </WrapPanel>
             </Border>
             <Border DockPanel.Dock="Bottom" Padding="12" MaxHeight="180"
                     Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
@@ -1035,7 +1068,9 @@
                                            Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
                               </Border>
                             </StackPanel>
-                            <TextBlock Text="{Binding Label}" Classes="MonoPath" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Text="{Binding Label}" Classes="MonoPath PrFileLabel"
+                                       Classes.Unviewed="{Binding File.IsViewed, Converter={x:Static conv:ForgeConverters.InvertBool}}"
+                                       TextTrimming="CharacterEllipsis" />
                           </DockPanel>
                         </Border>
                       </Panel>
@@ -1230,6 +1265,20 @@
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
             <DockPanel>
               <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <Button Classes="ReviewAction"
+                        Command="{Binding Review.UnmarkSelectedViewedCommand}"
+                        IsEnabled="{Binding Review.SelectedFile.IsViewed}"
+                        ToolTip.Tip="Mark as not viewed">
+                  <icons:MaterialIcon Kind="EyeOffOutline" Width="18" Height="18" />
+                </Button>
+                <Button Classes="ReviewAction"
+                        Classes.Pressed="{Binding Review.ShowFullFile}"
+                        Command="{Binding Review.ToggleShowFullFileCommand}"
+                        ToolTip.Tip="{Binding Review.FullFileToggleTooltip}">
+                  <icons:MaterialIcon Kind="FileDocumentOutline" Width="18" Height="18" />
+                </Button>
+                <Border Width="1" Height="22" Margin="2,0"
+                        Background="{DynamicResource ForgeOutlineVariantBrush}" />
                 <ItemsControl ItemsSource="{Binding Review.Reviewers}"
                               IsVisible="{Binding Review.HasReviewers}">
                   <ItemsControl.ItemsPanel>
@@ -1632,9 +1681,12 @@
                       <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                         <Button DockPanel.Dock="Right" Classes="Ghost" Content="Close" FontSize="11"
                                 Command="{Binding Review.ClearExpandedThreadCommand}" Margin="8,0,0,0" />
-                        <TextBlock Text="Thread" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource ForgePrimaryBrush}"
-                                   VerticalAlignment="Center" />
+                        <StackPanel Spacing="2" VerticalAlignment="Center">
+                          <TextBlock Text="Thread" FontSize="11" FontWeight="SemiBold"
+                                     Foreground="{DynamicResource ForgePrimaryBrush}" />
+                          <TextBlock Text="Not yet synced to GitHub" FontSize="10" Opacity="0.65"
+                                     IsVisible="{Binding Review.IsSelectedThreadPendingSync}" />
+                        </StackPanel>
                       </DockPanel>
                       <ScrollViewer MaxHeight="220">
                         <ItemsControl ItemsSource="{Binding Review.SelectedThread.Comments}">

@@ -81,6 +81,11 @@ public static class ForgeConverters
         new FuncValueConverter<bool, FontWeight>(selected =>
             selected ? FontWeight.SemiBold : FontWeight.Normal);
 
+    /// <summary>Bold for unviewed PR files; Normal once marked viewed.</summary>
+    public static readonly IValueConverter UnviewedFileFontWeight =
+        new FuncValueConverter<bool, FontWeight>(isViewed =>
+            isViewed ? FontWeight.Normal : FontWeight.Bold);
+
     public static readonly IValueConverter IsSideBySide =
         new FuncValueConverter<DiffViewMode, bool>(mode => mode == DiffViewMode.SideBySide);
 

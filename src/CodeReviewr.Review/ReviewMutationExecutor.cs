@@ -164,6 +164,7 @@ internal sealed class ReviewMutationExecutor(
         bool viewed,
         CancellationToken ct)
     {
+        // Mark/UnmarkFileAsViewedInput only accept pullRequestId + path (no commitOid).
         if (viewed)
         {
             var payload = DeserializeEnvelope<MarkFileViewedPayload>(entry.PayloadJson).Data;
@@ -171,7 +172,7 @@ internal sealed class ReviewMutationExecutor(
                     host,
                     token,
                     EmbeddedQueries.MarkFileAsViewedMutation,
-                    new { input = new { pullRequestId = entry.PrNodeId, path = payload.Path, commitOid = payload.CommitOid } },
+                    new { input = new { pullRequestId = entry.PrNodeId, path = payload.Path } },
                     ct)
                 .ConfigureAwait(false);
         }
@@ -182,7 +183,7 @@ internal sealed class ReviewMutationExecutor(
                     host,
                     token,
                     EmbeddedQueries.UnmarkFileAsViewedMutation,
-                    new { input = new { pullRequestId = entry.PrNodeId, path = payload.Path, commitOid = payload.CommitOid } },
+                    new { input = new { pullRequestId = entry.PrNodeId, path = payload.Path } },
                     ct)
                 .ConfigureAwait(false);
         }

@@ -160,10 +160,16 @@ public partial class ReviewViewModel : ObservableObject
         !HasDraftCommentAnchor;
 
     public bool HasFileFilter => !string.IsNullOrWhiteSpace(FileFilter);
+    public bool HasActivePrFilters =>
+        FilterViewed != ViewedFilter.All || FilterStale || FilterCommented || FilterUnresolved;
+    public bool IsFilterViewedAll => FilterViewed == ViewedFilter.All;
+    public bool IsFilterViewedOnly => FilterViewed == ViewedFilter.Viewed;
+    public bool IsFilterNotViewed => FilterViewed == ViewedFilter.NotViewed;
     public bool IsPullRequestFlatLayout => PullRequestFileListLayout == FileListLayoutMode.Flat;
     public bool IsPullRequestTreeLayout => PullRequestFileListLayout == FileListLayoutMode.Tree;
     public bool IsUnifiedView => ViewMode == DiffViewMode.Unified;
     public bool IsSideBySideView => ViewMode == DiffViewMode.SideBySide;
+    public bool IsSelectedThreadPendingSync => SelectedThread?.IsPendingSync == true;
     public Material.Icons.MaterialIconKind PullRequestLayoutIcon =>
         PullRequestFileListLayout == FileListLayoutMode.Tree
             ? Material.Icons.MaterialIconKind.FileTree
@@ -192,6 +198,7 @@ public partial class ReviewViewModel : ObservableObject
     public string RequestChangesTooltip => IsOwnPullRequest
         ? "You cannot review your own pull request"
         : "Request changes";
+    public string FullFileToggleTooltip => ShowFullFile ? "Diff only" : "Full file";
     public string ProgressSummary =>
         $"{ViewedFileCount} / {TotalFileCount} files viewed · {CommentCount} comments · {UnresolvedCount} unresolved";
 
@@ -266,7 +273,11 @@ public partial class ReviewViewModel : ObservableObject
 
     partial void OnIgnoreWhitespaceChanged(bool value) => _ = ReloadSelectedDiffAsync();
     partial void OnContextLinesChanged(int value) => _ = ReloadSelectedDiffAsync();
-    partial void OnShowFullFileChanged(bool value) => _ = ReloadSelectedDiffAsync();
+    partial void OnShowFullFileChanged(bool value)
+    {
+        OnPropertyChanged(nameof(FullFileToggleTooltip));
+        _ = ReloadSelectedDiffAsync();
+    }
     partial void OnSelectedFileChanged(FileItemViewModel? value)
     {
         ClearDraftCommentAnchor();
@@ -274,6 +285,8 @@ public partial class ReviewViewModel : ObservableObject
             IsConversationSelected = false;
         SyncSelectedPrFileEntry();
         _ = LoadDiffForSelectionAsync(value);
+        if (value is not null && !value.IsViewed && !value.IsViewedPending)
+            _ = MarkFileViewedInternalAsync(value);
     }
 
     partial void OnSelectedPrFileEntryChanged(FileListEntry? value)
@@ -331,10 +344,32 @@ public partial class ReviewViewModel : ObservableObject
         ApplyPrFileFilter();
     }
 
-    partial void OnFilterViewedChanged(ViewedFilter value) => ApplyPrFileFilter();
-    partial void OnFilterStaleChanged(bool value) => ApplyPrFileFilter();
-    partial void OnFilterCommentedChanged(bool value) => ApplyPrFileFilter();
-    partial void OnFilterUnresolvedChanged(bool value) => ApplyPrFileFilter();
+    partial void OnFilterViewedChanged(ViewedFilter value)
+    {
+        OnPropertyChanged(nameof(HasActivePrFilters));
+        OnPropertyChanged(nameof(IsFilterViewedAll));
+        OnPropertyChanged(nameof(IsFilterViewedOnly));
+        OnPropertyChanged(nameof(IsFilterNotViewed));
+        ApplyPrFileFilter();
+    }
+
+    partial void OnFilterStaleChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasActivePrFilters));
+        ApplyPrFileFilter();
+    }
+
+    partial void OnFilterCommentedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasActivePrFilters));
+        ApplyPrFileFilter();
+    }
+
+    partial void OnFilterUnresolvedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasActivePrFilters));
+        ApplyPrFileFilter();
+    }
 
     partial void OnFilterFocusRequestedChanged(bool value)
     {
@@ -360,6 +395,7 @@ public partial class ReviewViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(HasExpandedInlineThread));
         OnPropertyChanged(nameof(ShowSideThreadPanel));
+        OnPropertyChanged(nameof(IsSelectedThreadPendingSync));
         ExpandedThreadChanged?.Invoke();
     }
 
@@ -374,6 +410,24 @@ public partial class ReviewViewModel : ObservableObject
 
     [RelayCommand]
     private void ClearFileFilter() => FileFilter = "";
+
+    [RelayCommand]
+    private void SetFilterViewed(ViewedFilter filter) => FilterViewed = filter;
+
+    [RelayCommand]
+    private void ToggleFilterStale() => FilterStale = !FilterStale;
+
+    [RelayCommand]
+    private void ToggleFilterCommented() => FilterCommented = !FilterCommented;
+
+    [RelayCommand]
+    private void ToggleFilterUnresolved() => FilterUnresolved = !FilterUnresolved;
+
+    [RelayCommand]
+    private void ToggleShowFullFile() => ShowFullFile = !ShowFullFile;
+
+    [RelayCommand]
+    private void OpenPullRequestUrl() => OpenUrl(SelectedPullRequest?.Url);
 
     [RelayCommand]
     private void SelectConversation() => IsConversationSelected = true;
@@ -401,6 +455,13 @@ public partial class ReviewViewModel : ObservableObject
     {
         if (SelectedFile is not null)
             await ToggleViewedAsync(SelectedFile);
+    }
+
+    [RelayCommand]
+    private async Task UnmarkSelectedViewedAsync()
+    {
+        if (SelectedFile is { IsViewed: true } file)
+            await UnmarkFileViewedInternalAsync(file);
     }
 
     [RelayCommand]
@@ -452,7 +513,7 @@ public partial class ReviewViewModel : ObservableObject
             var selectedPath = SelectedFile?.Path.Value;
 
             FilteredPrFiles.Clear();
-            foreach (var file in PrFiles.Where(MatchesPrFileFilter))
+            foreach (var file in PrFiles.Where(f => MatchesPrFileFilter(f, selectedPath)))
                 FilteredPrFiles.Add(file);
 
             RebuildPrFileEntries();
@@ -519,7 +580,7 @@ public partial class ReviewViewModel : ObservableObject
         }
     }
 
-    private bool MatchesPrFileFilter(FileItemViewModel file)
+    private bool MatchesPrFileFilter(FileItemViewModel file, string? stickySelectedPath = null)
     {
         if (!string.IsNullOrWhiteSpace(FileFilter))
         {
@@ -530,9 +591,14 @@ public partial class ReviewViewModel : ObservableObject
             }
         }
 
+        var selectedPath = stickySelectedPath ?? SelectedFile?.Path.Value;
         if (FilterViewed == ViewedFilter.Viewed && !file.IsViewed)
             return false;
-        if (FilterViewed == ViewedFilter.NotViewed && file.IsViewed)
+        // Keep the current selection sticky under Not Viewed so mark-on-select does not
+        // cascade-remove through the list; it drops once another file is selected.
+        if (FilterViewed == ViewedFilter.NotViewed && file.IsViewed &&
+            (selectedPath is null ||
+             !string.Equals(file.Path.Value, selectedPath, StringComparison.Ordinal)))
             return false;
         if (FilterStale && !file.HasStaleThreads)
             return false;
@@ -666,10 +732,35 @@ public partial class ReviewViewModel : ObservableObject
     private void OpenUrl(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
+        {
+            _notifications.Error("No pull request URL available.");
             return;
+        }
 
         try
         {
+            if (OperatingSystem.IsMacOS())
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "open",
+                    ArgumentList = { url },
+                    UseShellExecute = false,
+                });
+                return;
+            }
+
+            if (OperatingSystem.IsLinux())
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "xdg-open",
+                    ArgumentList = { url },
+                    UseShellExecute = false,
+                });
+                return;
+            }
+
             Process.Start(new ProcessStartInfo
             {
                 FileName = url,
@@ -737,9 +828,7 @@ public partial class ReviewViewModel : ObservableObject
         var side = DraftCommentSide ?? "RIGHT";
         var pending = new PendingReviewMutation(PendingReviewMutationKind.AddComment, ClientId: Guid.NewGuid().ToString("N"));
         _pending.Add(pending);
-        ApplyOptimisticThreads(body, pending.ClientId);
-        if (line is not null)
-            ApplyProvisionalDraftAnnotation();
+        ApplyOptimisticPendingComment(body, pending.ClientId, line, startLine, side);
         NewCommentBody = "";
         DraftCommentLine = null;
         DraftCommentStartLine = null;
@@ -771,6 +860,62 @@ public partial class ReviewViewModel : ObservableObject
         }
     }
 
+    private void ApplyOptimisticPendingComment(
+        string body,
+        string clientId,
+        int? line,
+        int? startLine,
+        string side)
+    {
+        if (SelectedFile is null)
+            return;
+
+        AnnotationRange? anchor = null;
+        DiffSide? diffSide = null;
+        if (line is int endLine && _currentDiff is not null)
+        {
+            diffSide = side == "LEFT" ? DiffSide.Old : DiffSide.New;
+            var content = diffSide == DiffSide.Old ? _currentDiff.OldContent : _currentDiff.NewContent;
+            var start = new DiffAnchor(diffSide.Value, content, startLine ?? endLine);
+            var end = new DiffAnchor(diffSide.Value, content, endLine);
+            anchor = new AnnotationRange(start, end);
+        }
+
+        var comment = new ReviewComment(
+            clientId,
+            body,
+            AuthorLogin: null,
+            ViewerDidAuthor: true,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Url: null);
+        var thread = new ReviewThread(
+            clientId,
+            SelectedFile.Path.Value,
+            line,
+            startLine,
+            IsResolved: false,
+            IsOutdated: false,
+            Comments: [comment],
+            Side: diffSide,
+            Anchor: anchor,
+            IsPendingSync: true);
+
+        _allThreads = _allThreads.Append(thread).ToList();
+
+        InvokeOnUiAsync(() =>
+        {
+            Threads.Insert(0, new ReviewThreadViewModel(clientId, SelectedFile.Path.Value, isResolved: false, [body])
+            {
+                IsPending = true,
+            });
+            RemoveProvisionalDraftAnnotations();
+            if (anchor is not null)
+                DiffAnnotations.Add(new ReviewThreadAnnotation(thread));
+            UpdateFileThreadFlags();
+            UpdateProgressSummary();
+        }).GetAwaiter().GetResult();
+    }
+
     private void ApplyProvisionalDraftAnnotation()
     {
         if (DraftCommentLine is not int line || DraftCommentSide is null || _currentDiff is null)
@@ -796,17 +941,35 @@ public partial class ReviewViewModel : ObservableObject
     {
         if (_session is null || file is null) return;
 
+        if (file.IsViewed)
+            await UnmarkFileViewedInternalAsync(file).ConfigureAwait(false);
+        else
+            await MarkFileViewedInternalAsync(file).ConfigureAwait(false);
+    }
+
+    private Task MarkFileViewedInternalAsync(FileItemViewModel file) =>
+        SetFileViewedAsync(file, viewed: true);
+
+    private Task UnmarkFileViewedInternalAsync(FileItemViewModel file) =>
+        SetFileViewedAsync(file, viewed: false);
+
+    private async Task SetFileViewedAsync(FileItemViewModel file, bool viewed)
+    {
+        if (_session is null) return;
+        if (file.IsViewedPending) return;
+        if (file.IsViewed == viewed) return;
+
         var pending = new PendingReviewMutation(
             PendingReviewMutationKind.ToggleViewed,
             ClientId: file.Path.Value,
-            TargetViewed: !file.IsViewed);
+            TargetViewed: viewed);
         _pending.Add(pending);
-        file.IsViewed = pending.TargetViewed!.Value;
+        file.IsViewed = viewed;
         file.IsViewedPending = true;
 
         try
         {
-            if (pending.TargetViewed!.Value)
+            if (viewed)
                 await _comments.MarkFileViewedAsync(_session, file.Path).ConfigureAwait(false);
             else
                 await _comments.UnmarkFileViewedAsync(_session, file.Path).ConfigureAwait(false);
@@ -821,7 +984,13 @@ public partial class ReviewViewModel : ObservableObject
             _pending.Remove(pending);
             file.IsViewedPending = false;
             await ApplyViewedStateAsync().ConfigureAwait(false);
-            ApplyPrFileFilter();
+            // Rebuild only when viewed status changes list membership; otherwise Clear/refill
+            // flickers the ListBox selection background.
+            var membershipChanged =
+                (FilterViewed == ViewedFilter.NotViewed && viewed) ||
+                (FilterViewed == ViewedFilter.Viewed && !viewed);
+            if (membershipChanged)
+                ApplyPrFileFilter();
         }
     }
 
@@ -1222,17 +1391,29 @@ public partial class ReviewViewModel : ObservableObject
         try
         {
             var threads = await _comments.GetThreadsAsync(_session).ConfigureAwait(false);
-            _allThreads = threads;
+            var pendingStubs = _allThreads.Where(t => t.IsPendingSync).ToList();
+            var merged = threads.ToList();
+            foreach (var stub in pendingStubs)
+            {
+                var matched = threads.Any(t => MatchesOptimisticStub(t, stub));
+                if (!matched)
+                    merged.Add(stub);
+            }
+
+            _allThreads = merged;
             await InvokeOnUiAsync(() =>
             {
                 Threads.Clear();
-                foreach (var thread in threads)
+                foreach (var thread in merged)
                 {
                     Threads.Add(new ReviewThreadViewModel(
                         thread.NodeId,
                         thread.Path,
                         thread.IsResolved,
-                        thread.Comments.Select(c => c.Body).ToList()));
+                        thread.Comments.Select(c => c.Body).ToList())
+                    {
+                        IsPending = thread.IsPendingSync,
+                    });
                 }
 
                 foreach (var file in PrFiles)
@@ -1242,6 +1423,10 @@ public partial class ReviewViewModel : ObservableObject
                 ApplyOptimisticThreadsOverlay();
                 UpdateProgressSummary();
             });
+
+            if (SelectedFile is not null && _currentDiff is not null)
+                await UpdateThreadAnnotationsAsync(SelectedFile, _currentDiff, CancellationToken.None)
+                    .ConfigureAwait(false);
         }
         catch (Exception) when (_outbox.IsOffline)
         {
@@ -1253,6 +1438,20 @@ public partial class ReviewViewModel : ObservableObject
         }
 
         ApplyPrFileFilter();
+    }
+
+    private static bool MatchesOptimisticStub(ReviewThread remote, ReviewThread stub)
+    {
+        if (!string.Equals(remote.Path, stub.Path, StringComparison.Ordinal))
+            return false;
+        if (remote.Line != stub.Line)
+            return false;
+
+        var stubBody = stub.Comments.FirstOrDefault()?.Body;
+        if (string.IsNullOrEmpty(stubBody))
+            return false;
+
+        return remote.Comments.Any(c => string.Equals(c.Body, stubBody, StringComparison.Ordinal));
     }
 
     private async Task OnOutboxDrainCompletedAsync()
@@ -1300,8 +1499,12 @@ public partial class ReviewViewModel : ObservableObject
         if (_session is null) return;
 
         var prNodeId = _session.Detail.Summary.NodeId;
+        var head = _session.Head.Value;
         var localViewed = await _durableStore.ListAsync(prNodeId).ConfigureAwait(false);
-        var localSet = localViewed.Select(v => v.Path).ToHashSet(StringComparer.Ordinal);
+        var localFresh = localViewed
+            .Where(v => string.Equals(v.ContentId, head, StringComparison.OrdinalIgnoreCase))
+            .Select(v => v.Path)
+            .ToHashSet(StringComparer.Ordinal);
 
         await InvokeOnUiAsync(() =>
         {
@@ -1316,24 +1519,12 @@ public partial class ReviewViewModel : ObservableObject
                     continue;
                 }
 
-                file.IsViewed = localSet.Contains(file.Path.Value);
+                file.IsViewed = localFresh.Contains(file.Path.Value);
                 file.IsViewedPending = false;
             }
 
             UpdateProgressSummary();
         });
-    }
-
-    private void ApplyOptimisticThreads(string body, string clientId)
-    {
-        InvokeOnUiAsync(() =>
-        {
-            var thread = new ReviewThreadViewModel(clientId, SelectedFile!.Path.Value, isResolved: false, [body])
-            {
-                IsPending = true,
-            };
-            Threads.Insert(0, thread);
-        }).GetAwaiter().GetResult();
     }
 
     private void ApplyOptimisticThreadsOverlay()
@@ -1520,6 +1711,11 @@ public partial class ReviewViewModel : ObservableObject
 
         await InvokeOnUiAsync(() =>
         {
+            var previousNodeId = SelectedThread?.NodeId;
+            var previousPath = SelectedThread?.Path;
+            var previousLine = SelectedThread?.Line;
+            var previousBody = SelectedThread?.Comments.FirstOrDefault()?.Body;
+
             DiffAnnotations.Clear();
             UnplaceableThreads.Clear();
             FileLevelThreads.Clear();
@@ -1537,6 +1733,41 @@ public partial class ReviewViewModel : ObservableObject
 
             file.UnresolvedThreadCount = CountUnresolvedThreads(file.Path.Value);
             UpdateConversationThreadSummary();
+
+            // Keep an open thread selected across optimistic → synced remaps.
+            ReviewThread? next = null;
+            if (previousNodeId is not null)
+            {
+                next = placeable.FirstOrDefault(t => t.NodeId == previousNodeId)
+                    ?? unplaceable.FirstOrDefault(t => t.NodeId == previousNodeId)
+                    ?? fileLevel.FirstOrDefault(t => t.NodeId == previousNodeId);
+            }
+
+            if (next is null && previousPath is not null)
+            {
+                next = placeable.FirstOrDefault(t =>
+                    string.Equals(t.Path, previousPath, StringComparison.Ordinal) &&
+                    t.Line == previousLine &&
+                    (previousBody is null ||
+                     t.Comments.Any(c => string.Equals(c.Body, previousBody, StringComparison.Ordinal))));
+            }
+
+            if (next is not null)
+            {
+                SelectedThread = next;
+                SelectedAnnotation = DiffAnnotations.OfType<ReviewThreadAnnotation>()
+                    .FirstOrDefault(a => ReferenceEquals(a.Thread, next));
+            }
+            else if (SelectedThread is not null &&
+                     !placeable.Contains(SelectedThread) &&
+                     !unplaceable.Contains(SelectedThread) &&
+                     !fileLevel.Contains(SelectedThread))
+            {
+                SelectedThread = null;
+                SelectedAnnotation = null;
+            }
+
+            OnPropertyChanged(nameof(IsSelectedThreadPendingSync));
         });
     }
 
