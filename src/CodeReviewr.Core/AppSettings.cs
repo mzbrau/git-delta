@@ -31,6 +31,15 @@ public sealed record AppSettings
     public double FileListWidth { get; set; } = 300;
     public bool NavigatorCollapsed { get; set; }
 
+    /// <summary>Flat vs tree layout for File Status / Stash file lists.</summary>
+    public FileListLayoutMode FileStatusListLayout { get; set; } = FileListLayoutMode.Flat;
+
+    /// <summary>Flat vs tree layout for History file lists.</summary>
+    public FileListLayoutMode HistoryFileListLayout { get; set; } = FileListLayoutMode.Flat;
+
+    /// <summary>Flat vs tree layout for Pull Request file lists.</summary>
+    public FileListLayoutMode PullRequestFileListLayout { get; set; } = FileListLayoutMode.Flat;
+
     /// <summary>
     /// Temporary diagnostics toggle: when true, every git subprocess is delayed by a random 1–5s
     /// before starting. Used to test UI responsiveness under slow AV / disk environments.

@@ -38,6 +38,8 @@ public partial class ReviewViewModel : ObservableObject
     private IReadOnlyList<ReviewThread> _allThreads = [];
     private DateTimeOffset? _lastInboxRefresh;
     private static readonly TimeSpan InboxRefreshDebounce = TimeSpan.FromSeconds(30);
+    private readonly Dictionary<string, bool> _prExpandState = new(StringComparer.Ordinal);
+    private bool _suppressPrEntrySync;
 
     public ReviewViewModel(
         IPullRequestService pullRequestService,
@@ -68,6 +70,7 @@ public partial class ReviewViewModel : ObservableObject
         ViewMode = settings.Current.DefaultDiffMode;
         _ignoreWhitespace = settings.Current.IgnoreWhitespace;
         _contextLines = settings.Current.ContextLines > 0 ? settings.Current.ContextLines : 3;
+        _pullRequestFileListLayout = settings.Current.PullRequestFileListLayout;
         _outbox.DrainCompleted += (_, _) => _ = OnOutboxDrainCompletedAsync();
     }
 
@@ -76,6 +79,7 @@ public partial class ReviewViewModel : ObservableObject
     public ObservableCollection<PullRequestSummary> MyPullRequests { get; } = [];
     public ObservableCollection<FileItemViewModel> PrFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> FilteredPrFiles { get; } = [];
+    public ObservableCollection<FileListEntry> PrFileEntries { get; } = [];
     public ObservableCollection<DiffRow> DiffRows { get; } = [];
     public ObservableCollection<ReviewThreadViewModel> Threads { get; } = [];
     public ObservableCollection<ReviewThread> UnplaceableThreads { get; } = [];
@@ -113,6 +117,8 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private IDiffAnnotation? _selectedAnnotation;
     [ObservableProperty] private bool _isConversationSelected;
     [ObservableProperty] private string _fileFilter = "";
+    [ObservableProperty] private FileListLayoutMode _pullRequestFileListLayout;
+    [ObservableProperty] private FileListEntry? _selectedPrFileEntry;
     [ObservableProperty] private ViewedFilter _filterViewed = ViewedFilter.All;
     [ObservableProperty] private bool _filterStale;
     [ObservableProperty] private bool _filterCommented;
@@ -147,6 +153,12 @@ public partial class ReviewViewModel : ObservableObject
         !HasDraftCommentAnchor;
 
     public bool HasFileFilter => !string.IsNullOrWhiteSpace(FileFilter);
+    public bool IsPullRequestFlatLayout => PullRequestFileListLayout == FileListLayoutMode.Flat;
+    public bool IsPullRequestTreeLayout => PullRequestFileListLayout == FileListLayoutMode.Tree;
+    public Material.Icons.MaterialIconKind PullRequestLayoutIcon =>
+        PullRequestFileListLayout == FileListLayoutMode.Tree
+            ? Material.Icons.MaterialIconKind.FileTree
+            : Material.Icons.MaterialIconKind.FormatListBulleted;
     public int ViewedFileCount => PrFiles.Count(f => f.IsViewed);
     public int TotalFileCount => PrFiles.Count;
     public int CommentCount => _allThreads.Sum(t => t.Comments.Count);
@@ -197,7 +209,45 @@ public partial class ReviewViewModel : ObservableObject
         ClearDraftCommentAnchor();
         if (value is not null)
             IsConversationSelected = false;
+        SyncSelectedPrFileEntry();
         _ = LoadDiffForSelectionAsync(value);
+    }
+
+    partial void OnSelectedPrFileEntryChanged(FileListEntry? value)
+    {
+        if (_suppressPrEntrySync) return;
+        if (value is { IsFolder: true, FolderKey: { } key })
+        {
+            TogglePrFolder(key);
+            _suppressPrEntrySync = true;
+            try { SyncSelectedPrFileEntry(); }
+            finally { _suppressPrEntrySync = false; }
+            return;
+        }
+
+        SelectedFile = value?.File;
+    }
+
+    partial void OnPullRequestFileListLayoutChanged(FileListLayoutMode value)
+    {
+        _settings.Update(s => s.PullRequestFileListLayout = value);
+        _ = _settings.SaveAsync();
+        RebuildPrFileEntries();
+        OnPropertyChanged(nameof(IsPullRequestFlatLayout));
+        OnPropertyChanged(nameof(IsPullRequestTreeLayout));
+        OnPropertyChanged(nameof(PullRequestLayoutIcon));
+    }
+
+    [RelayCommand]
+    private void SetPullRequestFileListLayout(FileListLayoutMode mode) => PullRequestFileListLayout = mode;
+
+    [RelayCommand]
+    private void TogglePrFolder(string? folderKey)
+    {
+        if (string.IsNullOrEmpty(folderKey)) return;
+        var expanded = FileListLayoutHelper.IsExpanded(_prExpandState, folderKey);
+        _prExpandState[folderKey] = !expanded;
+        RebuildPrFileEntries();
     }
 
     partial void OnIsConversationSelectedChanged(bool value)
@@ -342,6 +392,8 @@ public partial class ReviewViewModel : ObservableObject
             foreach (var file in PrFiles.Where(MatchesPrFileFilter))
                 FilteredPrFiles.Add(file);
 
+            RebuildPrFileEntries();
+
             if (selectedPath is not null)
             {
                 SelectedFile = FilteredPrFiles.FirstOrDefault(f =>
@@ -351,6 +403,38 @@ public partial class ReviewViewModel : ObservableObject
 
             UpdateProgressSummary();
         }).GetAwaiter().GetResult();
+    }
+
+    private void RebuildPrFileEntries()
+    {
+        FileListLayoutHelper.Rebuild(
+            PrFileEntries,
+            FilteredPrFiles,
+            PullRequestFileListLayout,
+            flatUsesFullPath: true,
+            _prExpandState);
+        SyncSelectedPrFileEntry();
+    }
+
+    private void SyncSelectedPrFileEntry()
+    {
+        _suppressPrEntrySync = true;
+        try
+        {
+            if (SelectedFile is null)
+            {
+                SelectedPrFileEntry = null;
+                return;
+            }
+
+            SelectedPrFileEntry = PrFileEntries.FirstOrDefault(e =>
+                e.File is not null &&
+                string.Equals(e.File.Path.Value, SelectedFile.Path.Value, StringComparison.Ordinal));
+        }
+        finally
+        {
+            _suppressPrEntrySync = false;
+        }
     }
 
     private bool MatchesPrFileFilter(FileItemViewModel file)

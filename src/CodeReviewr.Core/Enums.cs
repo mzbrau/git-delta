@@ -78,3 +78,10 @@ public enum ViewedFilter
     Viewed,
     NotViewed,
 }
+
+/// <summary>Layout for changed-file sidebars (flat paths vs folder tree).</summary>
+public enum FileListLayoutMode
+{
+    Flat,
+    Tree,
+}

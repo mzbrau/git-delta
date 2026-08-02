@@ -509,17 +509,41 @@
             <Border DockPanel.Dock="Top" Padding="8,6"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1"
                     IsVisible="{Binding ShowFileStatusPane}">
-              <Grid>
-                <TextBox Classes="Forge" Text="{Binding WorkingCopy.FileFilter}"
-                         PlaceholderText="Filter files…" Padding="8,6,28,6" />
-                <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
-                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
-                        Command="{Binding WorkingCopy.ClearFileFilterCommand}"
-                        IsVisible="{Binding WorkingCopy.HasFileFilter}"
-                        ToolTip.Tip="Clear filter">
-                  <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Classes="IconOnly" Width="36" Height="28" Padding="4,2"
+                        Margin="6,0,0,0" VerticalAlignment="Center"
+                        ToolTip.Tip="File list layout">
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="Flat list"
+                                Command="{Binding WorkingCopy.SetFileStatusListLayoutCommand}"
+                                CommandParameter="{x:Static core:FileListLayoutMode.Flat}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding WorkingCopy.IsFileStatusFlatLayout, Mode=OneWay}" />
+                      <MenuItem Header="Tree view"
+                                Command="{Binding WorkingCopy.SetFileStatusListLayoutCommand}"
+                                CommandParameter="{x:Static core:FileListLayoutMode.Tree}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding WorkingCopy.IsFileStatusTreeLayout, Mode=OneWay}" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <icons:MaterialIcon Kind="{Binding WorkingCopy.FileStatusLayoutIcon}" Width="16" Height="16" />
+                    <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
+                  </StackPanel>
                 </Button>
-              </Grid>
+                <Grid>
+                  <TextBox Classes="Forge" Text="{Binding WorkingCopy.FileFilter}"
+                           PlaceholderText="Filter files…" Padding="8,6,28,6" />
+                  <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
+                          HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
+                          Command="{Binding WorkingCopy.ClearFileFilterCommand}"
+                          IsVisible="{Binding WorkingCopy.HasFileFilter}"
+                          ToolTip.Tip="Clear filter">
+                    <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                  </Button>
+                </Grid>
+              </DockPanel>
             </Border>
 
             <!-- Commit dock FIRST so fill gets remaining space -->
@@ -574,7 +598,7 @@
                 <StackPanel IsVisible="{Binding WorkingCopy.IsStashMode}">
                   <TextBlock Text="STASHED FILES" Classes="SectionLabel" Margin="8,0,8,4" />
                   <ListBox x:Name="StashFileList"
-                           ItemsSource="{Binding WorkingCopy.StashFiles}"
+                           ItemsSource="{Binding WorkingCopy.StashFileEntries}"
                            SelectionMode="Single"
                            SelectionChanged="OnStashFileSelectionChanged"
                            ScrollViewer.VerticalScrollBarVisibility="Disabled"
@@ -585,26 +609,40 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
-                      <DataTemplate x:DataType="vm:FileItemViewModel">
-                        <Border Padding="8,4" CornerRadius="4">
-                          <DockPanel>
-                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                    Background="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                              <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold"
-                                         Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                            </Border>
+                      <DataTemplate x:DataType="vm:FileListEntry">
+                        <Panel>
+                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFolder}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                              <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
-                                                  Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                              <TextBlock Text="{Binding Name}" Classes="MonoPath" VerticalAlignment="Center" />
-                              <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                  Opacity="0.55" VerticalAlignment="Center"
-                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                  IsVisible="{Binding HasCachedDiff}"
-                                                  ToolTip.Tip="Diff cached" />
+                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                                  Width="14" Height="14" Opacity="0.7" />
+                              <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
+                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
+                                         FontWeight="SemiBold" Opacity="0.9" />
                             </StackPanel>
-                          </DockPanel>
-                        </Border>
+                          </Border>
+                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFile}">
+                            <DockPanel>
+                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                      Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
+                                           Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                              </Border>
+                              <StackPanel Orientation="Horizontal" Spacing="6">
+                                <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
+                                                    Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                                <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center" />
+                                <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
+                                                    Opacity="0.55" VerticalAlignment="Center"
+                                                    Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                                    IsVisible="{Binding File.HasCachedDiff}"
+                                                    ToolTip.Tip="Diff cached" />
+                              </StackPanel>
+                            </DockPanel>
+                          </Border>
+                        </Panel>
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                     <ListBox.Styles>
@@ -638,7 +676,7 @@
                     </Button>
                   </DockPanel>
                   <ListBox x:Name="StagedFileList"
-                           ItemsSource="{Binding WorkingCopy.StagedFiles}"
+                           ItemsSource="{Binding WorkingCopy.StagedFileEntries}"
                            SelectionMode="Multiple"
                            SelectionChanged="OnFileSelectionChanged"
                            PointerPressed="OnFileListPointerPressed"
@@ -662,28 +700,42 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
-                      <DataTemplate x:DataType="vm:FileItemViewModel">
-                        <Border Classes="FileRow" Padding="8,4" CornerRadius="4">
-                          <DockPanel>
-                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                    Background="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                              <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold"
-                                         Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                            </Border>
-                            <CheckBox IsChecked="True" Margin="0,0,8,0" VerticalAlignment="Center"
-                                      Click="OnFileCheckClick" Tag="{Binding}" />
+                      <DataTemplate x:DataType="vm:FileListEntry">
+                        <Panel>
+                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFolder}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                              <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
-                                                  Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                              <TextBlock Text="{Binding Name}" Classes="MonoPath" VerticalAlignment="Center" />
-                              <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                  Opacity="0.55" VerticalAlignment="Center"
-                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                  IsVisible="{Binding HasCachedDiff}"
-                                                  ToolTip.Tip="Diff cached" />
+                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                                  Width="14" Height="14" Opacity="0.7" />
+                              <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
+                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
+                                         FontWeight="SemiBold" Opacity="0.9" />
                             </StackPanel>
-                          </DockPanel>
-                        </Border>
+                          </Border>
+                          <Border Classes="FileRow" Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFile}">
+                            <DockPanel>
+                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                      Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
+                                           Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                              </Border>
+                              <CheckBox IsChecked="True" Margin="0,0,8,0" VerticalAlignment="Center"
+                                        Click="OnFileCheckClick" Tag="{Binding File}" />
+                              <StackPanel Orientation="Horizontal" Spacing="6">
+                                <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
+                                                    Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                                <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center" />
+                                <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
+                                                    Opacity="0.55" VerticalAlignment="Center"
+                                                    Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                                    IsVisible="{Binding File.HasCachedDiff}"
+                                                    ToolTip.Tip="Diff cached" />
+                              </StackPanel>
+                            </DockPanel>
+                          </Border>
+                        </Panel>
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                     <ListBox.Styles>
@@ -717,7 +769,7 @@
                     </Button>
                   </DockPanel>
                   <ListBox x:Name="UnstagedFileList"
-                           ItemsSource="{Binding WorkingCopy.UnstagedFiles}"
+                           ItemsSource="{Binding WorkingCopy.UnstagedFileEntries}"
                            SelectionMode="Multiple"
                            SelectionChanged="OnFileSelectionChanged"
                            PointerPressed="OnFileListPointerPressed"
@@ -741,28 +793,42 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
-                      <DataTemplate x:DataType="vm:FileItemViewModel">
-                        <Border Padding="8,4" CornerRadius="4">
-                          <DockPanel>
-                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                    Background="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                              <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold"
-                                         Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                            </Border>
-                            <CheckBox IsChecked="False" Margin="0,0,8,0" VerticalAlignment="Center"
-                                      Click="OnFileCheckClick" Tag="{Binding}" />
+                      <DataTemplate x:DataType="vm:FileListEntry">
+                        <Panel>
+                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFolder}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                              <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
-                                                  Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                              <TextBlock Text="{Binding Name}" Classes="MonoPath" VerticalAlignment="Center" />
-                              <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                  Opacity="0.55" VerticalAlignment="Center"
-                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                  IsVisible="{Binding HasCachedDiff}"
-                                                  ToolTip.Tip="Diff cached" />
+                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                                  Width="14" Height="14" Opacity="0.7" />
+                              <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
+                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
+                                         FontWeight="SemiBold" Opacity="0.9" />
                             </StackPanel>
-                          </DockPanel>
-                        </Border>
+                          </Border>
+                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFile}">
+                            <DockPanel>
+                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                      Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
+                                           Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                              </Border>
+                              <CheckBox IsChecked="False" Margin="0,0,8,0" VerticalAlignment="Center"
+                                        Click="OnFileCheckClick" Tag="{Binding File}" />
+                              <StackPanel Orientation="Horizontal" Spacing="6">
+                                <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
+                                                    Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                                <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center" />
+                                <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
+                                                    Opacity="0.55" VerticalAlignment="Center"
+                                                    Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                                    IsVisible="{Binding File.HasCachedDiff}"
+                                                    ToolTip.Tip="Diff cached" />
+                              </StackPanel>
+                            </DockPanel>
+                          </Border>
+                        </Panel>
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                     <ListBox.Styles>
@@ -780,7 +846,7 @@
                   <TextBlock Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
                              Foreground="{DynamicResource ForgeErrorBrush}" />
                   <ListBox x:Name="ConflictedFileList"
-                           ItemsSource="{Binding WorkingCopy.ConflictedFiles}"
+                           ItemsSource="{Binding WorkingCopy.ConflictedFileEntries}"
                            SelectionMode="Multiple"
                            SelectionChanged="OnFileSelectionChanged"
                            PointerPressed="OnFileListPointerPressed"
@@ -798,25 +864,39 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
-                      <DataTemplate x:DataType="vm:FileItemViewModel">
-                        <Border Padding="8,4">
-                          <DockPanel>
-                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1"
-                                    Background="{DynamicResource ForgeStatusDeletedBadgeBgBrush}">
-                              <TextBlock Text="C" FontSize="10" FontWeight="Bold"
-                                         Foreground="{DynamicResource ForgeErrorBrush}" />
-                            </Border>
+                      <DataTemplate x:DataType="vm:FileListEntry">
+                        <Panel>
+                          <Border Padding="8,4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFolder}">
                             <StackPanel Orientation="Horizontal" Spacing="6">
-                              <TextBlock Text="{Binding Name}" Classes="MonoPath"
-                                         Foreground="{DynamicResource ForgeErrorBrush}" />
-                              <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                  Opacity="0.55" VerticalAlignment="Center"
-                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                  IsVisible="{Binding HasCachedDiff}"
-                                                  ToolTip.Tip="Diff cached" />
+                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                                  Width="14" Height="14" Opacity="0.7" />
+                              <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
+                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
+                                         FontWeight="SemiBold" Opacity="0.9" />
                             </StackPanel>
-                          </DockPanel>
-                        </Border>
+                          </Border>
+                          <Border Padding="8,4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFile}">
+                            <DockPanel>
+                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1"
+                                      Background="{DynamicResource ForgeStatusDeletedBadgeBgBrush}">
+                                <TextBlock Text="C" FontSize="10" FontWeight="Bold"
+                                           Foreground="{DynamicResource ForgeErrorBrush}" />
+                              </Border>
+                              <StackPanel Orientation="Horizontal" Spacing="6">
+                                <TextBlock Text="{Binding Label}" Classes="MonoPath"
+                                           Foreground="{DynamicResource ForgeErrorBrush}" />
+                                <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
+                                                    Opacity="0.55" VerticalAlignment="Center"
+                                                    Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                                    IsVisible="{Binding File.HasCachedDiff}"
+                                                    ToolTip.Tip="Diff cached" />
+                              </StackPanel>
+                            </DockPanel>
+                          </Border>
+                        </Panel>
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                   </ListBox>
@@ -848,17 +928,41 @@
             </Border>
             <Border DockPanel.Dock="Top" Padding="8,6"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-              <Grid>
-                <TextBox x:Name="PrFileFilterBox" Classes="Forge" Text="{Binding Review.FileFilter}"
-                         PlaceholderText="Filter files…" Padding="8,6,28,6" />
-                <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
-                        HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
-                        Command="{Binding Review.ClearFileFilterCommand}"
-                        IsVisible="{Binding Review.HasFileFilter}"
-                        ToolTip.Tip="Clear filter">
-                  <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Classes="IconOnly" Width="36" Height="28" Padding="4,2"
+                        Margin="6,0,0,0" VerticalAlignment="Center"
+                        ToolTip.Tip="File list layout">
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="Flat list"
+                                Command="{Binding Review.SetPullRequestFileListLayoutCommand}"
+                                CommandParameter="{x:Static core:FileListLayoutMode.Flat}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsPullRequestFlatLayout, Mode=OneWay}" />
+                      <MenuItem Header="Tree view"
+                                Command="{Binding Review.SetPullRequestFileListLayoutCommand}"
+                                CommandParameter="{x:Static core:FileListLayoutMode.Tree}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsPullRequestTreeLayout, Mode=OneWay}" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <icons:MaterialIcon Kind="{Binding Review.PullRequestLayoutIcon}" Width="16" Height="16" />
+                    <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
+                  </StackPanel>
                 </Button>
-              </Grid>
+                <Grid>
+                  <TextBox x:Name="PrFileFilterBox" Classes="Forge" Text="{Binding Review.FileFilter}"
+                           PlaceholderText="Filter files…" Padding="8,6,28,6" />
+                  <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
+                          HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
+                          Command="{Binding Review.ClearFileFilterCommand}"
+                          IsVisible="{Binding Review.HasFileFilter}"
+                          ToolTip.Tip="Clear filter">
+                    <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                  </Button>
+                </Grid>
+              </DockPanel>
             </Border>
             <Border DockPanel.Dock="Top" Padding="8,4"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
@@ -898,30 +1002,44 @@
                     <TextBlock Text="Conversation" FontWeight="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
                   </StackPanel>
                 </Button>
-                <ListBox ItemsSource="{Binding Review.FilteredPrFiles}"
-                         SelectedItem="{Binding Review.SelectedFile}"
+                <ListBox ItemsSource="{Binding Review.PrFileEntries}"
+                         SelectedItem="{Binding Review.SelectedPrFileEntry}"
                          SelectionMode="Single"
                          Margin="0">
                   <ListBox.ItemTemplate>
-                    <DataTemplate x:DataType="vm:FileItemViewModel">
-                      <Border Padding="8,4">
-                        <DockPanel>
-                          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
-                            <icons:MaterialIcon Kind="Eye" Width="12" Height="12" Opacity="0.6"
-                                                IsVisible="{Binding IsViewed}" ToolTip.Tip="Viewed" />
-                            <Border CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                    Background="{DynamicResource ForgePrimaryContainerBrush}"
-                                    IsVisible="{Binding UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
-                              <TextBlock Text="{Binding UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
-                            </Border>
-                            <Border CornerRadius="2" Padding="4,1"
-                                    Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
-                              <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold" />
-                            </Border>
+                    <DataTemplate x:DataType="vm:FileListEntry">
+                      <Panel>
+                        <Border Padding="8,4" Margin="{Binding IndentMargin}"
+                                IsVisible="{Binding IsFolder}">
+                          <StackPanel Orientation="Horizontal" Spacing="6">
+                            <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                                Width="14" Height="14" Opacity="0.7" />
+                            <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
+                                                Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                            <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
+                                       FontWeight="SemiBold" Opacity="0.9" TextTrimming="CharacterEllipsis" />
                           </StackPanel>
-                          <TextBlock Text="{Binding Path}" Classes="MonoPath" TextTrimming="CharacterEllipsis" />
-                        </DockPanel>
-                      </Border>
+                        </Border>
+                        <Border Padding="8,4" Margin="{Binding IndentMargin}"
+                                IsVisible="{Binding IsFile}">
+                          <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                              <icons:MaterialIcon Kind="Eye" Width="12" Height="12" Opacity="0.6"
+                                                  IsVisible="{Binding File.IsViewed}" ToolTip.Tip="Viewed" />
+                              <Border CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                      Background="{DynamicResource ForgePrimaryContainerBrush}"
+                                      IsVisible="{Binding File.UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
+                                <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
+                              </Border>
+                              <Border CornerRadius="2" Padding="4,1"
+                                      Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
+                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold" />
+                              </Border>
+                            </StackPanel>
+                            <TextBlock Text="{Binding Label}" Classes="MonoPath" TextTrimming="CharacterEllipsis" />
+                          </DockPanel>
+                        </Border>
+                      </Panel>
                     </DataTemplate>
                   </ListBox.ItemTemplate>
                 </ListBox>
@@ -1620,17 +1738,41 @@
 
                 <Border DockPanel.Dock="Top" Padding="8,6"
                         BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-                  <Grid>
-                    <TextBox Classes="Forge" Text="{Binding WorkingCopy.HistoryFileFilter}"
-                             PlaceholderText="Filter files…" Padding="8,6,28,6" />
-                    <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
-                            HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
-                            Command="{Binding WorkingCopy.ClearHistoryFileFilterCommand}"
-                            IsVisible="{Binding WorkingCopy.HasHistoryFileFilter}"
-                            ToolTip.Tip="Clear filter">
-                      <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="IconOnly" Width="36" Height="28" Padding="4,2"
+                            Margin="6,0,0,0" VerticalAlignment="Center"
+                            ToolTip.Tip="File list layout">
+                      <Button.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                          <MenuItem Header="Flat list"
+                                    Command="{Binding WorkingCopy.SetHistoryFileListLayoutCommand}"
+                                    CommandParameter="{x:Static core:FileListLayoutMode.Flat}"
+                                    ToggleType="Radio"
+                                    IsChecked="{Binding WorkingCopy.IsHistoryFlatLayout, Mode=OneWay}" />
+                          <MenuItem Header="Tree view"
+                                    Command="{Binding WorkingCopy.SetHistoryFileListLayoutCommand}"
+                                    CommandParameter="{x:Static core:FileListLayoutMode.Tree}"
+                                    ToggleType="Radio"
+                                    IsChecked="{Binding WorkingCopy.IsHistoryTreeLayout, Mode=OneWay}" />
+                        </MenuFlyout>
+                      </Button.Flyout>
+                      <StackPanel Orientation="Horizontal" Spacing="2">
+                        <icons:MaterialIcon Kind="{Binding WorkingCopy.HistoryLayoutIcon}" Width="16" Height="16" />
+                        <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
+                      </StackPanel>
                     </Button>
-                  </Grid>
+                    <Grid>
+                      <TextBox Classes="Forge" Text="{Binding WorkingCopy.HistoryFileFilter}"
+                               PlaceholderText="Filter files…" Padding="8,6,28,6" />
+                      <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
+                              HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
+                              Command="{Binding WorkingCopy.ClearHistoryFileFilterCommand}"
+                              IsVisible="{Binding WorkingCopy.HasHistoryFileFilter}"
+                              ToolTip.Tip="Clear filter">
+                        <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                      </Button>
+                    </Grid>
+                  </DockPanel>
                 </Border>
 
                 <!-- Commit details dock (same slot as commit message on File Status) -->
@@ -1674,32 +1816,46 @@
                 </Border>
 
                 <ListBox x:Name="HistoryFileList"
-                         ItemsSource="{Binding WorkingCopy.HistoryFiles}"
+                         ItemsSource="{Binding WorkingCopy.HistoryFileEntries}"
                          SelectionMode="Single"
                          SelectionChanged="OnHistoryFileSelectionChanged"
                          Margin="8,8,8,12">
                   <ListBox.ItemTemplate>
-                    <DataTemplate x:DataType="vm:FileItemViewModel">
-                      <Border Padding="8,4" CornerRadius="4">
-                        <DockPanel>
-                          <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                  Background="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                            <TextBlock Text="{Binding StatusBadge}" FontSize="10" FontWeight="Bold"
-                                       Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                          </Border>
+                    <DataTemplate x:DataType="vm:FileListEntry">
+                      <Panel>
+                        <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                IsVisible="{Binding IsFolder}">
                           <StackPanel Orientation="Horizontal" Spacing="6">
-                            <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
-                                                Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                            <TextBlock Text="{Binding Name}" Classes="MonoPath" VerticalAlignment="Center"
-                                       ToolTip.Tip="{Binding Path.Value}" />
-                            <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                Opacity="0.55" VerticalAlignment="Center"
-                                                Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                IsVisible="{Binding HasCachedDiff}"
-                                                ToolTip.Tip="Diff cached" />
+                            <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                                Width="14" Height="14" Opacity="0.7" />
+                            <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
+                                                Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                            <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
+                                       FontWeight="SemiBold" Opacity="0.9" />
                           </StackPanel>
-                        </DockPanel>
-                      </Border>
+                        </Border>
+                        <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                IsVisible="{Binding IsFile}">
+                          <DockPanel>
+                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                    Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                              <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
+                                         Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                            </Border>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
+                                                  Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
+                                         ToolTip.Tip="{Binding File.Path.Value}" />
+                              <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
+                                                  Opacity="0.55" VerticalAlignment="Center"
+                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                                  IsVisible="{Binding File.HasCachedDiff}"
+                                                  ToolTip.Tip="Diff cached" />
+                            </StackPanel>
+                          </DockPanel>
+                        </Border>
+                      </Panel>
                     </DataTemplate>
                   </ListBox.ItemTemplate>
                   <ListBox.Styles>

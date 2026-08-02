@@ -58,6 +58,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     private readonly List<FileItemViewModel> _selectedFiles = [];
     private bool _suppressSelectionSync;
     private bool _skipNextSelectedFileLoad;
+    private readonly Dictionary<string, bool> _fileStatusExpandState = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, bool> _historyExpandState = new(StringComparer.Ordinal);
     private readonly HashSet<(int HunkIndex, int LineIndexInHunk)> _expandedCollapses = [];
     private const int DefaultCollapseThreshold = 8;
     private const int FullFileContextLines = 100_000;
@@ -110,6 +112,8 @@ public partial class WorkingCopyViewModel : ObservableObject
         ViewMode = settings.Current.DefaultDiffMode;
         _ignoreWhitespace = settings.Current.IgnoreWhitespace;
         _contextLines = settings.Current.ContextLines > 0 ? settings.Current.ContextLines : 3;
+        _fileStatusListLayout = settings.Current.FileStatusListLayout;
+        _historyFileListLayout = settings.Current.HistoryFileListLayout;
         // Watcher callbacks arrive on thread-pool / FileSystemWatcher threads.
         _watcher.RefreshRequested += () =>
             Dispatcher.UIThread.Post(() => _ = RefreshAsync());
@@ -136,6 +140,11 @@ public partial class WorkingCopyViewModel : ObservableObject
     public ObservableCollection<FileItemViewModel> ConflictedFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> StashFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> HistoryFiles { get; } = [];
+    public ObservableCollection<FileListEntry> StagedFileEntries { get; } = [];
+    public ObservableCollection<FileListEntry> UnstagedFileEntries { get; } = [];
+    public ObservableCollection<FileListEntry> ConflictedFileEntries { get; } = [];
+    public ObservableCollection<FileListEntry> StashFileEntries { get; } = [];
+    public ObservableCollection<FileListEntry> HistoryFileEntries { get; } = [];
     public ObservableCollection<CommitInfo> HistoryCommits { get; } = [];
     public ObservableCollection<DiffRow> DiffRows { get; } = [];
     public ObservableCollection<BranchInfo> Branches { get; } = [];
@@ -181,6 +190,8 @@ public partial class WorkingCopyViewModel : ObservableObject
     [ObservableProperty] private bool _hasFileFilter;
     [ObservableProperty] private string _historyFileFilter = "";
     [ObservableProperty] private bool _hasHistoryFileFilter;
+    [ObservableProperty] private FileListLayoutMode _fileStatusListLayout;
+    [ObservableProperty] private FileListLayoutMode _historyFileListLayout;
     [ObservableProperty] private string _historySearchText = "";
     [ObservableProperty] private bool _hasHistorySearch;
     [ObservableProperty] private bool _isHistoryLoading;
@@ -281,6 +292,19 @@ public partial class WorkingCopyViewModel : ObservableObject
     public bool ShowCommitDock => IsFileStatusMode && HasStagedFiles;
     public bool ShowCommitDetailsDock => IsHistoryMode && SelectedCommit is not null;
     public bool ShowStashDetailsDock => IsStashMode && SelectedStash is not null;
+
+    public bool IsFileStatusFlatLayout => FileStatusListLayout == FileListLayoutMode.Flat;
+    public bool IsFileStatusTreeLayout => FileStatusListLayout == FileListLayoutMode.Tree;
+    public bool IsHistoryFlatLayout => HistoryFileListLayout == FileListLayoutMode.Flat;
+    public bool IsHistoryTreeLayout => HistoryFileListLayout == FileListLayoutMode.Tree;
+    public Material.Icons.MaterialIconKind FileStatusLayoutIcon =>
+        FileStatusListLayout == FileListLayoutMode.Tree
+            ? Material.Icons.MaterialIconKind.FileTree
+            : Material.Icons.MaterialIconKind.FormatListBulleted;
+    public Material.Icons.MaterialIconKind HistoryLayoutIcon =>
+        HistoryFileListLayout == FileListLayoutMode.Tree
+            ? Material.Icons.MaterialIconKind.FileTree
+            : Material.Icons.MaterialIconKind.FormatListBulleted;
 
     public string? SelectedStashMessage => SelectedStash?.DisplayTitle;
     public string? SelectedStashRef => SelectedStash?.Ref;
@@ -555,6 +579,8 @@ public partial class WorkingCopyViewModel : ObservableObject
             _suppressSelectionSync = false;
         }
 
+        RebuildFileStatusEntries();
+
         OnPropertyChanged(nameof(HasConflictedFiles));
         OnPropertyChanged(nameof(HasStagedFiles));
         OnPropertyChanged(nameof(ShowCommitDock));
@@ -586,6 +612,72 @@ public partial class WorkingCopyViewModel : ObservableObject
 
     private bool MatchesHistoryFileFilter(FileItemViewModel file) =>
         MatchesPathFilter(file, HistoryFileFilter);
+
+    private void RebuildFileStatusEntries()
+    {
+        FileListLayoutHelper.Rebuild(
+            StagedFileEntries, StagedFiles, FileStatusListLayout, flatUsesFullPath: false, _fileStatusExpandState);
+        FileListLayoutHelper.Rebuild(
+            UnstagedFileEntries, UnstagedFiles, FileStatusListLayout, flatUsesFullPath: false, _fileStatusExpandState);
+        FileListLayoutHelper.Rebuild(
+            ConflictedFileEntries, ConflictedFiles, FileStatusListLayout, flatUsesFullPath: false, _fileStatusExpandState);
+        FileListLayoutHelper.Rebuild(
+            StashFileEntries, StashFiles, FileStatusListLayout, flatUsesFullPath: false, _fileStatusExpandState);
+    }
+
+    private void RebuildHistoryFileEntries()
+    {
+        FileListLayoutHelper.Rebuild(
+            HistoryFileEntries, HistoryFiles, HistoryFileListLayout, flatUsesFullPath: false, _historyExpandState);
+    }
+
+    partial void OnFileStatusListLayoutChanged(FileListLayoutMode value)
+    {
+        _settings.Update(s => s.FileStatusListLayout = value);
+        _ = _settings.SaveAsync();
+        RebuildFileStatusEntries();
+        OnPropertyChanged(nameof(IsFileStatusFlatLayout));
+        OnPropertyChanged(nameof(IsFileStatusTreeLayout));
+        OnPropertyChanged(nameof(FileStatusLayoutIcon));
+        SelectionSyncRequested?.Invoke();
+    }
+
+    partial void OnHistoryFileListLayoutChanged(FileListLayoutMode value)
+    {
+        _settings.Update(s => s.HistoryFileListLayout = value);
+        _ = _settings.SaveAsync();
+        RebuildHistoryFileEntries();
+        OnPropertyChanged(nameof(IsHistoryFlatLayout));
+        OnPropertyChanged(nameof(IsHistoryTreeLayout));
+        OnPropertyChanged(nameof(HistoryLayoutIcon));
+        SelectionSyncRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    private void SetFileStatusListLayout(FileListLayoutMode mode) => FileStatusListLayout = mode;
+
+    [RelayCommand]
+    private void SetHistoryFileListLayout(FileListLayoutMode mode) => HistoryFileListLayout = mode;
+
+    [RelayCommand]
+    private void ToggleFileStatusFolder(string? folderKey)
+    {
+        if (string.IsNullOrEmpty(folderKey)) return;
+        var expanded = FileListLayoutHelper.IsExpanded(_fileStatusExpandState, folderKey);
+        _fileStatusExpandState[folderKey] = !expanded;
+        RebuildFileStatusEntries();
+        SelectionSyncRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    private void ToggleHistoryFolder(string? folderKey)
+    {
+        if (string.IsNullOrEmpty(folderKey)) return;
+        var expanded = FileListLayoutHelper.IsExpanded(_historyExpandState, folderKey);
+        _historyExpandState[folderKey] = !expanded;
+        RebuildHistoryFileEntries();
+        SelectionSyncRequested?.Invoke();
+    }
 
     private static bool MatchesPathFilter(FileItemViewModel file, string filter)
     {
@@ -776,6 +868,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         WorkspaceMode = WorkspaceMode.History;
         SelectedStash = null;
         StashFiles.Clear();
+        StashFileEntries.Clear();
         CanStageFromDiff = false;
         StagingDisabledReason = "History diffs are read-only.";
         OnPropertyChanged(nameof(CanStageLines));
@@ -802,6 +895,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         SelectedCommit = null;
         _allHistoryFiles.Clear();
         HistoryFiles.Clear();
+        HistoryFileEntries.Clear();
         DiffEmptyMessage = "Select a commit";
         DiffOverlayMessage = null;
         _ = LoadHistoryAsync(reset: true);
@@ -870,6 +964,8 @@ public partial class WorkingCopyViewModel : ObservableObject
             _suppressSelectionSync = false;
         }
 
+        RebuildHistoryFileEntries();
+
         if (HistoryFiles.Count == 0)
         {
             SelectedFile = null;
@@ -909,6 +1005,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         SelectedFileCount = 0;
         _allHistoryFiles.Clear();
         HistoryFiles.Clear();
+        HistoryFileEntries.Clear();
         DiffRows.Clear();
         _currentDiff = null;
         ClearImagePreview();
@@ -977,6 +1074,8 @@ public partial class WorkingCopyViewModel : ObservableObject
         {
             _suppressSelectionSync = false;
         }
+
+        RebuildHistoryFileEntries();
 
         if (HistoryFiles.Count == 0)
         {
@@ -1091,6 +1190,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             {
                 _allHistoryFiles.Clear();
                 HistoryFiles.Clear();
+                HistoryFileEntries.Clear();
                 SelectedFile = null;
                 _selectedFiles.Clear();
                 SelectedFileCount = 0;
@@ -1141,6 +1241,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             SelectedCommit = null;
             _allHistoryFiles.Clear();
             HistoryFiles.Clear();
+            HistoryFileEntries.Clear();
             DiffRows.Clear();
             DiffEmptyMessage = "Select a commit";
         }
@@ -1171,6 +1272,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         HistoryCommits.Clear();
         _allHistoryFiles.Clear();
         HistoryFiles.Clear();
+        HistoryFileEntries.Clear();
         SelectedCommit = null;
         _cachedHistorySelectedPath = null;
         HistorySearchText = "";
@@ -1241,6 +1343,8 @@ public partial class WorkingCopyViewModel : ObservableObject
                 StashFiles.Add(new FileItemViewModel(path, kind, isStagedList: false));
             }
 
+            RebuildFileStatusEntries();
+
             if (StashFiles.Count > 0)
                 ScheduleStashPrefetch(stash.Index, StashFiles.ToList());
         }
@@ -1290,6 +1394,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             {
                 SelectedStash = null;
                 StashFiles.Clear();
+                StashFileEntries.Clear();
                 DiffRows.Clear();
                 _currentDiff = null;
                 ClearImagePreview();

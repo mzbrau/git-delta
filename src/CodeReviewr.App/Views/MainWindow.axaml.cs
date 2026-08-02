@@ -350,8 +350,12 @@ public partial class MainWindow : Window
     private void OnStashFileSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (sender is not ListBox list) return;
-        if (list.SelectedItem is FileItemViewModel file)
+        if (TryHandleFolderSelection(list, e.AddedItems, isHistory: false))
+            return;
+        if (list.SelectedItem is FileListEntry { File: { } file })
             Vm.WorkingCopy.SetFileSelection([file]);
+        else if (list.SelectedItem is FileItemViewModel legacy)
+            Vm.WorkingCopy.SetFileSelection([legacy]);
         else
             Vm.WorkingCopy.SetFileSelection([]);
     }
@@ -367,8 +371,12 @@ public partial class MainWindow : Window
     {
         if (_suppressSelectionSync) return;
         if (sender is not ListBox list) return;
-        if (list.SelectedItem is FileItemViewModel file)
+        if (TryHandleFolderSelection(list, e.AddedItems, isHistory: true))
+            return;
+        if (list.SelectedItem is FileListEntry { File: { } file })
             Vm.WorkingCopy.SetFileSelection([file]);
+        else if (list.SelectedItem is FileItemViewModel legacy)
+            Vm.WorkingCopy.SetFileSelection([legacy]);
         else
             Vm.WorkingCopy.SetFileSelection([]);
     }
@@ -431,16 +439,22 @@ public partial class MainWindow : Window
     {
         if (_suppressSelectionSync) return;
 
-        if (!_multiSelectModifiers && sender is ListBox source)
+        if (sender is ListBox source)
         {
-            _suppressSelectionSync = true;
-            try
+            if (TryHandleFolderSelection(source, e.AddedItems, isHistory: false))
+                return;
+
+            if (!_multiSelectModifiers)
             {
-                ClearPeerSelections(source);
-            }
-            finally
-            {
-                _suppressSelectionSync = false;
+                _suppressSelectionSync = true;
+                try
+                {
+                    ClearPeerSelections(source);
+                }
+                finally
+                {
+                    _suppressSelectionSync = false;
+                }
             }
         }
 
@@ -482,7 +496,11 @@ public partial class MainWindow : Window
                 if (Vm.WorkingCopy.IsHistoryMode)
                 {
                     if (this.FindControl<ListBox>("HistoryFileList") is { } hf)
-                        hf.SelectedItem = file;
+                    {
+                        var historyMatch = FindEntryInList(hf, file);
+                        if (historyMatch is not null)
+                            hf.SelectedItem = historyMatch;
+                    }
                     continue;
                 }
 
@@ -491,7 +509,7 @@ public partial class MainWindow : Window
                     : UnstagedFileList;
                 // Only select items that exist in the list — prevents phantom SelectedItems
                 // when a stale History FileItemViewModel leaks into File Status sync.
-                var match = FindInList(list, file);
+                var match = FindEntryInList(list, file);
                 if (match is not null)
                     list.SelectedItems?.Add(match);
             }
@@ -502,20 +520,54 @@ public partial class MainWindow : Window
         }
     }
 
-    private static FileItemViewModel? FindInList(ListBox? list, FileItemViewModel file)
+    private bool TryHandleFolderSelection(ListBox list, System.Collections.IList added, bool isHistory)
+    {
+        foreach (var item in added)
+        {
+            if (item is not FileListEntry { IsFolder: true, FolderKey: { } key })
+                continue;
+
+            _suppressSelectionSync = true;
+            try
+            {
+                list.SelectedItems?.Remove(item);
+                if (ReferenceEquals(list.SelectedItem, item))
+                    list.SelectedItem = null;
+            }
+            finally
+            {
+                _suppressSelectionSync = false;
+            }
+
+            if (isHistory)
+                Vm.WorkingCopy.ToggleHistoryFolderCommand.Execute(key);
+            else
+                Vm.WorkingCopy.ToggleFileStatusFolderCommand.Execute(key);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static FileListEntry? FindEntryInList(ListBox? list, FileItemViewModel file)
     {
         if (list?.Items is null) return null;
         foreach (var item in list.Items)
         {
-            if (item is FileItemViewModel candidate
+            if (item is FileListEntry { File: { } candidate } entry
                 && string.Equals(candidate.Path.Value, file.Path.Value, StringComparison.Ordinal)
                 && candidate.IsStagedList == file.IsStagedList)
             {
-                return candidate;
+                return entry;
             }
         }
 
         return null;
+    }
+
+    private static FileItemViewModel? FindInList(ListBox? list, FileItemViewModel file)
+    {
+        return FindEntryInList(list, file)?.File;
     }
 
     private static void CollectSelected(ListBox? list, List<FileItemViewModel> into)
@@ -523,8 +575,10 @@ public partial class MainWindow : Window
         if (list?.SelectedItems is null) return;
         foreach (var item in list.SelectedItems)
         {
-            if (item is FileItemViewModel file)
+            if (item is FileListEntry { File: { } file })
                 into.Add(file);
+            else if (item is FileItemViewModel legacy)
+                into.Add(legacy);
         }
     }
 
