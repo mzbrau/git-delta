@@ -261,6 +261,8 @@ public partial class MainWindow : Window
             confirm.Owner = this;
         if (global::CodeReviewr.App.App.Services.GetService(typeof(AvaloniaStashDialog)) is AvaloniaStashDialog stashDialog)
             stashDialog.Owner = this;
+        if (global::CodeReviewr.App.App.Services.GetService(typeof(AvaloniaReviewSubmitDialog)) is AvaloniaReviewSubmitDialog reviewSubmit)
+            reviewSubmit.Owner = this;
 
         // Defer repo open so the window can paint first.
         Dispatcher.UIThread.Post(() => _ = Vm.TryOpenLastRepositoryAsync(), DispatcherPriority.Background);

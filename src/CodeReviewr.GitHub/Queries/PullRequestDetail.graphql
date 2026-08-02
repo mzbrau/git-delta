@@ -52,6 +52,30 @@ query PullRequestDetail($owner: String!, $name: String!, $number: Int!) {
           url
         }
       }
+      latestReviews(first: 20) {
+        nodes {
+          state
+          author {
+            login
+            avatarUrl
+          }
+        }
+      }
+      reviewRequests(first: 20) {
+        nodes {
+          requestedReviewer {
+            __typename
+            ... on User {
+              login
+              avatarUrl
+            }
+            ... on Team {
+              name
+              combinedSlug
+            }
+          }
+        }
+      }
       commits(last: 1) {
         nodes {
           commit {

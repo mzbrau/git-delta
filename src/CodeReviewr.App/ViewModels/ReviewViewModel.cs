@@ -24,6 +24,7 @@ public partial class ReviewViewModel : ObservableObject
     private readonly IDurableUserStore _durableStore;
     private readonly IGitCloneService _cloneService;
     private readonly IConfirmDialog _confirm;
+    private readonly IReviewSubmitDialog _reviewSubmit;
     private readonly ISettingsStore _settings;
     private readonly NotificationService _notifications;
     private readonly IIntraLineDiffer _intraLine;
@@ -49,6 +50,7 @@ public partial class ReviewViewModel : ObservableObject
         IDurableUserStore durableStore,
         IGitCloneService cloneService,
         IConfirmDialog confirm,
+        IReviewSubmitDialog reviewSubmit,
         ISettingsStore settings,
         NotificationService notifications,
         IIntraLineDiffer intraLine,
@@ -62,6 +64,7 @@ public partial class ReviewViewModel : ObservableObject
         _durableStore = durableStore;
         _cloneService = cloneService;
         _confirm = confirm;
+        _reviewSubmit = reviewSubmit;
         _settings = settings;
         _notifications = notifications;
         _intraLine = intraLine;
@@ -85,6 +88,7 @@ public partial class ReviewViewModel : ObservableObject
     public ObservableCollection<ReviewThread> UnplaceableThreads { get; } = [];
     public ObservableCollection<ReviewThread> FileLevelThreads { get; } = [];
     public ObservableCollection<IDiffAnnotation> DiffAnnotations { get; } = [];
+    public ObservableCollection<ReviewerStatusItem> Reviewers { get; } = [];
 
     [ObservableProperty] private PullRequestSummary? _selectedPullRequest;
     [ObservableProperty] private FileItemViewModel? _selectedFile;
@@ -109,10 +113,13 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private int _selectedRemovedLines;
     [ObservableProperty] private string _localNotes = "";
     [ObservableProperty] private string _newCommentBody = "";
-    [ObservableProperty] private string _submitReviewBody = "";
     [ObservableProperty] private bool _isSubmittingReview;
     [ObservableProperty] private string? _pullRequestBody;
     [ObservableProperty] private string _fileThreadSummary = string.Empty;
+    [ObservableProperty] private string _conversationThreadSummary = string.Empty;
+    [ObservableProperty] private int _pendingCommentCount;
+    [ObservableProperty] private bool _isOwnPullRequest;
+    [ObservableProperty] private string? _myReviewState;
     [ObservableProperty] private ReviewThread? _selectedThread;
     [ObservableProperty] private IDiffAnnotation? _selectedAnnotation;
     [ObservableProperty] private bool _isConversationSelected;
@@ -155,6 +162,8 @@ public partial class ReviewViewModel : ObservableObject
     public bool HasFileFilter => !string.IsNullOrWhiteSpace(FileFilter);
     public bool IsPullRequestFlatLayout => PullRequestFileListLayout == FileListLayoutMode.Flat;
     public bool IsPullRequestTreeLayout => PullRequestFileListLayout == FileListLayoutMode.Tree;
+    public bool IsUnifiedView => ViewMode == DiffViewMode.Unified;
+    public bool IsSideBySideView => ViewMode == DiffViewMode.SideBySide;
     public Material.Icons.MaterialIconKind PullRequestLayoutIcon =>
         PullRequestFileListLayout == FileListLayoutMode.Tree
             ? Material.Icons.MaterialIconKind.FileTree
@@ -163,6 +172,26 @@ public partial class ReviewViewModel : ObservableObject
     public int TotalFileCount => PrFiles.Count;
     public int CommentCount => _allThreads.Sum(t => t.Comments.Count);
     public int UnresolvedCount => _allThreads.Count(t => !t.IsResolved);
+    public int OutdatedCount => _allThreads.Count(t => t.IsOutdated);
+    public bool HasPendingComments => PendingCommentCount > 0;
+    public bool HasReviewers => Reviewers.Count > 0;
+    public bool HasApproved =>
+        string.Equals(MyReviewState, "APPROVED", StringComparison.OrdinalIgnoreCase);
+    public bool HasRequestedChanges =>
+        string.Equals(MyReviewState, "CHANGES_REQUESTED", StringComparison.OrdinalIgnoreCase);
+    public bool CanSubmitPendingComments => HasPendingComments && !IsSubmittingReview;
+    public bool CanSubmitVerdict => !IsOwnPullRequest && !IsSubmittingReview;
+    public string PendingCommentsTooltip => PendingCommentCount <= 0
+        ? "No pending comments to submit"
+        : PendingCommentCount == 1
+            ? "1 pending comment — submit without approval"
+            : $"{PendingCommentCount} pending comments — submit without approval";
+    public string ApproveTooltip => IsOwnPullRequest
+        ? "You cannot review your own pull request"
+        : "Approve";
+    public string RequestChangesTooltip => IsOwnPullRequest
+        ? "You cannot review your own pull request"
+        : "Request changes";
     public string ProgressSummary =>
         $"{ViewedFileCount} / {TotalFileCount} files viewed · {CommentCount} comments · {UnresolvedCount} unresolved";
 
@@ -197,8 +226,42 @@ public partial class ReviewViewModel : ObservableObject
 
     partial void OnViewModeChanged(DiffViewMode value)
     {
+        OnPropertyChanged(nameof(IsUnifiedView));
+        OnPropertyChanged(nameof(IsSideBySideView));
         if (_currentDiff is not null)
             ProjectRows(_currentDiff);
+    }
+
+    partial void OnPendingCommentCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasPendingComments));
+        OnPropertyChanged(nameof(PendingCommentsTooltip));
+        OnPropertyChanged(nameof(CanSubmitPendingComments));
+        SubmitCommentReviewCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnIsSubmittingReviewChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanSubmitPendingComments));
+        OnPropertyChanged(nameof(CanSubmitVerdict));
+        SubmitCommentReviewCommand.NotifyCanExecuteChanged();
+        SubmitApproveCommand.NotifyCanExecuteChanged();
+        SubmitRequestChangesCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnIsOwnPullRequestChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanSubmitVerdict));
+        OnPropertyChanged(nameof(ApproveTooltip));
+        OnPropertyChanged(nameof(RequestChangesTooltip));
+        SubmitApproveCommand.NotifyCanExecuteChanged();
+        SubmitRequestChangesCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnMyReviewStateChanged(string? value)
+    {
+        OnPropertyChanged(nameof(HasApproved));
+        OnPropertyChanged(nameof(HasRequestedChanges));
     }
 
     partial void OnIgnoreWhitespaceChanged(bool value) => _ = ReloadSelectedDiffAsync();
@@ -407,13 +470,32 @@ public partial class ReviewViewModel : ObservableObject
 
     private void RebuildPrFileEntries()
     {
-        FileListLayoutHelper.Rebuild(
-            PrFileEntries,
-            FilteredPrFiles,
-            PullRequestFileListLayout,
-            flatUsesFullPath: true,
-            _prExpandState);
-        SyncSelectedPrFileEntry();
+        // Suppress for the whole rebuild: PrFileEntries.Clear() makes the ListBox
+        // TwoWay-null SelectedPrFileEntry, which would clear SelectedFile and wipe DiffRows.
+        _suppressPrEntrySync = true;
+        try
+        {
+            FileListLayoutHelper.Rebuild(
+                PrFileEntries,
+                FilteredPrFiles,
+                PullRequestFileListLayout,
+                flatUsesFullPath: true,
+                _prExpandState);
+
+            if (SelectedFile is null)
+            {
+                SelectedPrFileEntry = null;
+                return;
+            }
+
+            SelectedPrFileEntry = PrFileEntries.FirstOrDefault(e =>
+                e.File is not null &&
+                string.Equals(e.File.Path.Value, SelectedFile.Path.Value, StringComparison.Ordinal));
+        }
+        finally
+        {
+            _suppressPrEntrySync = false;
+        }
     }
 
     private void SyncSelectedPrFileEntry()
@@ -468,7 +550,27 @@ public partial class ReviewViewModel : ObservableObject
         OnPropertyChanged(nameof(TotalFileCount));
         OnPropertyChanged(nameof(CommentCount));
         OnPropertyChanged(nameof(UnresolvedCount));
+        OnPropertyChanged(nameof(OutdatedCount));
         OnPropertyChanged(nameof(ProgressSummary));
+        UpdateConversationThreadSummary();
+    }
+
+    private void UpdateConversationThreadSummary()
+    {
+        var unresolved = UnresolvedCount;
+        var outdated = OutdatedCount;
+        if (unresolved == 0 && outdated == 0)
+        {
+            ConversationThreadSummary = string.Empty;
+            return;
+        }
+
+        var parts = new List<string>();
+        if (unresolved > 0)
+            parts.Add($"{unresolved} unresolved");
+        if (outdated > 0)
+            parts.Add($"{outdated} outdated");
+        ConversationThreadSummary = string.Join(" · ", parts);
     }
 
     private void UpdatePullRequestContext(ReviewSession session)
@@ -484,6 +586,27 @@ public partial class ReviewViewModel : ObservableObject
 
         MergeStateSummary = FormatMergeState(detail.Mergeable, detail.MergeStateStatus);
         UpdateHeadMovedState(session, detail.Summary.HeadOid);
+        ApplyReviewers(detail.Reviewers ?? []);
+        MyReviewState = detail.ViewerReviewState;
+        IsOwnPullRequest =
+            !string.IsNullOrWhiteSpace(detail.Summary.AuthorLogin) &&
+            string.Equals(
+                detail.Summary.AuthorLogin,
+                detail.Summary.AccountLogin,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void ApplyReviewers(IReadOnlyList<PullRequestReviewerStatus> reviewers)
+    {
+        Reviewers.Clear();
+        foreach (var reviewer in reviewers)
+        {
+            var item = new ReviewerStatusItem(reviewer.Login, reviewer.AvatarUrl, reviewer.State);
+            Reviewers.Add(item);
+            _ = item.LoadAvatarAsync();
+        }
+
+        OnPropertyChanged(nameof(HasReviewers));
     }
 
     private static string? FormatMergeState(bool? mergeable, string? mergeStateStatus)
@@ -644,6 +767,7 @@ public partial class ReviewViewModel : ObservableObject
         {
             _pending.Remove(pending);
             await RefreshThreadsAsync().ConfigureAwait(false);
+            await RefreshPendingCommentCountAsync().ConfigureAwait(false);
         }
     }
 
@@ -732,24 +856,44 @@ public partial class ReviewViewModel : ObservableObject
         }
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanSubmitVerdict))]
     private Task SubmitApproveAsync() => SubmitReviewAsync(SubmitReviewEvent.Approve);
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanSubmitPendingComments))]
     private Task SubmitCommentReviewAsync() => SubmitReviewAsync(SubmitReviewEvent.Comment);
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanSubmitVerdict))]
     private Task SubmitRequestChangesAsync() => SubmitReviewAsync(SubmitReviewEvent.RequestChanges);
+
+    [RelayCommand]
+    private void ToggleIgnoreWhitespace() => IgnoreWhitespace = !IgnoreWhitespace;
+
+    [RelayCommand]
+    private void SetViewMode(DiffViewMode mode) => ViewMode = mode;
 
     private async Task SubmitReviewAsync(SubmitReviewEvent reviewEvent)
     {
         if (_session is null) return;
 
+        string body = "";
+        if (reviewEvent is SubmitReviewEvent.Approve or SubmitReviewEvent.RequestChanges)
+        {
+            var title = reviewEvent == SubmitReviewEvent.Approve ? "Approve pull request" : "Request changes";
+            var confirmLabel = reviewEvent == SubmitReviewEvent.Approve ? "Approve" : "Request changes";
+            var dialogBody = await _reviewSubmit.ShowAsync(title, confirmLabel).ConfigureAwait(false);
+            if (dialogBody is null)
+                return;
+            body = dialogBody;
+        }
+
         IsSubmittingReview = true;
         try
         {
-            await _comments.SubmitReviewAsync(_session, reviewEvent, SubmitReviewBody).ConfigureAwait(false);
-            SubmitReviewBody = "";
+            await _comments.SubmitReviewAsync(_session, reviewEvent, body).ConfigureAwait(false);
+            if (reviewEvent == SubmitReviewEvent.Approve)
+                MyReviewState = "APPROVED";
+            else if (reviewEvent == SubmitReviewEvent.RequestChanges)
+                MyReviewState = "CHANGES_REQUESTED";
             _notifications.Info("Review submitted.");
         }
         catch (HeadMovedException ex)
@@ -765,6 +909,7 @@ public partial class ReviewViewModel : ObservableObject
             IsSubmittingReview = false;
             IsOffline = _outbox.IsOffline;
             await RefreshThreadsAsync().ConfigureAwait(false);
+            await RefreshPendingCommentCountAsync().ConfigureAwait(false);
         }
     }
 
@@ -887,6 +1032,7 @@ public partial class ReviewViewModel : ObservableObject
             ViewedIsLocalOnly = !await _comments.SupportsRemoteViewedStateAsync(session, ct).ConfigureAwait(false);
             await ApplyViewedStateAsync().ConfigureAwait(false);
             await RefreshThreadsAsync().ConfigureAwait(false);
+            await RefreshPendingCommentCountAsync().ConfigureAwait(false);
             await _outbox.DrainAsync(ct).ConfigureAwait(false);
             IsOffline = _outbox.IsOffline;
 
@@ -895,9 +1041,10 @@ public partial class ReviewViewModel : ObservableObject
 
             await InvokeOnUiAsync(() =>
             {
-                DiffEmptyMessage = "Select a file to view its diff";
                 if (FilteredPrFiles.Count > 0)
                     SelectedFile = FilteredPrFiles[0];
+                else
+                    DiffEmptyMessage = "Select a file to view its diff";
             }).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
@@ -945,6 +1092,10 @@ public partial class ReviewViewModel : ObservableObject
         MergeStateSummary = null;
         StatusChecks = [];
         Timeline = [];
+        Reviewers.Clear();
+        OnPropertyChanged(nameof(HasReviewers));
+        MyReviewState = null;
+        IsOwnPullRequest = false;
         HeadHasMoved = false;
         HeadMovedBanner = null;
         IsConversationSelected = false;
@@ -956,6 +1107,8 @@ public partial class ReviewViewModel : ObservableObject
         OnPropertyChanged(nameof(StatusChecks));
         OnPropertyChanged(nameof(Timeline));
         FileThreadSummary = string.Empty;
+        ConversationThreadSummary = string.Empty;
+        PendingCommentCount = 0;
         SelectedThread = null;
         SelectedAnnotation = null;
         _allThreads = [];
@@ -1107,6 +1260,39 @@ public partial class ReviewViewModel : ObservableObject
         IsOffline = _outbox.IsOffline;
         await RefreshThreadsAsync().ConfigureAwait(false);
         await ApplyViewedStateAsync().ConfigureAwait(false);
+        await RefreshPendingCommentCountAsync().ConfigureAwait(false);
+    }
+
+    private async Task RefreshPendingCommentCountAsync()
+    {
+        if (_session is null)
+        {
+            await InvokeOnUiAsync(() => PendingCommentCount = 0).ConfigureAwait(false);
+            return;
+        }
+
+        var summary = _session.Detail.Summary;
+        var remoteCount = 0;
+        try
+        {
+            remoteCount = await _pullRequests.GetPendingReviewCommentCountAsync(
+                    summary.Host,
+                    summary.AccountLogin,
+                    summary.Owner,
+                    summary.Name,
+                    summary.Number)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            // Keep local outbox count if the network call fails.
+        }
+
+        var pending = await _outbox.ListPendingAsync(summary.NodeId).ConfigureAwait(false);
+        var localCount = pending.Count(e => e.Kind == OutboxKind.AddComment);
+
+        await InvokeOnUiAsync(() => PendingCommentCount = remoteCount + localCount)
+            .ConfigureAwait(false);
     }
 
     private async Task ApplyViewedStateAsync()
@@ -1331,7 +1517,6 @@ public partial class ReviewViewModel : ObservableObject
         var placeable = resolved.Where(t => !t.IsUnplaceable && !t.IsFileLevel && t.Anchor is not null).ToList();
         var unplaceable = resolved.Where(t => t.IsUnplaceable).ToList();
         var fileLevel = resolved.Where(t => t.IsFileLevel).ToList();
-        var unresolvedCount = resolved.Count(t => !t.IsResolved);
 
         await InvokeOnUiAsync(() =>
         {
@@ -1348,12 +1533,10 @@ public partial class ReviewViewModel : ObservableObject
             foreach (var thread in fileLevel)
                 FileLevelThreads.Add(thread);
 
-            FileThreadSummary = unresolvedCount == 0
-                ? string.Empty
-                : $"{unresolvedCount} unresolved thread{(unresolvedCount == 1 ? "" : "s")}" +
-                  (resolved.Any(t => t.IsOutdated) ? $" · {resolved.Count(t => t.IsOutdated)} outdated" : string.Empty);
+            FileThreadSummary = string.Empty;
 
             file.UnresolvedThreadCount = CountUnresolvedThreads(file.Path.Value);
+            UpdateConversationThreadSummary();
         });
     }
 

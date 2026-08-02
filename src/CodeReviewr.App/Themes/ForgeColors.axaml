@@ -37,6 +37,7 @@
       <Color x:Key="ForgeStatusAddedColor">#4ade80</Color>
       <Color x:Key="ForgeStatusDeletedColor">#ffb4ab</Color>
       <Color x:Key="ForgeStatusModifiedColor">#4ade80</Color>
+      <Color x:Key="ForgeStatusRequestChangesColor">#fb923c</Color>
       <Color x:Key="ForgeStatusUntrackedColor">#9ba1a6</Color>
       <Color x:Key="ForgeDiffAddedFillColor">#264ade80</Color>
       <Color x:Key="ForgeDiffRemovedFillColor">#26ffb4ab</Color>
@@ -73,6 +74,7 @@
       <SolidColorBrush x:Key="ForgeStatusAddedBrush" Color="{StaticResource ForgeStatusAddedColor}" />
       <SolidColorBrush x:Key="ForgeStatusDeletedBrush" Color="{StaticResource ForgeStatusDeletedColor}" />
       <SolidColorBrush x:Key="ForgeStatusModifiedBrush" Color="{StaticResource ForgeStatusModifiedColor}" />
+      <SolidColorBrush x:Key="ForgeStatusRequestChangesBrush" Color="{StaticResource ForgeStatusRequestChangesColor}" />
       <SolidColorBrush x:Key="ForgeStatusUntrackedBrush" Color="{StaticResource ForgeStatusUntrackedColor}" />
       <SolidColorBrush x:Key="ForgeDiffAddedFillBrush" Color="{StaticResource ForgeDiffAddedFillColor}" />
       <SolidColorBrush x:Key="ForgeDiffRemovedFillBrush" Color="{StaticResource ForgeDiffRemovedFillColor}" />
@@ -127,6 +129,7 @@
       <Color x:Key="ForgeStatusAddedColor">#22863a</Color>
       <Color x:Key="ForgeStatusDeletedColor">#ba1a1a</Color>
       <Color x:Key="ForgeStatusModifiedColor">#22863a</Color>
+      <Color x:Key="ForgeStatusRequestChangesColor">#c2410c</Color>
       <Color x:Key="ForgeStatusUntrackedColor">#63646c</Color>
       <Color x:Key="ForgeDiffAddedFillColor">#3322863a</Color>
       <Color x:Key="ForgeDiffRemovedFillColor">#33ba1a1a</Color>
@@ -163,6 +166,7 @@
       <SolidColorBrush x:Key="ForgeStatusAddedBrush" Color="{StaticResource ForgeStatusAddedColor}" />
       <SolidColorBrush x:Key="ForgeStatusDeletedBrush" Color="{StaticResource ForgeStatusDeletedColor}" />
       <SolidColorBrush x:Key="ForgeStatusModifiedBrush" Color="{StaticResource ForgeStatusModifiedColor}" />
+      <SolidColorBrush x:Key="ForgeStatusRequestChangesBrush" Color="{StaticResource ForgeStatusRequestChangesColor}" />
       <SolidColorBrush x:Key="ForgeStatusUntrackedBrush" Color="{StaticResource ForgeStatusUntrackedColor}" />
       <SolidColorBrush x:Key="ForgeDiffAddedFillBrush" Color="{StaticResource ForgeDiffAddedFillColor}" />
       <SolidColorBrush x:Key="ForgeDiffRemovedFillBrush" Color="{StaticResource ForgeDiffRemovedFillColor}" />

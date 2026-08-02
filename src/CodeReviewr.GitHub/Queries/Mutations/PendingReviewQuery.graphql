@@ -13,6 +13,9 @@ query PendingReviewQuery($owner: String!, $name: String!, $number: Int!) {
           author {
             login
           }
+          comments {
+            totalCount
+          }
         }
       }
     }

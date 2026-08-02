@@ -1032,8 +1032,9 @@
                                 <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
                               </Border>
                               <Border CornerRadius="2" Padding="4,1"
-                                      Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
-                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold" />
+                                      Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
+                                           Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
                               </Border>
                             </StackPanel>
                             <TextBlock Text="{Binding Label}" Classes="MonoPath" TextTrimming="CharacterEllipsis" />
@@ -1230,38 +1231,120 @@
                   Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
             <DockPanel>
-              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <Button Classes="Ghost" Content="Approve"
-                        Command="{Binding Review.SubmitApproveCommand}"
-                        IsEnabled="{Binding Review.IsSubmittingReview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
-                <Button Classes="Ghost" Content="Comment"
+              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                <ItemsControl ItemsSource="{Binding Review.Reviewers}"
+                              IsVisible="{Binding Review.HasReviewers}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel Orientation="Horizontal" Spacing="4" />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ReviewerStatusItem">
+                      <Panel Width="28" Height="28" ToolTip.Tip="{Binding Tooltip}">
+                        <Border Width="24" Height="24" CornerRadius="12"
+                                HorizontalAlignment="Center" VerticalAlignment="Center"
+                                Background="{DynamicResource ForgeSurfaceContainerHighBrush}"
+                                ClipToBounds="True">
+                          <Panel>
+                            <TextBlock Text="{Binding Initials}" FontSize="9" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                       IsVisible="{Binding HasAvatar, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                            <Image Source="{Binding Avatar}" Stretch="UniformToFill"
+                                   IsVisible="{Binding HasAvatar}" />
+                          </Panel>
+                        </Border>
+                        <Border Width="12" Height="12" CornerRadius="6"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Margin="0,-1,-1,0"
+                                IsVisible="{Binding ShowApprovedBadge}"
+                                Background="{DynamicResource ForgeStatusAddedBrush}">
+                          <icons:MaterialIcon Kind="Check" Width="8" Height="8"
+                                              Foreground="White"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <Border Width="12" Height="12" CornerRadius="6"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Margin="0,-1,-1,0"
+                                IsVisible="{Binding ShowChangesRequestedBadge}"
+                                Background="{DynamicResource ForgeStatusRequestChangesBrush}">
+                          <icons:MaterialIcon Kind="Minus" Width="8" Height="8"
+                                              Foreground="White"
+                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                      </Panel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Button Classes="ReviewAction"
                         Command="{Binding Review.SubmitCommentReviewCommand}"
-                        IsEnabled="{Binding Review.IsSubmittingReview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
-                <Button Classes="Ghost" Content="Request changes"
+                        IsEnabled="{Binding Review.CanSubmitPendingComments}"
+                        ToolTip.Tip="{Binding Review.PendingCommentsTooltip}">
+                  <Panel>
+                    <icons:MaterialIcon Kind="MessageOutline" Width="18" Height="18" />
+                    <Border MinWidth="14" Height="14" CornerRadius="7" Padding="3,0"
+                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="10,-6,-6,0"
+                            Background="{DynamicResource ForgePrimaryBrush}"
+                            IsVisible="{Binding Review.HasPendingComments}">
+                      <TextBlock Text="{Binding Review.PendingCommentCount}" FontSize="9" FontWeight="Bold"
+                                 Foreground="{DynamicResource ForgeOnPrimaryBrush}"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                  </Panel>
+                </Button>
+
+                <Button Classes="ReviewAction RequestChanges"
+                        Classes.Pressed="{Binding Review.HasRequestedChanges}"
                         Command="{Binding Review.SubmitRequestChangesCommand}"
-                        IsEnabled="{Binding Review.IsSubmittingReview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
-                <CheckBox Content="Ignore whitespace"
-                          IsChecked="{Binding Review.IgnoreWhitespace}"
-                          FontSize="11" VerticalAlignment="Center" />
-                <ComboBox SelectedItem="{Binding Review.ViewMode}" MinWidth="120">
-                  <core:DiffViewMode>SideBySide</core:DiffViewMode>
-                  <core:DiffViewMode>Unified</core:DiffViewMode>
-                </ComboBox>
+                        IsEnabled="{Binding Review.CanSubmitVerdict}"
+                        ToolTip.Tip="{Binding Review.RequestChangesTooltip}">
+                  <icons:MaterialIcon Kind="MinusCircle" Width="18" Height="18" />
+                </Button>
+
+                <Button Classes="ReviewAction Approve"
+                        Classes.Pressed="{Binding Review.HasApproved}"
+                        Command="{Binding Review.SubmitApproveCommand}"
+                        IsEnabled="{Binding Review.CanSubmitVerdict}"
+                        ToolTip.Tip="{Binding Review.ApproveTooltip}">
+                  <icons:MaterialIcon Kind="CheckCircle" Width="18" Height="18" />
+                </Button>
+
+                <Button Classes="IconOnly" ToolTip.Tip="Diff options">
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="Ignore whitespace"
+                                Command="{Binding Review.ToggleIgnoreWhitespaceCommand}"
+                                ToggleType="CheckBox"
+                                IsChecked="{Binding Review.IgnoreWhitespace, Mode=OneWay}" />
+                      <Separator />
+                      <MenuItem Header="Unified"
+                                Command="{Binding Review.SetViewModeCommand}"
+                                CommandParameter="{x:Static core:DiffViewMode.Unified}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsUnifiedView, Mode=OneWay}" />
+                      <MenuItem Header="Side by side"
+                                Command="{Binding Review.SetViewModeCommand}"
+                                CommandParameter="{x:Static core:DiffViewMode.SideBySide}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsSideBySideView, Mode=OneWay}" />
+                    </MenuFlyout>
+                  </Button.Flyout>
+                  <icons:MaterialIcon Kind="DotsHorizontal" Width="18" Height="18" />
+                </Button>
               </StackPanel>
               <!-- Fill remaining width so path TextTrimming gets a finite measure and cannot paint over actions -->
               <Panel ClipToBounds="True">
                 <TextBlock Text="Conversation" FontWeight="SemiBold" VerticalAlignment="Center"
                            IsVisible="{Binding Review.IsConversationSelected}" />
-                <DockPanel IsVisible="{Binding Review.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
-                  <TextBlock DockPanel.Dock="Right"
-                             Text="{Binding Review.FileThreadSummary}" FontSize="11" Opacity="0.75"
-                             Margin="10,0,0,0" VerticalAlignment="Center"
-                             IsVisible="{Binding Review.FileThreadSummary, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+                <Panel IsVisible="{Binding Review.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                   <TextBlock Text="{Binding Review.SelectedFile.Path}" FontWeight="SemiBold"
                              Classes="MonoPath" TextTrimming="CharacterEllipsis"
                              VerticalAlignment="Center"
                              ToolTip.Tip="{Binding Review.SelectedFile.Path}" />
-                </DockPanel>
+                </Panel>
               </Panel>
             </DockPanel>
           </Border>
@@ -1287,6 +1370,9 @@
                         CornerRadius="8" Padding="12">
                   <StackPanel Spacing="10">
                     <TextBlock Text="STATUS" Classes="PanelHeader" Opacity="0.7" />
+                    <TextBlock Text="{Binding Review.ConversationThreadSummary}" FontSize="12"
+                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                               IsVisible="{Binding Review.ConversationThreadSummary, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
                     <DockPanel>
                       <TextBlock DockPanel.Dock="Left" Text="Decision" Width="72" FontSize="12"
                                  VerticalAlignment="Center"
@@ -1396,16 +1482,7 @@
                             Command="{Binding Review.AddCommentCommand}" Margin="8,0,0,0" />
                     <TextBox x:Name="PrCommentDraftBox" Text="{Binding Review.NewCommentBody}" AcceptsReturn="True" MinHeight="40" />
                   </DockPanel>
-                  <TextBox Text="{Binding Review.SubmitReviewBody}" PlaceholderText="Optional review summary"
-                           FontSize="11" />
                 </StackPanel>
-              </Border>
-              <Border DockPanel.Dock="Bottom" Padding="12,8"
-                      Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
-                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
-                      IsVisible="{Binding Review.HasDraftCommentAnchor}">
-                <TextBox Text="{Binding Review.SubmitReviewBody}" PlaceholderText="Optional review summary"
-                         FontSize="11" />
               </Border>
               <Border DockPanel.Dock="Bottom" MaxHeight="180" Padding="8"
                       Background="{DynamicResource ForgeSurfaceContainerBrush}"

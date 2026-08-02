@@ -159,6 +159,7 @@ internal static class PullRequestGraphQLParser
         }
 
         var timeline = ParseTimeline(pr);
+        var (reviewers, viewerReviewState) = ParseReviewers(pr, accountLogin);
 
         return new PullRequestDetail(
             summary,
@@ -168,7 +169,151 @@ internal static class PullRequestGraphQLParser
             mergeable,
             mergeStateStatus,
             statusChecks,
-            timeline);
+            timeline,
+            reviewers,
+            viewerReviewState);
+    }
+
+    /// <summary>
+    /// Sums <c>comments.totalCount</c> across PENDING reviews in a PendingReviewQuery response.
+    /// </summary>
+    public static int ParsePendingReviewCommentCount(JsonElement data)
+    {
+        if (!data.TryGetProperty("repository", out var repository) ||
+            repository.ValueKind != JsonValueKind.Object ||
+            !repository.TryGetProperty("pullRequest", out var pr) ||
+            pr.ValueKind != JsonValueKind.Object ||
+            !pr.TryGetProperty("reviews", out var reviews) ||
+            !reviews.TryGetProperty("nodes", out var nodes) ||
+            nodes.ValueKind != JsonValueKind.Array)
+        {
+            return 0;
+        }
+
+        var total = 0;
+        foreach (var review in nodes.EnumerateArray())
+        {
+            if (review.TryGetProperty("state", out var state) &&
+                state.ValueKind == JsonValueKind.String &&
+                !string.Equals(state.GetString(), "PENDING", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (review.TryGetProperty("comments", out var comments) &&
+                comments.TryGetProperty("totalCount", out var count) &&
+                count.ValueKind == JsonValueKind.Number)
+            {
+                total += count.GetInt32();
+            }
+        }
+
+        return total;
+    }
+
+    internal static (IReadOnlyList<PullRequestReviewerStatus> Reviewers, string? ViewerReviewState) ParseReviewers(
+        JsonElement pr,
+        string viewerLogin,
+        int maxCount = 8)
+    {
+        var byLogin = new Dictionary<string, PullRequestReviewerStatus>(StringComparer.OrdinalIgnoreCase);
+        string? viewerReviewState = null;
+
+        if (pr.TryGetProperty("reviewRequests", out var requests) &&
+            requests.TryGetProperty("nodes", out var requestNodes) &&
+            requestNodes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var node in requestNodes.EnumerateArray())
+            {
+                if (!node.TryGetProperty("requestedReviewer", out var reviewer) ||
+                    reviewer.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                string? login = null;
+                string? avatarUrl = null;
+                if (reviewer.TryGetProperty("login", out var loginProp) &&
+                    loginProp.ValueKind == JsonValueKind.String)
+                {
+                    login = loginProp.GetString();
+                    if (reviewer.TryGetProperty("avatarUrl", out var avatar) &&
+                        avatar.ValueKind == JsonValueKind.String)
+                    {
+                        avatarUrl = avatar.GetString();
+                    }
+                }
+                else if (reviewer.TryGetProperty("name", out var nameProp) &&
+                         nameProp.ValueKind == JsonValueKind.String)
+                {
+                    login = nameProp.GetString();
+                    if (reviewer.TryGetProperty("combinedSlug", out var slug) &&
+                        slug.ValueKind == JsonValueKind.String)
+                    {
+                        login = slug.GetString() ?? login;
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(login) ||
+                    string.Equals(login, viewerLogin, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                byLogin[login] = new PullRequestReviewerStatus(login, avatarUrl, "REQUESTED");
+            }
+        }
+
+        if (pr.TryGetProperty("latestReviews", out var latest) &&
+            latest.TryGetProperty("nodes", out var latestNodes) &&
+            latestNodes.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var review in latestNodes.EnumerateArray())
+            {
+                string? login = null;
+                string? avatarUrl = null;
+                if (review.TryGetProperty("author", out var author) &&
+                    author.ValueKind == JsonValueKind.Object)
+                {
+                    if (author.TryGetProperty("login", out var loginProp) &&
+                        loginProp.ValueKind == JsonValueKind.String)
+                    {
+                        login = loginProp.GetString();
+                    }
+
+                    if (author.TryGetProperty("avatarUrl", out var avatar) &&
+                        avatar.ValueKind == JsonValueKind.String)
+                    {
+                        avatarUrl = avatar.GetString();
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(login))
+                    continue;
+
+                var state = review.TryGetProperty("state", out var stateProp) &&
+                            stateProp.ValueKind == JsonValueKind.String
+                    ? stateProp.GetString() ?? "COMMENTED"
+                    : "COMMENTED";
+
+                if (string.Equals(state, "DISMISSED", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(state, "PENDING", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (string.Equals(login, viewerLogin, StringComparison.OrdinalIgnoreCase))
+                {
+                    viewerReviewState = state;
+                    continue;
+                }
+
+                // Latest review wins over a bare request.
+                byLogin[login] = new PullRequestReviewerStatus(login, avatarUrl, state);
+            }
+        }
+
+        return (byLogin.Values.Take(maxCount).ToList(), viewerReviewState);
     }
 
     private static IReadOnlyList<PullRequestTimelineEntry> ParseTimeline(JsonElement pr)
