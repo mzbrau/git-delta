@@ -226,12 +226,85 @@
                 BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,1,0"
                 IsVisible="{Binding IsNavigatorCollapsed, Converter={x:Static conv:ForgeConverters.InvertBool}}">
           <DockPanel>
-            <Border DockPanel.Dock="Top" Padding="8,8"
+            <Border DockPanel.Dock="Top" Padding="6,6"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-              <Button Classes="Ghost" HorizontalAlignment="Right" Padding="4"
-                      Click="OnToggleNavigatorCollapsed" ToolTip.Tip="Collapse sidebar">
-                <icons:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" />
-              </Button>
+              <DockPanel>
+                <Button DockPanel.Dock="Right" Classes="Ghost" Padding="4" Margin="2,0,0,0"
+                        Click="OnToggleNavigatorCollapsed" ToolTip.Tip="Collapse sidebar">
+                  <icons:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" />
+                </Button>
+                <Button DockPanel.Dock="Right" Classes="Ghost" Padding="4" Margin="2,0,0,0"
+                        Click="OnOpenRepository" ToolTip.Tip="Open repository…">
+                  <icons:MaterialIcon Kind="FolderOpen" Width="16" Height="16" />
+                </Button>
+                <Button x:Name="RepoSwitcherButton" Classes="Ghost"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="6,4" ToolTip.Tip="{Binding CurrentRepositoryTooltip}">
+                  <Button.Flyout>
+                    <Flyout Placement="BottomEdgeAlignedLeft" Opened="OnRepoSwitcherFlyoutOpened">
+                      <Border MinWidth="260" MaxWidth="360" MaxHeight="380" Padding="8">
+                        <DockPanel>
+                          <TextBox DockPanel.Dock="Top" Classes="Forge"
+                                   Text="{Binding RepositoryFilter}"
+                                   PlaceholderText="Filter repositories…"
+                                   Margin="0,0,0,8" />
+                          <TextBlock DockPanel.Dock="Bottom"
+                                     Text="{Binding RepositoryCatalogEmptyText}"
+                                     FontSize="11" Opacity="0.7" TextWrapping="Wrap"
+                                     Margin="4,8,4,0"
+                                     IsVisible="{Binding ShowRepositoryCatalogEmpty}" />
+                          <TextBlock DockPanel.Dock="Bottom"
+                                     Text="Scanning…"
+                                     FontSize="11" Opacity="0.7"
+                                     Margin="4,8,4,0"
+                                     IsVisible="{Binding ShowRepositoryCatalogScanning}" />
+                          <ScrollViewer MaxHeight="300" HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding FilteredRepositories}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:RepositoryEntryViewModel">
+                                  <Button Classes="Ghost"
+                                          Classes.NavSelected="{Binding IsCurrent}"
+                                          HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Left"
+                                          Padding="8,6" Margin="0,1"
+                                          Tag="{Binding Path}"
+                                          Click="OnRepositoryEntryClick"
+                                          ToolTip.Tip="{Binding Path}">
+                                    <StackPanel Spacing="2">
+                                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                 TextTrimming="CharacterEllipsis" />
+                                      <DockPanel LastChildFill="True">
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding BranchDisplay}"
+                                                   IsVisible="{Binding HasBranch}"
+                                                   FontSize="11" Opacity="0.75" Margin="8,0,0,0"
+                                                   FontFamily="{DynamicResource ForgeCodeFont}" />
+                                        <TextBlock Text="{Binding RelativePath}" FontSize="11" Opacity="0.7"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   FontFamily="{DynamicResource ForgeCodeFont}" />
+                                      </DockPanel>
+                                    </StackPanel>
+                                  </Button>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </ScrollViewer>
+                        </DockPanel>
+                      </Border>
+                    </Flyout>
+                  </Button.Flyout>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Spacing="1" VerticalAlignment="Center">
+                      <TextBlock Text="{Binding CurrentRepositoryName}" FontWeight="SemiBold"
+                                 FontSize="12" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding CurrentRepositorySubtitle}" FontSize="10" Opacity="0.7"
+                                 TextTrimming="CharacterEllipsis"
+                                 FontFamily="{DynamicResource ForgeCodeFont}" />
+                    </StackPanel>
+                    <icons:MaterialIcon Grid.Column="1" Kind="MenuDown" Width="16" Height="16"
+                                        VerticalAlignment="Center" Margin="4,0,0,0" Opacity="0.7" />
+                  </Grid>
+                </Button>
+              </DockPanel>
             </Border>
 
             <Border DockPanel.Dock="Bottom" Padding="8"

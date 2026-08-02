@@ -1,5 +1,6 @@
 using System;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
@@ -268,6 +269,21 @@ public partial class MainWindow : Window
         // Defer repo open so the window can paint first.
         Dispatcher.UIThread.Post(() => _ = Vm.TryOpenLastRepositoryAsync(), DispatcherPriority.Background);
         Dispatcher.UIThread.Post(() => _ = Vm.Review.RefreshInboxCommand.ExecuteAsync(null), DispatcherPriority.Background);
+        Dispatcher.UIThread.Post(() => _ = Vm.EnsureRepositoryCatalogAsync(), DispatcherPriority.Background);
+    }
+
+    private void OnRepoSwitcherFlyoutOpened(object? sender, EventArgs e) =>
+        _ = Vm.EnsureRepositoryCatalogAsync();
+
+    private void OnRepositoryEntryClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string path })
+            return;
+
+        if (RepoSwitcherButton.Flyout is FlyoutBase flyout)
+            flyout.Hide();
+
+        _ = Vm.SelectRepositoryCommand.ExecuteAsync(path);
     }
 
     private void ApplyColumnWidths()

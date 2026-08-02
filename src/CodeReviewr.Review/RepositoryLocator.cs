@@ -50,6 +50,27 @@ public sealed class RepositoryLocator(
         }
     }
 
+    public async IAsyncEnumerable<LocatedRepository> ScanLocalAsync(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var settings = settingsStore.Current;
+        var root = settings.DevelopmentFolder;
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            yield break;
+
+        var ignore = new HashSet<string>(
+            settings.RepositoryScanIgnore,
+            StringComparer.OrdinalIgnoreCase);
+        var maxDepth = Math.Max(1, settings.RepositoryScanDepth);
+
+        await foreach (var repoPath in ScanDirectoryAsync(root, ignore, maxDepth, ct).ConfigureAwait(false))
+        {
+            ct.ThrowIfCancellationRequested();
+            var branch = GitHeadReader.TryReadCurrentBranch(repoPath);
+            yield return new LocatedRepository(repoPath, null, null, null, null, branch);
+        }
+    }
+
     private static async IAsyncEnumerable<string> ScanDirectoryAsync(
         string root,
         HashSet<string> ignore,
@@ -64,7 +85,7 @@ public sealed class RepositoryLocator(
             ct.ThrowIfCancellationRequested();
             var (current, depth) = pending.Dequeue();
 
-            if (Directory.Exists(Path.Combine(current, ".git")))
+            if (IsGitRepository(current))
             {
                 yield return current;
                 continue;
@@ -99,5 +120,11 @@ public sealed class RepositoryLocator(
                 pending.Enqueue((subdir, depth + 1));
             }
         }
+    }
+
+    private static bool IsGitRepository(string path)
+    {
+        var dotGit = Path.Combine(path, ".git");
+        return Directory.Exists(dotGit) || File.Exists(dotGit);
     }
 }

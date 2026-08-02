@@ -1,10 +1,13 @@
+using System.Collections.ObjectModel;
 using Avalonia.Controls;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CodeReviewr.App.Services;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
 using CodeReviewr.GitHub;
+using CodeReviewr.Review;
 
 namespace CodeReviewr.App.ViewModels;
 
@@ -17,6 +20,12 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly ISettingsStore _settings;
     private readonly NotificationService _notifications;
     private readonly IAccountService _accounts;
+    private readonly IRepositoryLocator _repositoryLocator;
+    private readonly SemaphoreSlim _openGate = new(1, 1);
+    private CancellationTokenSource? _catalogCts;
+    private string? _requestedOpenPath;
+    private string? _catalogRoot;
+    private bool _catalogLoaded;
     private double _expandedNavigatorWidth;
 
     public MainWindowViewModel(
@@ -26,7 +35,8 @@ public partial class MainWindowViewModel : ObservableObject
         GitConsoleViewModel gitConsole,
         ISettingsStore settings,
         NotificationService notifications,
-        IAccountService accounts)
+        IAccountService accounts,
+        IRepositoryLocator repositoryLocator)
     {
         WorkingCopy = workingCopy;
         Review = review;
@@ -35,6 +45,7 @@ public partial class MainWindowViewModel : ObservableObject
         _settings = settings;
         _notifications = notifications;
         _accounts = accounts;
+        _repositoryLocator = repositoryLocator;
         RecentRepositories = new(_settings.Current.RecentRepositories);
         DevelopmentFolder = _settings.Current.DevelopmentFolder ?? "";
         GitHubAccounts = new(_settings.Current.Accounts);
@@ -58,6 +69,14 @@ public partial class MainWindowViewModel : ObservableObject
                 OnPropertyChanged(nameof(ShowPullRequestPane));
                 OnPropertyChanged(nameof(ShowHistoryPane));
                 OnPropertyChanged(nameof(ShowMainFileDiffSplitter));
+            }
+
+            if (e.PropertyName is nameof(WorkingCopyViewModel.RepositoryPath)
+                or nameof(WorkingCopyViewModel.CurrentBranch)
+                or nameof(WorkingCopyViewModel.HasRepository))
+            {
+                NotifyRepositorySwitcherDisplayChanged();
+                UpdateScannedCurrentFlags();
             }
         };
         Review.PropertyChanged += (_, e) =>
@@ -121,10 +140,49 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool _isNavigatorCollapsed;
     [ObservableProperty] private double _windowWidth;
     [ObservableProperty] private double _windowHeight;
+    [ObservableProperty] private string _repositoryFilter = "";
+    [ObservableProperty] private bool _isScanningRepositories;
+    [ObservableProperty] private bool _isOpeningRepository;
 
-    public System.Collections.ObjectModel.ObservableCollection<string> RecentRepositories { get; }
+    public ObservableCollection<string> RecentRepositories { get; }
+    public ObservableCollection<RepositoryEntryViewModel> ScannedRepositories { get; } = [];
+    public ObservableCollection<RepositoryEntryViewModel> FilteredRepositories { get; } = [];
 
     public bool HasRecentRepositories => RecentRepositories.Count > 0;
+    public bool HasFilteredRepositories => FilteredRepositories.Count > 0;
+    public bool ShowRepositoryCatalogEmpty =>
+        !IsScanningRepositories && FilteredRepositories.Count == 0;
+
+    public bool ShowRepositoryCatalogScanning =>
+        IsScanningRepositories && FilteredRepositories.Count == 0;
+
+    public string RepositoryCatalogEmptyText =>
+        string.IsNullOrWhiteSpace(RepositoryFilter)
+            ? "No repositories found under Development Folder"
+            : "No matching repositories";
+
+    public string CurrentRepositoryName =>
+        WorkingCopy.HasRepository && !string.IsNullOrWhiteSpace(WorkingCopy.RepositoryPath)
+            ? Path.GetFileName(WorkingCopy.RepositoryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            : "Select repository";
+
+    public string CurrentRepositorySubtitle
+    {
+        get
+        {
+            if (!WorkingCopy.HasRepository || string.IsNullOrWhiteSpace(WorkingCopy.RepositoryPath))
+                return "No repository open";
+
+            var pathLabel = FormatRepositoryPathLabel(WorkingCopy.RepositoryPath);
+            var branch = WorkingCopy.CurrentBranch;
+            return string.IsNullOrWhiteSpace(branch) ? pathLabel : $"{pathLabel}  ·  {branch}";
+        }
+    }
+
+    public string CurrentRepositoryTooltip =>
+        WorkingCopy.HasRepository && !string.IsNullOrWhiteSpace(WorkingCopy.RepositoryPath)
+            ? WorkingCopy.RepositoryPath
+            : "Select a repository";
     public bool HasGitHubAccounts => GitHubAccounts.Count > 0;
     public bool IsSettingsGeneral => SelectedSettingsCategory == "General";
     public bool IsSettingsAccounts => SelectedSettingsCategory == "Accounts";
@@ -226,19 +284,258 @@ public partial class MainWindowViewModel : ObservableObject
 
     public async Task OpenRepositoryPathAsync(string path)
     {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        _requestedOpenPath = path;
+        if (!await _openGate.WaitAsync(0).ConfigureAwait(true))
+            return;
+
         try
         {
-            StatusText = $"Opening {path}…";
-            await WorkingCopy.OpenAsync(path);
-            AddRecent(path);
-            StatusText = WorkingCopy.CurrentBranch is null
-                ? path
-                : $"{WorkingCopy.CurrentBranch} — {path}";
+            while (_requestedOpenPath is { } target)
+            {
+                _requestedOpenPath = null;
+                IsOpeningRepository = true;
+                try
+                {
+                    StatusText = $"Opening {target}…";
+                    await WorkingCopy.OpenAsync(target).ConfigureAwait(true);
+                    if (_requestedOpenPath is not null)
+                        continue;
+
+                    AddRecent(target);
+                    StatusText = WorkingCopy.CurrentBranch is null
+                        ? target
+                        : $"{WorkingCopy.CurrentBranch} — {target}";
+                    NotifyRepositorySwitcherDisplayChanged();
+                    UpdateScannedCurrentFlags();
+                }
+                catch (Exception ex)
+                {
+                    if (_requestedOpenPath is not null)
+                        continue;
+
+                    _notifications.Error($"Failed to open repository: {ex.Message}",
+                        () => _ = OpenRepositoryPathAsync(target));
+                    StatusText = "Failed to open repository";
+                }
+            }
+        }
+        finally
+        {
+            IsOpeningRepository = false;
+            _openGate.Release();
+            if (_requestedOpenPath is { } pending)
+                _ = OpenRepositoryPathAsync(pending);
+        }
+    }
+
+    [RelayCommand]
+    private async Task SelectRepositoryAsync(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        if (string.Equals(path, WorkingCopy.RepositoryPath, StringComparison.OrdinalIgnoreCase)
+            && !IsOpeningRepository)
+            return;
+
+        await OpenRepositoryPathAsync(path).ConfigureAwait(true);
+    }
+
+    [RelayCommand]
+    private Task RefreshRepositoryCatalogAsync() => RefreshRepositoryCatalogCoreAsync(force: true);
+
+    public Task EnsureRepositoryCatalogAsync() => RefreshRepositoryCatalogCoreAsync(force: false);
+
+    private async Task RefreshRepositoryCatalogCoreAsync(bool force)
+    {
+        var root = _settings.Current.DevelopmentFolder?.Trim();
+        if (!force
+            && _catalogLoaded
+            && string.Equals(_catalogRoot, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!force && IsScanningRepositories
+            && string.Equals(_catalogRoot, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _catalogCts?.Cancel();
+        _catalogCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _catalogCts = cts;
+        var ct = cts.Token;
+
+        _catalogLoaded = false;
+        _catalogRoot = root;
+
+        await InvokeOnUiAsync(() =>
+        {
+            IsScanningRepositories = true;
+            ScannedRepositories.Clear();
+            RebuildFilteredRepositories();
+        }).ConfigureAwait(false);
+
+        try
+        {
+            var batch = new List<RepositoryEntryViewModel>();
+            await foreach (var located in _repositoryLocator.ScanLocalAsync(ct).ConfigureAwait(false))
+            {
+                ct.ThrowIfCancellationRequested();
+                batch.Add(CreateRepositoryEntry(located.LocalPath, located.CurrentBranch));
+
+                if (batch.Count < 8)
+                    continue;
+
+                var toAdd = batch;
+                batch = [];
+                await InvokeOnUiAsync(() => AppendScannedRepositories(toAdd)).ConfigureAwait(false);
+            }
+
+            if (batch.Count > 0)
+                await InvokeOnUiAsync(() => AppendScannedRepositories(batch)).ConfigureAwait(false);
+
+            if (_catalogCts == cts)
+                _catalogLoaded = true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to open repository: {ex.Message}", () => _ = OpenRepositoryPathAsync(path));
-            StatusText = "Failed to open repository";
+            await InvokeOnUiAsync(() =>
+                _notifications.Error($"Failed to scan repositories: {ex.Message}",
+                    () => _ = RefreshRepositoryCatalogAsync())).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (_catalogCts == cts)
+            {
+                await InvokeOnUiAsync(() =>
+                {
+                    IsScanningRepositories = false;
+                    OnPropertyChanged(nameof(ShowRepositoryCatalogEmpty));
+                }).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private void AppendScannedRepositories(List<RepositoryEntryViewModel> entries)
+    {
+        var current = WorkingCopy.RepositoryPath;
+        foreach (var entry in entries)
+        {
+            entry.IsCurrent = current is not null
+                              && string.Equals(entry.Path, current, StringComparison.OrdinalIgnoreCase);
+            ScannedRepositories.Add(entry);
+        }
+
+        RebuildFilteredRepositories();
+    }
+
+    private RepositoryEntryViewModel CreateRepositoryEntry(string path, string? branch)
+    {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(trimmed);
+        if (string.IsNullOrWhiteSpace(name))
+            name = trimmed;
+
+        return new RepositoryEntryViewModel(path, name, FormatRepositoryPathLabel(path), branch);
+    }
+
+    private string FormatRepositoryPathLabel(string path)
+    {
+        var root = _settings.Current.DevelopmentFolder?.Trim();
+        if (!string.IsNullOrWhiteSpace(root))
+        {
+            try
+            {
+                var relative = Path.GetRelativePath(root, path);
+                if (!relative.StartsWith("..", StringComparison.Ordinal)
+                    && !Path.IsPathRooted(relative))
+                {
+                    return relative.Replace(Path.DirectorySeparatorChar, '/');
+                }
+            }
+            catch
+            {
+                // Fall through to absolute path.
+            }
+        }
+
+        return path;
+    }
+
+    private void RebuildFilteredRepositories()
+    {
+        FilteredRepositories.Clear();
+        foreach (var entry in ScannedRepositories
+                     .Where(e => e.MatchesFilter(RepositoryFilter))
+                     .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase))
+            FilteredRepositories.Add(entry);
+
+        OnPropertyChanged(nameof(HasFilteredRepositories));
+        OnPropertyChanged(nameof(ShowRepositoryCatalogEmpty));
+        OnPropertyChanged(nameof(ShowRepositoryCatalogScanning));
+    }
+
+    private void UpdateScannedCurrentFlags()
+    {
+        var current = WorkingCopy.RepositoryPath;
+        foreach (var entry in ScannedRepositories)
+        {
+            entry.IsCurrent = current is not null
+                              && string.Equals(entry.Path, current, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    private void NotifyRepositorySwitcherDisplayChanged()
+    {
+        OnPropertyChanged(nameof(CurrentRepositoryName));
+        OnPropertyChanged(nameof(CurrentRepositorySubtitle));
+        OnPropertyChanged(nameof(CurrentRepositoryTooltip));
+    }
+
+    partial void OnRepositoryFilterChanged(string value)
+    {
+        RebuildFilteredRepositories();
+        OnPropertyChanged(nameof(RepositoryCatalogEmptyText));
+    }
+
+    partial void OnIsScanningRepositoriesChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowRepositoryCatalogEmpty));
+        OnPropertyChanged(nameof(ShowRepositoryCatalogScanning));
+    }
+
+    private static async Task InvokeOnUiAsync(Action action)
+    {
+        try
+        {
+            var dispatcher = Dispatcher.UIThread;
+            if (dispatcher.CheckAccess())
+            {
+                action();
+                return;
+            }
+
+            if (Avalonia.Application.Current is null)
+            {
+                action();
+                return;
+            }
+
+            await dispatcher.InvokeAsync(action);
+        }
+        catch (InvalidOperationException)
+        {
+            action();
         }
     }
 
@@ -358,6 +655,10 @@ public partial class MainWindowViewModel : ObservableObject
     {
         _settings.Update(s => s.DevelopmentFolder = string.IsNullOrWhiteSpace(value) ? null : value.Trim());
         _ = _settings.SaveAsync();
+        // Invalidate so the next flyout open / EnsureRepositoryCatalogAsync rescans.
+        _catalogLoaded = false;
+        _catalogRoot = null;
+        NotifyRepositorySwitcherDisplayChanged();
     }
 
     [RelayCommand]
