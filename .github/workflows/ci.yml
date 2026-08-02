@@ -47,7 +47,8 @@ jobs:
           $summary = Get-Content "TestResults/coverage-report/Summary.txt" -Raw
           Write-Host $summary
           function Get-LineRate($assembly) {
-            if ($summary -match "(?ms)$assembly.*?Line coverage:\s*([\d\.]+)%") { return [double]$Matches[1] }
+            $escaped = [regex]::Escape($assembly)
+            if ($summary -match "(?m)^$escaped\s+([\d\.]+)%") { return [double]$Matches[1] }
             return 0
           }
           $floors = @{
@@ -55,12 +56,17 @@ jobs:
             "CodeReviewr.Review" = 40
             "CodeReviewr.Persistence" = 40
           }
+          $failures = @()
           foreach ($entry in $floors.GetEnumerator()) {
             $rate = Get-LineRate $entry.Key
             Write-Host "$($entry.Key): $rate% (floor $($entry.Value)%)"
             if ($rate -lt $entry.Value) {
-              Write-Error "$($entry.Key) line coverage $rate% is below floor $($entry.Value)%"
+              $failures += "$($entry.Key) line coverage $rate% is below floor $($entry.Value)%"
             }
+          }
+          if ($failures.Count -gt 0) {
+            Write-Error ($failures -join "; ")
+            exit 1
           }
 
       - name: Publish win-x64
