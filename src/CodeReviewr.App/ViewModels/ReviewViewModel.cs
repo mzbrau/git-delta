@@ -34,6 +34,7 @@ public partial class ReviewViewModel : ObservableObject
     private CancellationTokenSource? _diffCts;
     private CancellationTokenSource? _openCts;
     private CancellationTokenSource? _inboxCts;
+    private CancellationTokenSource? _markdownCts;
     private ReviewSession? _session;
     private FileDiff? _currentDiff;
     private IReadOnlyList<ReviewThread> _allThreads = [];
@@ -109,6 +110,8 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private bool _ignoreWhitespace;
     [ObservableProperty] private int _contextLines = 3;
     [ObservableProperty] private bool _showFullFile;
+    [ObservableProperty] private bool _showMarkdownPreview;
+    [ObservableProperty] private string? _markdownPreviewText;
     [ObservableProperty] private int _selectedAddedLines;
     [ObservableProperty] private int _selectedRemovedLines;
     [ObservableProperty] private string _localNotes = "";
@@ -199,6 +202,14 @@ public partial class ReviewViewModel : ObservableObject
         ? "You cannot review your own pull request"
         : "Request changes";
     public string FullFileToggleTooltip => ShowFullFile ? "Diff only" : "Full file";
+    public bool IsMarkdownFile => SelectedFile is not null && MarkdownPath.IsMarkdownPath(SelectedFile.Path.Value);
+    public bool CanShowMarkdownPreview => IsMarkdownFile && !IsConversationSelected;
+    public bool ShowMarkdownPreviewPane => ShowMarkdownPreview && CanShowMarkdownPreview;
+    public bool ShowDiffViewer => !ShowMarkdownPreviewPane;
+    public string MarkdownPreviewEmptyMessage =>
+        SelectedFile is null ? "Select a file to view its diff"
+        : MarkdownPreviewText is null ? "No new version"
+        : "No markdown content";
     public string ProgressSummary =>
         $"{ViewedFileCount} / {TotalFileCount} files viewed · {CommentCount} comments · {UnresolvedCount} unresolved";
 
@@ -278,12 +289,31 @@ public partial class ReviewViewModel : ObservableObject
         OnPropertyChanged(nameof(FullFileToggleTooltip));
         _ = ReloadSelectedDiffAsync();
     }
+
+    partial void OnShowMarkdownPreviewChanged(bool value)
+    {
+        NotifyMarkdownPreviewStateChanged();
+        _markdownCts?.Cancel();
+        _markdownCts = null;
+        if (value && SelectedFile is not null && _currentDiff is not null)
+        {
+            _markdownCts = new CancellationTokenSource();
+            _ = LoadMarkdownPreviewTextAsync(SelectedFile, _currentDiff, _markdownCts.Token);
+        }
+        else if (!value)
+            MarkdownPreviewText = null;
+    }
+
+    partial void OnMarkdownPreviewTextChanged(string? value) =>
+        OnPropertyChanged(nameof(MarkdownPreviewEmptyMessage));
+
     partial void OnSelectedFileChanged(FileItemViewModel? value)
     {
         ClearDraftCommentAnchor();
         if (value is not null)
             IsConversationSelected = false;
         SyncSelectedPrFileEntry();
+        NotifyMarkdownPreviewStateChanged();
         _ = LoadDiffForSelectionAsync(value);
         if (value is not null && !value.IsViewed && !value.IsViewedPending)
             _ = MarkFileViewedInternalAsync(value);
@@ -334,8 +364,11 @@ public partial class ReviewViewModel : ObservableObject
             SelectedFile = null;
             DiffRows.Clear();
             _currentDiff = null;
+            MarkdownPreviewText = null;
             DiffEmptyMessage = "Pull request context";
         }
+
+        NotifyMarkdownPreviewStateChanged();
     }
 
     partial void OnFileFilterChanged(string value)
@@ -425,6 +458,14 @@ public partial class ReviewViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleShowFullFile() => ShowFullFile = !ShowFullFile;
+
+    [RelayCommand]
+    private void ToggleShowMarkdownPreview()
+    {
+        if (!CanShowMarkdownPreview)
+            return;
+        ShowMarkdownPreview = !ShowMarkdownPreview;
+    }
 
     [RelayCommand]
     private void OpenPullRequestUrl() => OpenUrl(SelectedPullRequest?.Url);
@@ -1321,15 +1362,19 @@ public partial class ReviewViewModel : ObservableObject
     {
         _diffCts?.Cancel();
         _diffCts = new CancellationTokenSource();
+        _markdownCts?.Cancel();
+        _markdownCts = null;
         var ct = _diffCts.Token;
 
         if (file is null || _session is null)
         {
             DiffRows.Clear();
             _currentDiff = null;
+            MarkdownPreviewText = null;
             DiffEmptyMessage = SelectedPullRequest is null
                 ? "Select a pull request"
                 : "Select a file to view its diff";
+            NotifyMarkdownPreviewStateChanged();
             return;
         }
 
@@ -1347,10 +1392,15 @@ public partial class ReviewViewModel : ObservableObject
                 UpdateDiffStats(_currentDiff);
                 ProjectRows(_currentDiff);
                 DiffEmptyMessage = DiffRows.Count == 0 ? "No differences" : "";
+                NotifyMarkdownPreviewStateChanged();
             });
 
             await LoadSyntaxTokensAsync(file, _currentDiff!, ct).ConfigureAwait(false);
             await UpdateThreadAnnotationsAsync(file, diff, ct).ConfigureAwait(false);
+            if (ShowMarkdownPreviewPane)
+                await LoadMarkdownPreviewTextAsync(file, _currentDiff!, ct).ConfigureAwait(false);
+            else
+                await InvokeOnUiAsync(() => MarkdownPreviewText = null);
         }
         catch (OperationCanceledException)
         {
@@ -1362,6 +1412,7 @@ public partial class ReviewViewModel : ObservableObject
             DiffRows.Clear();
             LeftSyntaxTokens = null;
             RightSyntaxTokens = null;
+            MarkdownPreviewText = null;
             DiffEmptyMessage = ex.Message;
         }
         catch (Exception ex)
@@ -1369,6 +1420,7 @@ public partial class ReviewViewModel : ObservableObject
             DiffRows.Clear();
             LeftSyntaxTokens = null;
             RightSyntaxTokens = null;
+            MarkdownPreviewText = null;
             DiffEmptyMessage = $"Failed to load diff: {ex.Message}";
         }
         finally
@@ -1376,6 +1428,49 @@ public partial class ReviewViewModel : ObservableObject
             IsLoadingDiff = false;
             OnPropertyChanged(nameof(DiffFooterText));
         }
+    }
+
+    private async Task LoadMarkdownPreviewTextAsync(
+        FileItemViewModel file,
+        FileDiff diff,
+        CancellationToken ct)
+    {
+        if (_session is null || !MarkdownPath.IsMarkdownPath(file.Path.Value))
+        {
+            await InvokeOnUiAsync(() => MarkdownPreviewText = null);
+            return;
+        }
+
+        try
+        {
+            string? text = null;
+            if (!diff.NewContent.IsEmpty)
+            {
+                var bytes = await _objects.ReadBlobAsync(_session.RepositoryPath, diff.NewContent, ct)
+                    .ConfigureAwait(false);
+                text = DecodeUtf8(bytes);
+            }
+
+            ct.ThrowIfCancellationRequested();
+            await InvokeOnUiAsync(() => MarkdownPreviewText = text);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            await InvokeOnUiAsync(() => MarkdownPreviewText = null);
+        }
+    }
+
+    private void NotifyMarkdownPreviewStateChanged()
+    {
+        OnPropertyChanged(nameof(IsMarkdownFile));
+        OnPropertyChanged(nameof(CanShowMarkdownPreview));
+        OnPropertyChanged(nameof(ShowMarkdownPreviewPane));
+        OnPropertyChanged(nameof(ShowDiffViewer));
+        OnPropertyChanged(nameof(MarkdownPreviewEmptyMessage));
     }
 
     private async Task ReloadSelectedDiffAsync()

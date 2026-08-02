@@ -87,8 +87,7 @@ public partial class MainWindow : Window
 
     private void PositionInlineCommentDraft(MainWindowViewModel vm)
     {
-        if (this.FindControl<DiffViewer>("PrDiffViewer") is not { } viewer ||
-            this.FindControl<Border>("InlineCommentDraft") is not { } draft)
+        if (this.FindControl<Border>("InlineCommentDraft") is not { } draft)
             return;
 
         var side = string.Equals(vm.Review.DraftCommentSide, "LEFT", StringComparison.OrdinalIgnoreCase)
@@ -98,14 +97,16 @@ public partial class MainWindow : Window
 
         double left = 48;
         double top = 24;
-        if (viewer.TryGetLineAnchorRect(side, line, out var anchor))
+        double hostHeight = 400;
+        double hostWidth = 800;
+        if (TryGetPrLineAnchorRect(vm, side, line, out var anchor, out hostHeight, out hostWidth))
         {
             left = Math.Max(8, anchor.X);
             top = Math.Max(8, anchor.Y);
-            var maxTop = Math.Max(8, viewer.Bounds.Height - 180);
+            var maxTop = Math.Max(8, hostHeight - 180);
             if (top > maxTop)
                 top = maxTop;
-            var maxWidth = Math.Max(280, viewer.Bounds.Width - left - 16);
+            var maxWidth = Math.Max(280, hostWidth - left - 16);
             draft.Width = Math.Min(520, maxWidth);
         }
 
@@ -119,7 +120,6 @@ public partial class MainWindow : Window
             return;
         if (!vm.Review.HasExpandedInlineThread ||
             vm.Review.SelectedThread?.Anchor is not { } range ||
-            this.FindControl<DiffViewer>("PrDiffViewer") is not { } viewer ||
             this.FindControl<Border>("InlineThreadCard") is not { } card)
             return;
 
@@ -128,19 +128,50 @@ public partial class MainWindow : Window
 
         double left = 48;
         double top = 24;
-        if (viewer.TryGetLineAnchorRect(side, line, out var anchor))
+        if (TryGetPrLineAnchorRect(vm, side, line, out var anchor, out var hostHeight, out var hostWidth))
         {
             left = Math.Max(8, anchor.X);
             top = Math.Max(8, anchor.Y);
-            var maxTop = Math.Max(8, viewer.Bounds.Height - 220);
+            var maxTop = Math.Max(8, hostHeight - 220);
             if (top > maxTop)
                 top = maxTop;
-            var maxWidth = Math.Max(280, viewer.Bounds.Width - left - 16);
+            var maxWidth = Math.Max(280, hostWidth - left - 16);
             card.Width = Math.Min(520, maxWidth);
         }
 
         Canvas.SetLeft(card, left);
         Canvas.SetTop(card, top);
+    }
+
+    private bool TryGetPrLineAnchorRect(
+        MainWindowViewModel vm,
+        DiffSide side,
+        int line,
+        out Avalonia.Rect anchor,
+        out double hostHeight,
+        out double hostWidth)
+    {
+        anchor = default;
+        hostHeight = 400;
+        hostWidth = 800;
+
+        if (vm.Review.ShowMarkdownPreviewPane &&
+            this.FindControl<MarkdownFilePreview>("PrMarkdownPreview") is { } preview)
+        {
+            hostHeight = preview.Bounds.Height;
+            hostWidth = preview.Bounds.Width;
+            if (preview.TryGetLineAnchorRect(side, line, out anchor))
+                return true;
+        }
+
+        if (this.FindControl<DiffViewer>("PrDiffViewer") is { } viewer)
+        {
+            hostHeight = viewer.Bounds.Height;
+            hostWidth = viewer.Bounds.Width;
+            return viewer.TryGetLineAnchorRect(side, line, out anchor);
+        }
+
+        return false;
     }
 
     private void OnFileOrUnplaceableThreadPressed(object? sender, PointerPressedEventArgs e)

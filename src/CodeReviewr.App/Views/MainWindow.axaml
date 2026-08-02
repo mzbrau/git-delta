@@ -1177,6 +1177,13 @@
                         ToolTip.Tip="{Binding WorkingCopy.FullFileToggleTooltip}">
                   <icons:MaterialIcon Kind="FileDocumentOutline" Width="18" Height="18" />
                 </Button>
+                <Button Classes="ReviewAction"
+                        Classes.Pressed="{Binding WorkingCopy.ShowMarkdownPreview}"
+                        Command="{Binding WorkingCopy.ToggleShowMarkdownPreviewCommand}"
+                        IsVisible="{Binding WorkingCopy.CanShowMarkdownPreview}"
+                        ToolTip.Tip="Rendered markdown">
+                  <icons:MaterialIcon Kind="LanguageMarkdown" Width="18" Height="18" />
+                </Button>
                 <Border Width="1" Height="22" Margin="2,0"
                         Background="{DynamicResource ForgeOutlineVariantBrush}" />
                 <Button Classes="IconOnly" ToolTip.Tip="Diff options">
@@ -1301,7 +1308,12 @@
                                  LeftSyntaxTokens="{Binding WorkingCopy.LeftSyntaxTokens}"
                                  RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
                                  RowHeight="20"
-                                 IsVisible="{Binding WorkingCopy.IsImagePreview, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                                 IsVisible="{Binding WorkingCopy.ShowDiffViewer}" />
+
+            <controls:MarkdownFilePreview Markdown="{Binding WorkingCopy.MarkdownPreviewText}"
+                                          EmptyMessage="{Binding WorkingCopy.MarkdownPreviewEmptyMessage}"
+                                          CanAddLineComments="False"
+                                          IsVisible="{Binding WorkingCopy.ShowMarkdownPreviewPane}" />
 
             <!-- Changed image: before | after -->
             <Grid IsVisible="{Binding WorkingCopy.HasImageBefore}"
@@ -1374,6 +1386,13 @@
                         Command="{Binding Review.ToggleShowFullFileCommand}"
                         ToolTip.Tip="{Binding Review.FullFileToggleTooltip}">
                   <icons:MaterialIcon Kind="FileDocumentOutline" Width="18" Height="18" />
+                </Button>
+                <Button Classes="ReviewAction"
+                        Classes.Pressed="{Binding Review.ShowMarkdownPreview}"
+                        Command="{Binding Review.ToggleShowMarkdownPreviewCommand}"
+                        IsVisible="{Binding Review.CanShowMarkdownPreview}"
+                        ToolTip.Tip="Rendered markdown">
+                  <icons:MaterialIcon Kind="LanguageMarkdown" Width="18" Height="18" />
                 </Button>
                 <Border Width="1" Height="22" Margin="2,0"
                         Background="{DynamicResource ForgeOutlineVariantBrush}" />
@@ -1734,7 +1753,16 @@
                                      CanStageLines="False"
                                      CanUnstageLines="False"
                                      CanDiscardLines="False"
-                                     RowHeight="20" />
+                                     RowHeight="20"
+                                     IsVisible="{Binding Review.ShowDiffViewer}" />
+                <controls:MarkdownFilePreview x:Name="PrMarkdownPreview"
+                                              Markdown="{Binding Review.MarkdownPreviewText}"
+                                              EmptyMessage="{Binding Review.MarkdownPreviewEmptyMessage}"
+                                              Annotations="{Binding Review.DiffAnnotations}"
+                                              SelectedAnnotation="{Binding Review.SelectedAnnotation, Mode=TwoWay}"
+                                              CanAddLineComments="True"
+                                              AddLineCommentCommand="{Binding Review.BeginLineCommentCommand}"
+                                              IsVisible="{Binding Review.ShowMarkdownPreviewPane}" />
                 <Canvas IsVisible="{Binding Review.HasDraftCommentAnchor}">
                   <Border x:Name="InlineCommentDraft"
                           Width="520" MaxWidth="640"
@@ -2115,6 +2143,13 @@
                             ToolTip.Tip="{Binding WorkingCopy.FullFileToggleTooltip}">
                       <icons:MaterialIcon Kind="FileDocumentOutline" Width="18" Height="18" />
                     </Button>
+                    <Button Classes="ReviewAction"
+                            Classes.Pressed="{Binding WorkingCopy.ShowMarkdownPreview}"
+                            Command="{Binding WorkingCopy.ToggleShowMarkdownPreviewCommand}"
+                            IsVisible="{Binding WorkingCopy.CanShowMarkdownPreview}"
+                            ToolTip.Tip="Rendered markdown">
+                      <icons:MaterialIcon Kind="LanguageMarkdown" Width="18" Height="18" />
+                    </Button>
                     <Border Width="1" Height="22" Margin="2,0"
                             Background="{DynamicResource ForgeOutlineVariantBrush}" />
                     <Button Classes="IconOnly" ToolTip.Tip="Diff options">
@@ -2232,7 +2267,12 @@
                                      CanDiscardLines="False"
                                      LeftSyntaxTokens="{Binding WorkingCopy.LeftSyntaxTokens}"
                                      RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
-                                     RowHeight="20" />
+                                     RowHeight="20"
+                                     IsVisible="{Binding WorkingCopy.ShowDiffViewer}" />
+                <controls:MarkdownFilePreview Markdown="{Binding WorkingCopy.MarkdownPreviewText}"
+                                              EmptyMessage="{Binding WorkingCopy.MarkdownPreviewEmptyMessage}"
+                                              CanAddLineComments="False"
+                                              IsVisible="{Binding WorkingCopy.ShowMarkdownPreviewPane}" />
                 <Border Background="{DynamicResource ForgeSettingsScrimBrush}"
                         IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
                   <ProgressBar Width="36" Height="36" IsIndeterminate="True"
