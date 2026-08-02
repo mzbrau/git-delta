@@ -10,15 +10,17 @@
   </Style>
 
   <Style Selector="TextBlock.PanelHeader">
-    <Setter Property="FontSize" Value="{DynamicResource ForgeUiSmFontSize}" />
+    <Setter Property="FontSize" Value="{DynamicResource ForgeSidebarHeaderFontSize}" />
     <Setter Property="FontWeight" Value="Bold" />
-    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource ForgeSidebarHeaderLetterSpacing}" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceVariantBrush}" />
   </Style>
 
   <Style Selector="TextBlock.SectionLabel">
-    <Setter Property="FontSize" Value="{DynamicResource ForgeUiSmFontSize}" />
-    <Setter Property="FontWeight" Value="SemiBold" />
-    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
+    <Setter Property="FontSize" Value="{DynamicResource ForgeSidebarHeaderFontSize}" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="{DynamicResource ForgeSidebarHeaderLetterSpacing}" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceVariantBrush}" />
   </Style>
 
   <Style Selector="TextBlock.MonoPath">
@@ -37,7 +39,8 @@
     <Setter Property="FontSize" Value="{DynamicResource ForgeUiFontSize}" />
   </Style>
   <Style Selector="Button.Ghost:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
   </Style>
 
   <Style Selector="Button.Primary">
@@ -71,14 +74,54 @@
     <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceVariantBrush}" />
   </Style>
   <Style Selector="Button.IconOnly:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+  </Style>
+
+  <!-- Selected nav item: raised surface + 3px primary left accent -->
+  <Style Selector="Button.NavSelected, Button.Ghost.NavSelected">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="3,0,0,0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="Padding" Value="25,6,12,6" />
+  </Style>
+  <Style Selector="Button.NavSelected:pointerover /template/ ContentPresenter, Button.Ghost.NavSelected:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource ForgePrimaryBrush}" />
+  </Style>
+  <Style Selector="Button.NavSelected TextBlock, Button.Ghost.NavSelected TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource ForgePrimaryBrush}" />
+  </Style>
+  <Style Selector="Button.NavSelected icons|MaterialIcon, Button.Ghost.NavSelected icons|MaterialIcon">
+    <Setter Property="Foreground" Value="{DynamicResource ForgePrimaryBrush}" />
+  </Style>
+
+  <Style Selector="ListBox.PrList ListBoxItem">
+    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="MinHeight" Value="28" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="ListBox.PrList ListBoxItem:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceContainerHighBrush}" />
+  </Style>
+  <Style Selector="ListBox.PrList ListBoxItem:selected /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+  </Style>
+  <Style Selector="ListBox.PrList ListBoxItem:selected">
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="3,0,0,0" />
+  </Style>
+  <Style Selector="ListBox.PrList ListBoxItem:selected TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource ForgePrimaryBrush}" />
   </Style>
 
   <Style Selector="TextBox.Forge">
-    <Setter Property="Background" Value="{DynamicResource ForgeBackgroundBrush}" />
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceContainerLowBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource ForgeOutlineVariantBrush}" />
     <Setter Property="BorderThickness" Value="1" />
-    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="CornerRadius" Value="8" />
     <Setter Property="Padding" Value="8" />
     <Setter Property="Foreground" Value="{DynamicResource ForgeOnSurfaceBrush}" />
     <Setter Property="CaretBrush" Value="{DynamicResource ForgePrimaryBrush}" />
@@ -95,14 +138,19 @@
   <Style Selector="ListBoxItem.FileRow">
     <Setter Property="Padding" Value="8,4" />
     <Setter Property="MinHeight" Value="32" />
-    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="CornerRadius" Value="0" />
     <Setter Property="Margin" Value="0,0,0,1" />
+    <Setter Property="BorderThickness" Value="0" />
   </Style>
   <Style Selector="ListBoxItem.FileRow:pointerover /template/ ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceContainerHighBrush}" />
   </Style>
   <Style Selector="ListBoxItem.FileRow:selected /template/ ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+  </Style>
+  <Style Selector="ListBoxItem.FileRow:selected">
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="3,0,0,0" />
   </Style>
 
   <Style Selector="ListBoxItem.NavItem">
@@ -114,7 +162,11 @@
     <Setter Property="Background" Value="{DynamicResource ForgeSurfaceContainerHighBrush}" />
   </Style>
   <Style Selector="ListBoxItem.NavItem:selected /template/ ContentPresenter">
-    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+  </Style>
+  <Style Selector="ListBoxItem.NavItem:selected">
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="3,0,0,0" />
   </Style>
 
   <Style Selector="Border.Chip">
@@ -128,7 +180,7 @@
   </Style>
 
   <Style Selector="ComboBox">
-    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource ForgeOutlineVariantBrush}" />
     <Setter Property="BorderThickness" Value="1" />
     <Setter Property="CornerRadius" Value="4" />
@@ -139,6 +191,10 @@
 
   <Style Selector="ScrollBar">
     <Setter Property="Width" Value="6" />
+    <Setter Property="AllowAutoHide" Value="True" />
+  </Style>
+  <Style Selector="ScrollBar:horizontal">
+    <Setter Property="Height" Value="6" />
   </Style>
 
   <Style Selector="icons|MaterialIcon">

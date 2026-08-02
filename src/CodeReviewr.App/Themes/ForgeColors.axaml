@@ -1,45 +1,55 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <ResourceDictionary.ThemeDictionaries>
-    <!-- Dark (Forge Control) -->
+    <!-- Dark (Obsidian / Midnight) -->
     <ResourceDictionary x:Key="Dark">
-      <Color x:Key="ForgeBackgroundColor">#0b1326</Color>
-      <Color x:Key="ForgeSurfaceDimColor">#0b1326</Color>
-      <Color x:Key="ForgeSurfaceBrightColor">#31394d</Color>
-      <Color x:Key="ForgeSurfaceContainerLowestColor">#060e20</Color>
-      <Color x:Key="ForgeSurfaceContainerLowColor">#131b2e</Color>
-      <Color x:Key="ForgeSurfaceContainerColor">#171f33</Color>
-      <Color x:Key="ForgeSurfaceContainerHighColor">#222a3d</Color>
-      <Color x:Key="ForgeSurfaceContainerHighestColor">#2d3449</Color>
-      <Color x:Key="ForgeSurfaceVariantColor">#2d3449</Color>
-      <Color x:Key="ForgeOnSurfaceColor">#dae2fd</Color>
-      <Color x:Key="ForgeOnSurfaceVariantColor">#c2c6d6</Color>
-      <Color x:Key="ForgeOutlineColor">#8c909f</Color>
-      <Color x:Key="ForgeOutlineVariantColor">#424754</Color>
-      <Color x:Key="ForgePrimaryColor">#adc6ff</Color>
-      <Color x:Key="ForgeOnPrimaryColor">#002e6a</Color>
-      <Color x:Key="ForgePrimaryContainerColor">#4d8eff</Color>
-      <Color x:Key="ForgeOnPrimaryContainerColor">#00285d</Color>
-      <Color x:Key="ForgeSecondaryColor">#b7c8e1</Color>
-      <Color x:Key="ForgeSecondaryContainerColor">#3a4a5f</Color>
-      <Color x:Key="ForgeOnSecondaryContainerColor">#a9bad3</Color>
+      <!-- Fluent accent overrides (violet) -->
+      <Color x:Key="SystemAccentColor">#d9b9ff</Color>
+      <Color x:Key="SystemAccentColorDark1">#c9a3f5</Color>
+      <Color x:Key="SystemAccentColorDark2">#b88eeb</Color>
+      <Color x:Key="SystemAccentColorLight1">#e4ccff</Color>
+      <Color x:Key="SystemAccentColorLight2">#eedbff</Color>
+      <Color x:Key="SystemAccentColorLight3">#f5e9ff</Color>
+
+      <Color x:Key="ForgeBackgroundColor">#131313</Color>
+      <Color x:Key="ForgeSurfaceDimColor">#131313</Color>
+      <Color x:Key="ForgeSurfaceBrightColor">#393939</Color>
+      <!-- Lowest used for sidebars/header-raised areas in MainWindow -->
+      <Color x:Key="ForgeSurfaceContainerLowestColor">#191919</Color>
+      <Color x:Key="ForgeSurfaceContainerLowColor">#1c1c1c</Color>
+      <Color x:Key="ForgeSurfaceContainerColor">#1e1e1e</Color>
+      <Color x:Key="ForgeSurfaceContainerHighColor">#232323</Color>
+      <Color x:Key="ForgeSurfaceContainerHighestColor">#2d2d2d</Color>
+      <Color x:Key="ForgeSurfaceHighColor">#262626</Color>
+      <Color x:Key="ForgeSurfaceVariantColor">#2a2a2a</Color>
+      <Color x:Key="ForgeOnSurfaceColor">#e5e2e1</Color>
+      <Color x:Key="ForgeOnSurfaceVariantColor">#9ba1a6</Color>
+      <Color x:Key="ForgeOutlineColor">#4a4a4a</Color>
+      <Color x:Key="ForgeOutlineVariantColor">#2a2a2a</Color>
+      <Color x:Key="ForgePrimaryColor">#d9b9ff</Color>
+      <Color x:Key="ForgeOnPrimaryColor">#460085</Color>
+      <Color x:Key="ForgePrimaryContainerColor">#7a00df</Color>
+      <Color x:Key="ForgeOnPrimaryContainerColor">#dec1ff</Color>
+      <Color x:Key="ForgeSecondaryColor">#adcae6</Color>
+      <Color x:Key="ForgeSecondaryContainerColor">#2e4961</Color>
+      <Color x:Key="ForgeOnSecondaryContainerColor">#9cb8d4</Color>
       <Color x:Key="ForgeErrorColor">#ffb4ab</Color>
       <Color x:Key="ForgeStatusAddedColor">#4ade80</Color>
-      <Color x:Key="ForgeStatusDeletedColor">#f87171</Color>
-      <Color x:Key="ForgeStatusModifiedColor">#fb923c</Color>
-      <Color x:Key="ForgeStatusUntrackedColor">#c2c6d6</Color>
-      <Color x:Key="ForgeDiffAddedFillColor">#2622c55e</Color>
-      <Color x:Key="ForgeDiffRemovedFillColor">#26ef4444</Color>
-      <Color x:Key="ForgeDiffSelectionFillColor">#40334866</Color>
-      <Color x:Key="ForgeDiffHeaderFillColor">#282d3449</Color>
-      <Color x:Key="ForgeDiffCollapsedFillColor">#148c909f</Color>
+      <Color x:Key="ForgeStatusDeletedColor">#ffb4ab</Color>
+      <Color x:Key="ForgeStatusModifiedColor">#4ade80</Color>
+      <Color x:Key="ForgeStatusUntrackedColor">#9ba1a6</Color>
+      <Color x:Key="ForgeDiffAddedFillColor">#264ade80</Color>
+      <Color x:Key="ForgeDiffRemovedFillColor">#26ffb4ab</Color>
+      <Color x:Key="ForgeDiffSelectionFillColor">#40d9b9ff</Color>
+      <Color x:Key="ForgeDiffHeaderFillColor">#282d2d2d</Color>
+      <Color x:Key="ForgeDiffCollapsedFillColor">#149ba1a6</Color>
       <Color x:Key="ForgeDiffAddedTextColor">#bbf7d0</Color>
       <Color x:Key="ForgeDiffRemovedTextColor">#fecaca</Color>
-      <Color x:Key="ForgeDiffGutterTextColor">#4Dc2c6d6</Color>
-      <Color x:Key="ForgeBannerColor">#5c3b00</Color>
-      <Color x:Key="ForgeSettingsScrimColor">#99060e20</Color>
-      <Color x:Key="ForgeMinimapTrackColor">#1A8c909f</Color>
-      <Color x:Key="ForgeMinimapViewportColor">#668c909f</Color>
+      <Color x:Key="ForgeDiffGutterTextColor">#4D9ba1a6</Color>
+      <Color x:Key="ForgeBannerColor">#3d2a14</Color>
+      <Color x:Key="ForgeSettingsScrimColor">#990e0e0e</Color>
+      <Color x:Key="ForgeMinimapTrackColor">#1A9ba1a6</Color>
+      <Color x:Key="ForgeMinimapViewportColor">#669ba1a6</Color>
 
       <SolidColorBrush x:Key="ForgeBackgroundBrush" Color="{StaticResource ForgeBackgroundColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceContainerLowestBrush" Color="{StaticResource ForgeSurfaceContainerLowestColor}" />
@@ -47,6 +57,7 @@
       <SolidColorBrush x:Key="ForgeSurfaceContainerBrush" Color="{StaticResource ForgeSurfaceContainerColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceContainerHighBrush" Color="{StaticResource ForgeSurfaceContainerHighColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceContainerHighestBrush" Color="{StaticResource ForgeSurfaceContainerHighestColor}" />
+      <SolidColorBrush x:Key="ForgeSurfaceHighBrush" Color="{StaticResource ForgeSurfaceHighColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceVariantBrush" Color="{StaticResource ForgeSurfaceVariantColor}" />
       <SolidColorBrush x:Key="ForgeOnSurfaceBrush" Color="{StaticResource ForgeOnSurfaceColor}" />
       <SolidColorBrush x:Key="ForgeOnSurfaceVariantBrush" Color="{StaticResource ForgeOnSurfaceVariantColor}" />
@@ -55,6 +66,7 @@
       <SolidColorBrush x:Key="ForgePrimaryBrush" Color="{StaticResource ForgePrimaryColor}" />
       <SolidColorBrush x:Key="ForgeOnPrimaryBrush" Color="{StaticResource ForgeOnPrimaryColor}" />
       <SolidColorBrush x:Key="ForgePrimaryContainerBrush" Color="{StaticResource ForgePrimaryContainerColor}" />
+      <SolidColorBrush x:Key="ForgeSecondaryBrush" Color="{StaticResource ForgeSecondaryColor}" />
       <SolidColorBrush x:Key="ForgeSecondaryContainerBrush" Color="{StaticResource ForgeSecondaryContainerColor}" />
       <SolidColorBrush x:Key="ForgeOnSecondaryContainerBrush" Color="{StaticResource ForgeOnSecondaryContainerColor}" />
       <SolidColorBrush x:Key="ForgeErrorBrush" Color="{StaticResource ForgeErrorColor}" />
@@ -75,50 +87,59 @@
       <SolidColorBrush x:Key="ForgeMinimapTrackBrush" Color="{StaticResource ForgeMinimapTrackColor}" />
       <SolidColorBrush x:Key="ForgeMinimapViewportBrush" Color="{StaticResource ForgeMinimapViewportColor}" />
       <SolidColorBrush x:Key="ForgeStatusAddedBadgeBgBrush" Color="#1A4ade80" />
-      <SolidColorBrush x:Key="ForgeStatusDeletedBadgeBgBrush" Color="#1Af87171" />
-      <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1Afb923c" />
-      <SolidColorBrush x:Key="ForgeStatusUntrackedBadgeBgBrush" Color="#2d3449" />
+      <SolidColorBrush x:Key="ForgeStatusDeletedBadgeBgBrush" Color="#1Affb4ab" />
+      <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1A4ade80" />
+      <SolidColorBrush x:Key="ForgeStatusUntrackedBadgeBgBrush" Color="#2d2d2d" />
     </ResourceDictionary>
 
-    <!-- Light -->
+    <!-- Light (Obsidian cool gray + violet) -->
     <ResourceDictionary x:Key="Light">
-      <Color x:Key="ForgeBackgroundColor">#f4f6fb</Color>
-      <Color x:Key="ForgeSurfaceDimColor">#e8ecf4</Color>
+      <!-- Fluent accent overrides (indigo-violet) -->
+      <Color x:Key="SystemAccentColor">#6d5290</Color>
+      <Color x:Key="SystemAccentColorDark1">#5a4278</Color>
+      <Color x:Key="SystemAccentColorDark2">#483260</Color>
+      <Color x:Key="SystemAccentColorLight1">#8669a8</Color>
+      <Color x:Key="SystemAccentColorLight2">#a08cc0</Color>
+      <Color x:Key="SystemAccentColorLight3">#eedbff</Color>
+
+      <Color x:Key="ForgeBackgroundColor">#f7f9fb</Color>
+      <Color x:Key="ForgeSurfaceDimColor">#f2f4f6</Color>
       <Color x:Key="ForgeSurfaceBrightColor">#ffffff</Color>
       <Color x:Key="ForgeSurfaceContainerLowestColor">#ffffff</Color>
-      <Color x:Key="ForgeSurfaceContainerLowColor">#eef1f8</Color>
-      <Color x:Key="ForgeSurfaceContainerColor">#e4e9f2</Color>
-      <Color x:Key="ForgeSurfaceContainerHighColor">#d8dee9</Color>
-      <Color x:Key="ForgeSurfaceContainerHighestColor">#cdd3e0</Color>
-      <Color x:Key="ForgeSurfaceVariantColor">#d8dee9</Color>
-      <Color x:Key="ForgeOnSurfaceColor">#1a2336</Color>
-      <Color x:Key="ForgeOnSurfaceVariantColor">#4a5568</Color>
-      <Color x:Key="ForgeOutlineColor">#6b7385</Color>
-      <Color x:Key="ForgeOutlineVariantColor">#c5cbd8</Color>
-      <Color x:Key="ForgePrimaryColor">#2657c9</Color>
+      <Color x:Key="ForgeSurfaceContainerLowColor">#f7f9fb</Color>
+      <Color x:Key="ForgeSurfaceContainerColor">#f2f4f6</Color>
+      <Color x:Key="ForgeSurfaceContainerHighColor">#e6e8ea</Color>
+      <Color x:Key="ForgeSurfaceContainerHighestColor">#e0e3e5</Color>
+      <Color x:Key="ForgeSurfaceHighColor">#eceef0</Color>
+      <Color x:Key="ForgeSurfaceVariantColor">#eceef0</Color>
+      <Color x:Key="ForgeOnSurfaceColor">#191c1e</Color>
+      <Color x:Key="ForgeOnSurfaceVariantColor">#46464b</Color>
+      <Color x:Key="ForgeOutlineColor">#958e9a</Color>
+      <Color x:Key="ForgeOutlineVariantColor">#c7c6cb</Color>
+      <Color x:Key="ForgePrimaryColor">#6d5290</Color>
       <Color x:Key="ForgeOnPrimaryColor">#ffffff</Color>
-      <Color x:Key="ForgePrimaryContainerColor">#4d8eff</Color>
-      <Color x:Key="ForgeOnPrimaryContainerColor">#001a44</Color>
-      <Color x:Key="ForgeSecondaryColor">#4a5d75</Color>
-      <Color x:Key="ForgeSecondaryContainerColor">#d5e3f5</Color>
-      <Color x:Key="ForgeOnSecondaryContainerColor">#2a3a4f</Color>
-      <Color x:Key="ForgeErrorColor">#b3261e</Color>
-      <Color x:Key="ForgeStatusAddedColor">#15803d</Color>
-      <Color x:Key="ForgeStatusDeletedColor">#dc2626</Color>
-      <Color x:Key="ForgeStatusModifiedColor">#c2410c</Color>
-      <Color x:Key="ForgeStatusUntrackedColor">#64748b</Color>
-      <Color x:Key="ForgeDiffAddedFillColor">#3322c55e</Color>
-      <Color x:Key="ForgeDiffRemovedFillColor">#33ef4444</Color>
-      <Color x:Key="ForgeDiffSelectionFillColor">#332657c9</Color>
-      <Color x:Key="ForgeDiffHeaderFillColor">#22c5cbd8</Color>
-      <Color x:Key="ForgeDiffCollapsedFillColor">#148c909f</Color>
+      <Color x:Key="ForgePrimaryContainerColor">#eedbff</Color>
+      <Color x:Key="ForgeOnPrimaryContainerColor">#270b48</Color>
+      <Color x:Key="ForgeSecondaryColor">#adcae6</Color>
+      <Color x:Key="ForgeSecondaryContainerColor">#d0e4ff</Color>
+      <Color x:Key="ForgeOnSecondaryContainerColor">#2d4961</Color>
+      <Color x:Key="ForgeErrorColor">#ba1a1a</Color>
+      <Color x:Key="ForgeStatusAddedColor">#22863a</Color>
+      <Color x:Key="ForgeStatusDeletedColor">#ba1a1a</Color>
+      <Color x:Key="ForgeStatusModifiedColor">#22863a</Color>
+      <Color x:Key="ForgeStatusUntrackedColor">#63646c</Color>
+      <Color x:Key="ForgeDiffAddedFillColor">#3322863a</Color>
+      <Color x:Key="ForgeDiffRemovedFillColor">#33ba1a1a</Color>
+      <Color x:Key="ForgeDiffSelectionFillColor">#336d5290</Color>
+      <Color x:Key="ForgeDiffHeaderFillColor">#22c7c6cb</Color>
+      <Color x:Key="ForgeDiffCollapsedFillColor">#14958e9a</Color>
       <Color x:Key="ForgeDiffAddedTextColor">#14532d</Color>
       <Color x:Key="ForgeDiffRemovedTextColor">#7f1d1d</Color>
-      <Color x:Key="ForgeDiffGutterTextColor">#806b7385</Color>
+      <Color x:Key="ForgeDiffGutterTextColor">#8063646c</Color>
       <Color x:Key="ForgeBannerColor">#fff3cd</Color>
-      <Color x:Key="ForgeSettingsScrimColor">#660b1326</Color>
-      <Color x:Key="ForgeMinimapTrackColor">#1A6b7385</Color>
-      <Color x:Key="ForgeMinimapViewportColor">#666b7385</Color>
+      <Color x:Key="ForgeSettingsScrimColor">#66191c1e</Color>
+      <Color x:Key="ForgeMinimapTrackColor">#1A958e9a</Color>
+      <Color x:Key="ForgeMinimapViewportColor">#66958e9a</Color>
 
       <SolidColorBrush x:Key="ForgeBackgroundBrush" Color="{StaticResource ForgeBackgroundColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceContainerLowestBrush" Color="{StaticResource ForgeSurfaceContainerLowestColor}" />
@@ -126,6 +147,7 @@
       <SolidColorBrush x:Key="ForgeSurfaceContainerBrush" Color="{StaticResource ForgeSurfaceContainerColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceContainerHighBrush" Color="{StaticResource ForgeSurfaceContainerHighColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceContainerHighestBrush" Color="{StaticResource ForgeSurfaceContainerHighestColor}" />
+      <SolidColorBrush x:Key="ForgeSurfaceHighBrush" Color="{StaticResource ForgeSurfaceHighColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceVariantBrush" Color="{StaticResource ForgeSurfaceVariantColor}" />
       <SolidColorBrush x:Key="ForgeOnSurfaceBrush" Color="{StaticResource ForgeOnSurfaceColor}" />
       <SolidColorBrush x:Key="ForgeOnSurfaceVariantBrush" Color="{StaticResource ForgeOnSurfaceVariantColor}" />
@@ -134,6 +156,7 @@
       <SolidColorBrush x:Key="ForgePrimaryBrush" Color="{StaticResource ForgePrimaryColor}" />
       <SolidColorBrush x:Key="ForgeOnPrimaryBrush" Color="{StaticResource ForgeOnPrimaryColor}" />
       <SolidColorBrush x:Key="ForgePrimaryContainerBrush" Color="{StaticResource ForgePrimaryContainerColor}" />
+      <SolidColorBrush x:Key="ForgeSecondaryBrush" Color="{StaticResource ForgeSecondaryColor}" />
       <SolidColorBrush x:Key="ForgeSecondaryContainerBrush" Color="{StaticResource ForgeSecondaryContainerColor}" />
       <SolidColorBrush x:Key="ForgeOnSecondaryContainerBrush" Color="{StaticResource ForgeOnSecondaryContainerColor}" />
       <SolidColorBrush x:Key="ForgeErrorBrush" Color="{StaticResource ForgeErrorColor}" />
@@ -153,10 +176,10 @@
       <SolidColorBrush x:Key="ForgeSettingsScrimBrush" Color="{StaticResource ForgeSettingsScrimColor}" />
       <SolidColorBrush x:Key="ForgeMinimapTrackBrush" Color="{StaticResource ForgeMinimapTrackColor}" />
       <SolidColorBrush x:Key="ForgeMinimapViewportBrush" Color="{StaticResource ForgeMinimapViewportColor}" />
-      <SolidColorBrush x:Key="ForgeStatusAddedBadgeBgBrush" Color="#1A15803d" />
-      <SolidColorBrush x:Key="ForgeStatusDeletedBadgeBgBrush" Color="#1Adc2626" />
-      <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1Ac2410c" />
-      <SolidColorBrush x:Key="ForgeStatusUntrackedBadgeBgBrush" Color="#d8dee9" />
+      <SolidColorBrush x:Key="ForgeStatusAddedBadgeBgBrush" Color="#1A22863a" />
+      <SolidColorBrush x:Key="ForgeStatusDeletedBadgeBgBrush" Color="#1Aba1a1a" />
+      <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1A22863a" />
+      <SolidColorBrush x:Key="ForgeStatusUntrackedBadgeBgBrush" Color="#eceef0" />
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
 </ResourceDictionary>

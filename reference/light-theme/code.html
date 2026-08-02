@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Workspace IDE - Code Reviewer</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@450&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "inverse-on-surface": "#313030",
+                        "primary-fixed-dim": "#d9b9ff",
+                        "primary": "#6d5290", // Deep indigo/violet accent
+                        "surface-container-high": "#e6e8ea",
+                        "error": "#ffb4ab",
+                        "surface-tint": "#6d5290",
+                        "tertiary-container": "#ffb68b",
+                        "tertiary-fixed-dim": "#ffb68b",
+                        "primary-container": "#eedbff",
+                        "surface-high": "#eceef0",
+                        "error-red": "#ba1a1a",
+                        "on-secondary-container": "#9cb8d4",
+                        "on-background": "#191c1e",
+                        "border-subtle": "#e0e3e5",
+                        "surface-container-low": "#f7f9fb",
+                        "surface": "#ffffff",
+                        "tertiary": "#ffdbc8",
+                        "on-tertiary-fixed": "#321200",
+                        "surface-dim": "#f2f4f6",
+                        "on-surface": "#191c1e",
+                        "on-primary-fixed": "#270b48",
+                        "secondary-fixed-dim": "#adcae6",
+                        "on-primary-fixed-variant": "#543a76",
+                        "on-tertiary-container": "#7a4523",
+                        "inverse-surface": "#191c1e",
+                        "on-secondary-fixed": "#001e31",
+                        "on-secondary-fixed-variant": "#2d4961",
+                        "surface-base": "#ffffff",
+                        "on-tertiary": "#502405",
+                        "surface-container-highest": "#e0e3e5",
+                        "surface-low": "#fcfcfc",
+                        "text-muted": "#63646c",
+                        "success-green": "#22863a",
+                        "secondary": "#adcae6",
+                        "on-secondary": "#ffffff",
+                        "surface-variant": "#eceef0",
+                        "on-tertiary-fixed-variant": "#6c3a19",
+                        "outline": "#958e9a",
+                        "background": "#f7f9fb",
+                        "on-surface-variant": "#46464b",
+                        "on-primary-container": "#270b48",
+                        "outline-variant": "#c7c6cb",
+                        "surface-container": "#f2f4f6",
+                        "tertiary-fixed": "#ffdbc9",
+                        "secondary-container": "#d0e4ff",
+                        "inverse-primary": "#d9b9ff",
+                        "primary-fixed": "#eedcff",
+                        "error-container": "#ffdad6",
+                        "on-error-container": "#93000a",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary-fixed": "#cce5ff",
+                        "text-vibrant": "#121315",
+                        "on-error": "#ffffff",
+                        "surface-bright": "#ffffff",
+                        "on-primary": "#ffffff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "stack-loose": "24px",
+                        "stack-tight": "4px",
+                        "gutter": "20px",
+                        "stack-base": "12px",
+                        "margin-safe": "24px",
+                        "unit": "4px",
+                        "sidebar-width": "260px",
+                        "file-list-width": "380px"
+                    },
+                    "fontFamily": {
+                        "headline-md": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "headline-xl": ["Inter"],
+                        "headline-lg": ["Inter"],
+                        "code-md": ["JetBrains Mono"],
+                        "label-sm": ["Inter"],
+                        "sidebar-header": ["Inter"],
+                        "body-md": ["Inter"]
+                    },
+                    "fontSize": {
+                        "headline-md": ["14px", {"lineHeight": "20px", "fontWeight": "600"}],
+                        "body-lg": ["15px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "headline-xl": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.01em", "fontWeight": "700"}],
+                        "headline-lg": ["18px", {"lineHeight": "26px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "code-md": ["12px", {"lineHeight": "18px", "fontWeight": "450"}],
+                        "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "sidebar-header": ["10px", {"lineHeight": "12px", "letterSpacing": "0.08em", "fontWeight": "700"}],
+                        "body-md": ["13px", {"lineHeight": "20px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-color: #f7f9fb;
+            color: #191c1e;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+        .material-symbols-outlined {
+            font-size: 18px;
+            vertical-align: middle;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f2f4f6;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #c7c6cb;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #958e9a;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen font-body-md text-body-md selection:bg-primary/20">
+<!-- TopNavBar -->
+<header class="flex items-center justify-between px-6 w-full h-14 bg-surface border-b border-outline-variant z-50">
+<div class="flex items-center gap-10">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">terminal</span>
+<span class="text-body-lg font-headline-md font-bold text-on-surface tracking-tight">CodeReviewr</span>
+</div>
+<nav class="flex items-center gap-2">
+<button class="flex items-center gap-1.5 text-on-surface-variant hover:text-primary px-3 py-1.5 transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined !text-[18px]">upload</span>
+<span class="font-label-sm uppercase tracking-widest text-[11px]">Push</span>
+</button>
+<button class="flex items-center gap-1.5 text-on-surface-variant hover:text-primary px-3 py-1.5 transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined !text-[18px]">download</span>
+<span class="font-label-sm uppercase tracking-widest text-[11px]">Pull</span>
+</button>
+<button class="flex items-center gap-1.5 text-on-surface-variant hover:text-primary px-3 py-1.5 transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined !text-[18px]">sync</span>
+<span class="font-label-sm uppercase tracking-widest text-[11px]">Fetch</span>
+</button>
+<div class="h-4 w-[1px] bg-outline-variant mx-2"></div>
+<button class="flex items-center gap-1.5 text-on-surface-variant hover:text-primary px-3 py-1.5 transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined !text-[18px]">archive</span>
+<span class="font-label-sm uppercase tracking-widest text-[11px]">Stash</span>
+</button>
+<button class="flex items-center gap-1.5 text-on-surface-variant hover:text-primary px-3 py-1.5 transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined !text-[18px]">public</span>
+<span class="font-label-sm uppercase tracking-widest text-[11px]">View Remote</span>
+</button>
+<button class="flex items-center gap-1.5 text-on-surface-variant hover:text-primary px-3 py-1.5 transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined !text-[18px]">folder_open</span>
+<span class="font-label-sm uppercase tracking-widest text-[11px]">Show in Finder</span>
+</button>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 px-3 py-1.5 bg-surface-container rounded border border-outline-variant">
+<span class="material-symbols-outlined text-primary/70 !text-[16px]">account_tree</span>
+<span class="font-code-md text-[11px] text-on-surface">feature/phase2/1</span>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer hover:text-primary transition-colors">settings</span>
+</div>
+</header>
+<div class="flex flex-1 overflow-hidden">
+<!-- Left SideNavBar -->
+<aside class="flex flex-col h-full w-sidebar-width bg-surface-container-low border-r border-outline-variant shrink-0">
+<div class="p-6 pb-4 flex items-center justify-between">
+<div>
+<h2 class="font-sidebar-header text-on-surface-variant uppercase">PROJECT ALPHA</h2>
+<p class="font-label-sm text-[10px] text-primary/70">main branch</p>
+</div>
+<span class="material-symbols-outlined text-on-surface-variant opacity-40 hover:opacity-100 cursor-pointer">keyboard_double_arrow_left</span>
+</div>
+<div class="flex-1 overflow-y-auto">
+<!-- Workspace -->
+<div class="mb-6">
+<div class="flex items-center px-6 py-2.5 gap-2 cursor-pointer hover:bg-surface-container-high transition-all group">
+<span class="material-symbols-outlined text-[14px] opacity-40 group-hover:opacity-100">expand_more</span>
+<span class="font-label-sm text-on-surface-variant uppercase text-[10px]">WORKSPACE</span>
+</div>
+<div class="flex items-center justify-between px-9 py-2.5 bg-surface-container-highest text-primary border-l-[3px] border-primary cursor-pointer shadow-sm">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[18px]">description</span>
+<span class="font-body-md font-semibold">File Status</span>
+</div>
+<span class="bg-surface-container-low px-1.5 py-0.5 rounded text-[10px] text-on-surface-variant font-bold border border-outline-variant">30</span>
+</div>
+<div class="flex items-center gap-3 px-9 py-2.5 text-on-surface-variant hover:bg-surface-container-high cursor-pointer transition-all">
+<span class="material-symbols-outlined text-[18px] opacity-60">history</span>
+<span class="font-body-md">History</span>
+</div>
+</div>
+<!-- Branches -->
+<div class="mb-6">
+<div class="flex items-center px-6 py-2.5 gap-2 cursor-pointer hover:bg-surface-container-high transition-all group">
+<span class="material-symbols-outlined text-[14px] opacity-40 group-hover:opacity-100">chevron_right</span>
+<span class="font-label-sm text-on-surface-variant uppercase text-[10px]">BRANCHES</span>
+</div>
+</div>
+<!-- Stashes -->
+<div class="mb-6">
+<div class="flex items-center px-6 py-2.5 gap-2 cursor-pointer hover:bg-surface-container-high transition-all group">
+<span class="material-symbols-outlined text-[14px] opacity-40 group-hover:opacity-100">expand_more</span>
+<span class="font-label-sm text-on-surface-variant uppercase text-[10px]">STASHES</span>
+</div>
+<div class="flex items-center gap-3 px-9 py-2 text-on-surface-variant hover:bg-surface-container-high cursor-pointer transition-all">
+<span class="material-symbols-outlined text-[18px] opacity-60">inventory_2</span>
+<span class="font-body-md truncate">WIP on main: 79597c3 Add ...</span>
+</div>
+</div>
+<!-- Pull Requests -->
+<div class="mb-8">
+<div class="flex items-center px-6 py-2.5 gap-2 cursor-pointer hover:bg-surface-container-high transition-all group">
+<span class="material-symbols-outlined text-[14px] opacity-40 group-hover:opacity-100">expand_more</span>
+<span class="font-label-sm text-on-surface-variant uppercase text-[10px]">PULL REQUESTS</span>
+</div>
+<!-- Needs my review -->
+<div class="pl-8">
+<div class="flex items-center gap-2 px-2 py-2 text-on-surface cursor-pointer">
+<span class="material-symbols-outlined text-[14px] opacity-60">expand_more</span>
+<span class="font-label-sm text-[11px]">Needs my review</span>
+</div>
+<div class="pl-4 border-l border-outline-variant ml-3.5 space-y-3 py-3">
+<div class="px-3 py-2 hover:bg-surface-container-high rounded cursor-pointer group">
+<div class="font-label-sm text-on-surface leading-tight text-[12px] tracking-normal">Fix test database initializatio...</div>
+<div class="text-[10px] text-text-muted mt-1 font-medium">mzbrau/modular-monolith</div>
+<div class="text-[10px] text-text-muted/60 mt-0.5 italic">created 19 Jan</div>
+</div>
+<div class="px-3 py-2 hover:bg-surface-container-high rounded cursor-pointer group">
+<div class="font-label-sm text-on-surface leading-tight text-[12px] tracking-normal">docs: add Docusaurus site w...</div>
+<div class="text-[10px] text-text-muted mt-1 font-medium">mzbrau/tripit-scraper</div>
+<div class="text-[10px] text-text-muted/60 mt-0.5 italic">created 31 May</div>
+</div>
+</div>
+</div>
+<!-- Reviewed -->
+<div class="pl-8 mt-2">
+<div class="flex items-center gap-2 px-2 py-2 text-on-surface-variant cursor-pointer">
+<span class="material-symbols-outlined text-[14px] opacity-60">chevron_right</span>
+<span class="font-label-sm text-[11px]">Reviewed</span>
+</div>
+</div>
+<!-- My pull requests -->
+<div class="pl-8 mt-2">
+<div class="flex items-center gap-2 px-2 py-2 text-on-surface cursor-pointer">
+<span class="material-symbols-outlined text-[14px] opacity-60">expand_more</span>
+<span class="font-label-sm text-[11px]">My pull requests</span>
+</div>
+<div class="pl-4 border-l border-outline-variant ml-3.5 space-y-3 py-3">
+<div class="px-3 py-2 hover:bg-surface-container-high rounded cursor-pointer">
+<div class="font-label-sm text-primary font-bold leading-tight text-[12px] tracking-normal">Add AI onboarding</div>
+<div class="text-[10px] text-text-muted mt-1 font-medium">mzbrau/fig</div>
+<div class="text-[10px] text-text-muted/60 mt-0.5">created 1h ago</div>
+</div>
+<div class="px-3 py-2 hover:bg-surface-container-high rounded cursor-pointer">
+<div class="font-label-sm text-on-surface leading-tight text-[12px] tracking-normal">Phase 2 initial version</div>
+<div class="text-[10px] text-text-muted mt-1 font-medium">mzbrau/CodeReviewr</div>
+<div class="text-[10px] text-text-muted/60 mt-0.5">created 1h ago</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- SideNav Footer -->
+<div class="mt-auto border-t border-outline-variant bg-surface-container-low/50">
+<div class="flex items-center gap-3 px-6 py-4 hover:bg-surface-container-high cursor-pointer transition-all group">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary transition-colors">settings</span>
+<span class="font-label-sm text-[11px]">REPOSITORY SETTINGS</span>
+</div>
+</div>
+</aside>
+<!-- Central-left panel: Pull request files -->
+<main class="flex flex-1">
+<div class="w-file-list-width border-r border-outline-variant bg-surface-dim flex flex-col">
+<div class="p-6 border-b border-outline-variant">
+<div class="flex justify-between items-center mb-3">
+<h3 class="font-headline-md text-on-surface">Pull request files</h3>
+<span class="font-sidebar-header text-text-muted uppercase">FILE STATUS</span>
+</div>
+<p class="text-[11px] text-text-muted mb-5">0 / 4 files viewed · 3 comments · 2 unresolved</p>
+<div class="relative mb-5">
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded px-4 py-2 text-body-md focus:border-primary focus:ring-1 focus:ring-primary/20 outline-none text-on-surface placeholder:text-text-muted/50" placeholder="Filter files..." type="text"/>
+</div>
+<div class="flex flex-wrap gap-4 items-center">
+<div class="relative inline-block">
+<select class="appearance-none bg-surface-container-high border border-outline-variant rounded px-6 py-1.5 text-[11px] font-semibold cursor-pointer outline-none hover:border-primary/50 transition-colors">
+<option>All</option>
+</select>
+<span class="material-symbols-outlined absolute right-2 top-1.5 text-[14px] pointer-events-none opacity-60">expand_more</span>
+</div>
+<div class="flex items-center gap-4">
+<label class="flex items-center gap-2 cursor-pointer group">
+<input class="w-3.5 h-3.5 rounded bg-surface-container-lowest border-outline-variant text-primary focus:ring-0 cursor-pointer" type="checkbox"/>
+<span class="font-label-sm text-[10px] text-on-surface-variant uppercase group-hover:text-on-surface">Stale</span>
+</label>
+<label class="flex items-center gap-2 cursor-pointer group">
+<input class="w-3.5 h-3.5 rounded bg-surface-container-lowest border-outline-variant text-primary focus:ring-0 cursor-pointer" type="checkbox"/>
+<span class="font-label-sm text-[10px] text-on-surface-variant uppercase group-hover:text-on-surface">Commented</span>
+</label>
+<label class="flex items-center gap-2 cursor-pointer group">
+<input class="w-3.5 h-3.5 rounded bg-surface-container-lowest border-outline-variant text-primary focus:ring-0 cursor-pointer" type="checkbox"/>
+<span class="font-label-sm text-[10px] text-on-surface-variant uppercase group-hover:text-on-surface">Unresolved</span>
+</label>
+</div>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto">
+<div class="flex items-center gap-2 px-6 py-3 border-b border-outline-variant text-on-surface bg-surface-container-low hover:bg-surface-container-high cursor-pointer transition-colors">
+<span class="material-symbols-outlined !text-[18px] opacity-70">forum</span>
+<span class="font-label-sm text-[11px] uppercase">Conversation</span>
+</div>
+<!-- File List -->
+<div class="py-3">
+<!-- File 1 -->
+<div class="flex items-center justify-between px-6 py-3 hover:bg-surface-container-high cursor-pointer transition-colors group">
+<div class="flex items-center gap-3 overflow-hidden">
+<span class="font-code-md text-[12px] text-on-surface-variant truncate group-hover:text-on-surface">doc/fig-documentation/docs/guides/0-add-w...</span>
+</div>
+<div class="flex gap-1.5 shrink-0">
+<span class="bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px] font-bold border border-primary/20">1</span>
+<span class="bg-surface-variant px-1.5 py-0.5 rounded text-[10px] font-bold text-on-surface-variant border border-outline-variant">A</span>
+</div>
+</div>
+<!-- File 2 (Active) -->
+<div class="flex items-center justify-between px-6 py-3 bg-surface-container-highest border-l-[4px] border-primary cursor-pointer transition-colors group shadow-sm">
+<div class="flex items-center gap-3 overflow-hidden">
+<span class="font-code-md text-[12px] text-primary font-bold truncate">doc/fig-documentation/docs/intro.md</span>
+</div>
+<div class="flex gap-1.5 shrink-0">
+<span class="bg-primary text-on-primary px-1.5 py-0.5 rounded text-[10px] font-bold">1</span>
+<span class="bg-success-green/10 px-1.5 py-0.5 rounded text-[10px] font-bold text-success-green border border-success-green/20">M</span>
+</div>
+</div>
+<!-- File 3 -->
+<div class="flex items-center justify-between px-6 py-3 hover:bg-surface-container-high cursor-pointer transition-colors group">
+<div class="flex items-center gap-3 overflow-hidden">
+<span class="font-code-md text-[12px] text-on-surface-variant truncate group-hover:text-on-surface">doc/fig-documentation/src/pages/index.js</span>
+</div>
+<div class="flex gap-1.5 shrink-0">
+<span class="bg-success-green/10 px-1.5 py-0.5 rounded text-[10px] font-bold text-success-green border border-success-green/20">M</span>
+</div>
+</div>
+<!-- File 4 -->
+<div class="flex items-center justify-between px-6 py-3 hover:bg-surface-container-high cursor-pointer transition-colors group">
+<div class="flex items-center gap-3 overflow-hidden">
+<span class="font-code-md text-[12px] text-on-surface-variant truncate group-hover:text-on-surface">doc/fig-documentation/src/pages/index.module...</span>
+</div>
+<div class="flex gap-1.5 shrink-0">
+<span class="bg-success-green/10 px-1.5 py-0.5 rounded text-[10px] font-bold text-success-green border border-success-green/20">M</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Local Notes -->
+<div class="p-6 border-t border-outline-variant bg-surface-container-low">
+<h4 class="font-label-sm text-[10px] text-on-surface-variant mb-3 uppercase tracking-[0.1em]">Local notes</h4>
+<textarea class="w-full h-28 bg-surface-container-lowest border border-outline-variant rounded-lg p-4 text-code-md text-on-surface outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/10 resize-none shadow-inner placeholder:text-text-muted/30" placeholder="Private notes (never synced)"></textarea>
+</div>
+</div>
+<!-- Right main area: Diff Viewer -->
+<div class="flex-1 flex flex-col bg-surface-container-lowest">
+<!-- Diff Toolbar -->
+<div class="h-14 border-b border-outline-variant flex items-center justify-end px-6 gap-6 bg-surface shadow-sm">
+<div class="flex items-center gap-3 border-r border-outline-variant pr-6">
+<button class="text-[12px] text-on-surface-variant hover:text-primary px-3 py-1.5 transition-colors font-bold uppercase tracking-wider">Approve</button>
+<button class="text-[12px] text-on-surface-variant hover:text-primary px-3 py-1.5 transition-colors font-bold uppercase tracking-wider">Comment</button>
+<button class="text-[12px] text-error-red/80 hover:text-error-red px-3 py-1.5 transition-colors font-bold uppercase tracking-wider">Request changes</button>
+</div>
+<div class="flex items-center gap-6">
+<label class="flex items-center gap-2 cursor-pointer group">
+<input class="w-3.5 h-3.5 rounded bg-surface-container-lowest border-outline-variant text-primary focus:ring-0 cursor-pointer" type="checkbox"/>
+<span class="text-[12px] text-on-surface-variant group-hover:text-on-surface transition-colors">Ignore whitespace</span>
+</label>
+<div class="relative">
+<select class="appearance-none bg-surface-container-high border border-outline-variant rounded px-5 py-1.5 text-[11px] font-bold cursor-pointer outline-none hover:border-primary/50 transition-colors min-w-[120px]">
+<option>Unified</option>
+<option>Split</option>
+</select>
+<span class="material-symbols-outlined absolute right-2.5 top-2 text-[14px] pointer-events-none opacity-60">expand_more</span>
+</div>
+</div>
+</div>
+<!-- Empty State Content -->
+<div class="flex-1 flex flex-col relative bg-surface-low/30">
+<div class="absolute inset-0 flex items-center justify-center opacity-30 pointer-events-none">
+<div class="text-center">
+<span class="material-symbols-outlined text-7xl mb-6 block text-on-surface-variant/50 font-thin">code_off</span>
+<p class="font-headline-lg text-on-surface-variant tracking-tight">Select a file to view its diff</p>
+</div>
+</div>
+<!-- Unplaceable comments (Bottom pinned area) -->
+<div class="mt-auto border-t border-outline-variant bg-surface-container-low shadow-2xl">
+<div class="px-6 py-3 border-b border-outline-variant bg-surface-container-high flex justify-between items-center">
+<h5 class="font-sidebar-header text-on-surface-variant uppercase">Unplaceable comments</h5>
+<span class="bg-surface-container-lowest border border-outline-variant px-2 py-0.5 rounded text-[10px] text-text-muted font-bold">1 comment</span>
+</div>
+<div class="p-6 space-y-6 max-h-[380px] overflow-y-auto">
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden shadow-sm">
+<div class="bg-surface-container-high px-5 py-3 text-code-md border-b border-outline-variant text-text-muted leading-relaxed italic">
+                                    verify each finding against current code. Fix only stiff valid issues, skip the rest with a brief reason, keep changes minimal, and validate.
+                                </div>
+<div class="p-5 font-code-md text-[12px] leading-relaxed text-on-surface">
+                                    In <span class="text-primary font-bold">@doc/fig-documentation/docs/guides/0-add-with-ai.md</span> at line 66, Update the Fig Web credentials guidance near the removed localhost URL to state that admin/admin is for isolated local development only, and require changing the default password before exposing Fig Web or using it outside localhost.
+                                </div>
+<div class="px-5 pb-5 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="w-5 h-5 rounded-full bg-success-green/10 flex items-center justify-center border border-success-green/20">
+<span class="material-symbols-outlined !text-[12px] text-success-green font-bold">check</span>
+</div>
+<span class="text-on-surface text-[11px] font-medium">Addressed in commit <span class="font-code-md text-primary font-bold">3efaf31</span></span>
+</div>
+</div>
+</div>
+<!-- Draft Comment Section -->
+<div class="space-y-4 pt-2">
+<div class="flex items-center justify-between">
+<h6 class="font-sidebar-header text-on-surface-variant uppercase">Draft comment</h6>
+<button class="bg-primary text-on-primary px-6 py-2 rounded font-label-sm hover:shadow-lg hover:bg-primary/90 active:scale-95 transition-all shadow-md">Post Comment</button>
+</div>
+<textarea class="w-full h-24 bg-surface-container-lowest border border-outline-variant rounded-xl p-4 text-body-md text-on-surface focus:border-primary/50 focus:ring-1 focus:ring-primary/10 outline-none resize-none shadow-inner placeholder:text-text-muted/30" placeholder="Enter comment text..."></textarea>
+<input class="w-full bg-surface-container-lowest border border-outline-variant rounded-xl px-4 py-2.5 text-[12px] text-on-surface focus:border-primary/50 outline-none shadow-inner" placeholder="Optional review summary" type="text"/>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+<!-- Footer Status Bar -->
+<footer class="fixed bottom-0 w-full h-7 bg-surface-container-lowest border-t border-outline-variant flex justify-between items-center px-6 z-50">
+<div class="flex items-center gap-6 text-on-surface-variant font-code-md text-[11px]">
+<div class="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors group">
+<span class="material-symbols-outlined !text-[14px] opacity-60 group-hover:opacity-100">terminal</span>
+<span class="opacity-80 group-hover:opacity-100">Git Output</span>
+</div>
+<div class="h-3 w-[1px] bg-outline-variant"></div>
+<div class="flex items-center gap-2">
+<span class="opacity-40">Branch:</span>
+<span class="text-primary font-bold">feature/phase2/1</span>
+</div>
+<div class="h-3 w-[1px] bg-outline-variant"></div>
+<span class="opacity-40 truncate max-w-[400px]">/Users/michaelbrowne/Documents/Projects/CodeReviewr/</span>
+</div>
+<div class="flex items-center gap-6 text-on-surface-variant font-code-md text-[11px]">
+<span class="opacity-40">Ln 42, Col 12 | UTF-8 | TypeScript</span>
+<div class="flex items-center gap-1.5 cursor-pointer hover:text-primary transition-colors group">
+<span class="opacity-40 group-hover:opacity-100">Clear</span>
+<span class="material-symbols-outlined !text-[14px] opacity-40 group-hover:opacity-100">chevron_right</span>
+</div>
+</div>
+</footer>
+<script>
+        // Micro-interactions
+        document.querySelectorAll('.cursor-pointer, button').forEach(el => {
+            el.addEventListener('click', () => {
+                // Console interaction tracking for prototyping
+            });
+        });
+
+        // Search highlight interaction
+        const searchInput = document.querySelector('input[placeholder="Filter files..."]');
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                const val = e.target.value.toLowerCase();
+                document.querySelectorAll('.font-code-md.truncate').forEach(file => {
+                    const row = file.closest('.group, [class*="bg-surface-container-highest"]');
+                    if (row) {
+                        if (file.textContent.toLowerCase().includes(val)) {
+                            row.style.opacity = '1';
+                            row.style.display = 'flex';
+                        } else {
+                            row.style.display = 'none';
+                        }
+                    }
+                });
+            });
+        }
+    </script>
+</body></html>

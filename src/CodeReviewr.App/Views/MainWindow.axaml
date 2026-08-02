@@ -48,8 +48,8 @@
     <!-- Main workspace -->
     <DockPanel IsVisible="{Binding WorkingCopy.HasRepository}">
       <!-- Top bar -->
-      <Border DockPanel.Dock="Top" Height="48" Padding="8,0"
-              Background="{DynamicResource ForgeBackgroundBrush}"
+      <Border DockPanel.Dock="Top" Height="44" Padding="8,0"
+              Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
               BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
               BorderThickness="0,0,0,1">
         <Grid ColumnDefinitions="*,Auto">
@@ -254,21 +254,14 @@
                     <icons:MaterialIcon Kind="{Binding WorkingCopy.WorkspaceExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                         Width="14" Height="14" />
                     <icons:MaterialIcon Kind="Monitor" Width="14" Height="14" Opacity="0.7" />
-                    <TextBlock Text="WORKSPACE" FontWeight="SemiBold" FontSize="11"
-                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                    <TextBlock Text="WORKSPACE" Classes="SectionLabel" VerticalAlignment="Center" />
                   </StackPanel>
                 </Button>
                 <StackPanel IsVisible="{Binding WorkingCopy.WorkspaceExpanded}" Spacing="1">
-                  <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                  <Button Classes="Ghost"
+                          Classes.NavSelected="{Binding WorkingCopy.IsFileStatusNavSelected}"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                           Padding="28,6,12,6" Command="{Binding SelectWorkspaceFileStatusCommand}">
-                    <Button.Styles>
-                      <Style Selector="Button">
-                        <Setter Property="Background" Value="Transparent" />
-                      </Style>
-                      <Style Selector="Button:pointerover /template/ ContentPresenter">
-                        <Setter Property="Background" Value="{DynamicResource ForgeSurfaceVariantBrush}" />
-                      </Style>
-                    </Button.Styles>
                     <DockPanel>
                       <Border DockPanel.Dock="Right" Classes="Chip" VerticalAlignment="Center"
                               IsVisible="{Binding WorkingCopy.WorkingCopyChangeCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
@@ -284,7 +277,9 @@
                       </StackPanel>
                     </DockPanel>
                   </Button>
-                  <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                  <Button Classes="Ghost"
+                          Classes.NavSelected="{Binding WorkingCopy.IsHistoryNavSelected}"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                           Padding="28,6,12,6" Command="{Binding SelectWorkspaceHistoryCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                       <icons:MaterialIcon Kind="History" Width="16" Height="16" />
@@ -301,8 +296,7 @@
                     <icons:MaterialIcon Kind="{Binding WorkingCopy.BranchesExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                         Width="14" Height="14" />
                     <icons:MaterialIcon Kind="SourceBranch" Width="14" Height="14" Opacity="0.7" />
-                    <TextBlock Text="BRANCHES" FontWeight="SemiBold" FontSize="11"
-                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                    <TextBlock Text="BRANCHES" Classes="SectionLabel" VerticalAlignment="Center" />
                   </StackPanel>
                 </Button>
                 <ItemsControl ItemsSource="{Binding WorkingCopy.Branches}"
@@ -343,8 +337,7 @@
                     <icons:MaterialIcon Kind="{Binding WorkingCopy.StashesExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                         Width="14" Height="14" />
                     <icons:MaterialIcon Kind="Archive" Width="14" Height="14" Opacity="0.7" />
-                    <TextBlock Text="STASHES" FontWeight="SemiBold" FontSize="11"
-                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                    <TextBlock Text="STASHES" Classes="SectionLabel" VerticalAlignment="Center" />
                   </StackPanel>
                 </Button>
                 <ItemsControl ItemsSource="{Binding WorkingCopy.Stashes}"
@@ -382,8 +375,7 @@
                     <icons:MaterialIcon Kind="{Binding Review.PullRequestsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                         Width="14" Height="14" />
                     <icons:MaterialIcon Kind="SourcePull" Width="14" Height="14" Opacity="0.7" />
-                    <TextBlock Text="PULL REQUESTS" FontWeight="SemiBold" FontSize="11"
-                               Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                    <TextBlock Text="PULL REQUESTS" Classes="SectionLabel" VerticalAlignment="Center" />
                   </StackPanel>
                 </Button>
                 <StackPanel IsVisible="{Binding Review.PullRequestsExpanded}" Spacing="1">
@@ -395,7 +387,8 @@
                       <TextBlock Text="Needs my review" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
                     </StackPanel>
                   </Button>
-                  <ListBox ItemsSource="{Binding Review.NeedsMyReview}"
+                  <ListBox Classes="PrList"
+                           ItemsSource="{Binding Review.NeedsMyReview}"
                            IsVisible="{Binding Review.NeedsMyReviewExpanded}"
                            SelectionMode="Single"
                            SelectedItem="{Binding Review.SelectedPullRequest}"
@@ -422,7 +415,8 @@
                       <TextBlock Text="Reviewed" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
                     </StackPanel>
                   </Button>
-                  <ListBox ItemsSource="{Binding Review.Reviewed}"
+                  <ListBox Classes="PrList"
+                           ItemsSource="{Binding Review.Reviewed}"
                            IsVisible="{Binding Review.ReviewedExpanded}"
                            SelectionMode="Single"
                            SelectedItem="{Binding Review.SelectedPullRequest}"
@@ -449,7 +443,8 @@
                       <TextBlock Text="My pull requests" FontSize="12" VerticalAlignment="Center" Opacity="0.85" />
                     </StackPanel>
                   </Button>
-                  <ListBox ItemsSource="{Binding Review.MyPullRequests}"
+                  <ListBox Classes="PrList"
+                           ItemsSource="{Binding Review.MyPullRequests}"
                            IsVisible="{Binding Review.MyPullRequestsExpanded}"
                            SelectionMode="Single"
                            SelectedItem="{Binding Review.SelectedPullRequest}"
@@ -1093,7 +1088,7 @@
                      MaxWidth="1200" MaxHeight="1200" />
             </ScrollViewer>
 
-            <Border Background="#80060e20"
+            <Border Background="{DynamicResource ForgeSettingsScrimBrush}"
                     IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
               <ProgressBar Width="36" Height="36" IsIndeterminate="True"
                            HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -1467,7 +1462,7 @@
                 </Canvas>
               </Panel>
             </DockPanel>
-            <Border Background="#80060e20"
+            <Border Background="{DynamicResource ForgeSettingsScrimBrush}"
                     IsVisible="{Binding Review.IsLoadingDiff}">
               <ProgressBar Width="36" Height="36" IsIndeterminate="True"
                            HorizontalAlignment="Center" VerticalAlignment="Center" />
@@ -1477,7 +1472,7 @@
 
         <!-- Full PR pane loading overlay (file list + diff) -->
         <Border Grid.Column="2" Grid.ColumnSpan="3"
-                Background="#80060e20"
+                Background="{DynamicResource ForgeSettingsScrimBrush}"
                 ZIndex="40"
                 IsVisible="{Binding Review.IsOpeningPullRequest}">
           <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
@@ -1812,7 +1807,7 @@
                                      LeftSyntaxTokens="{Binding WorkingCopy.LeftSyntaxTokens}"
                                      RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
                                      RowHeight="20" />
-                <Border Background="#80060e20"
+                <Border Background="{DynamicResource ForgeSettingsScrimBrush}"
                         IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
                   <ProgressBar Width="36" Height="36" IsIndeterminate="True"
                                HorizontalAlignment="Center" VerticalAlignment="Center" />
