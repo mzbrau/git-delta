@@ -149,7 +149,7 @@ public sealed class PullRequestService(
             throw;
         }
 
-        return PullRequestGraphQLParser.ParsePendingReviewCommentCount(data);
+        return PullRequestGraphQLParser.ParsePendingReviewCommentCount(data, accountLogin);
     }
 
     private async Task<IReadOnlyList<PullRequestSummary>> SearchInboxSectionAsync(

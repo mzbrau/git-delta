@@ -175,9 +175,9 @@ internal static class PullRequestGraphQLParser
     }
 
     /// <summary>
-    /// Sums <c>comments.totalCount</c> across PENDING reviews in a PendingReviewQuery response.
+    /// Sums <c>comments.totalCount</c> for the viewer's PENDING review in a PendingReviewQuery response.
     /// </summary>
-    public static int ParsePendingReviewCommentCount(JsonElement data)
+    public static int ParsePendingReviewCommentCount(JsonElement data, string viewerLogin)
     {
         if (!data.TryGetProperty("repository", out var repository) ||
             repository.ValueKind != JsonValueKind.Object ||
@@ -196,6 +196,13 @@ internal static class PullRequestGraphQLParser
             if (review.TryGetProperty("state", out var state) &&
                 state.ValueKind == JsonValueKind.String &&
                 !string.Equals(state.GetString(), "PENDING", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (review.TryGetProperty("author", out var author) &&
+                author.TryGetProperty("login", out var login) &&
+                !string.Equals(login.GetString(), viewerLogin, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

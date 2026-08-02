@@ -11,7 +11,7 @@ public sealed class AvaloniaReviewSubmitDialog : IReviewSubmitDialog
     public async Task<string?> ShowAsync(string title, string confirmLabel)
     {
         if (Owner is null)
-            return "";
+            return null;
 
         string? result = null;
         var dialog = new Window

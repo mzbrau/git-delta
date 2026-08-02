@@ -213,7 +213,7 @@ public sealed class PullRequestDetailParserTests
                       },
                       {
                         "id": "PRR_2",
-                        "state": "APPROVED",
+                        "state": "PENDING",
                         "author": { "login": "other" },
                         "comments": { "totalCount": 9 }
                       }
@@ -225,7 +225,7 @@ public sealed class PullRequestDetailParserTests
             """;
         using var doc = JsonDocument.Parse(json);
 
-        var count = PullRequestGraphQLParser.ParsePendingReviewCommentCount(doc.RootElement);
+        var count = PullRequestGraphQLParser.ParsePendingReviewCommentCount(doc.RootElement, "viewer");
 
         Assert.That(count, Is.EqualTo(3));
     }
