@@ -55,6 +55,27 @@ internal sealed class AiReviewCoordinator(
         return ToSnapshot(run, triage);
     }
 
+    public async Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default)
+    {
+        // Keep an already-live session; attach is only for hydrating after process restart.
+        if (_runsByPr.TryGetValue(request.PrNodeId, out var existing) && existing.Session is not null)
+            return;
+
+        var run = await resultStore.GetLatestRunAsync(request.PrNodeId, ct).ConfigureAwait(false);
+        if (run is null)
+            return;
+
+        var prResult = await resultStore.GetPrResultForRunAsync(run.Id, ct).ConfigureAwait(false);
+        var triage = prResult is null ? null : Deserialize<AiPrTriageResult>(prResult.PayloadJson);
+        var context = RegisterRunContext(request, run.Id, run.CopilotSessionId, triage, run.State);
+        context.CacheKey = run.CacheKey;
+        context.TurnsUsed = run.TurnsUsed;
+        context.StartedUtc = run.StartedUtc;
+        context.FinishedUtc = run.FinishedUtc;
+        context.ErrorMessage = run.ErrorMessage;
+        // Session intentionally left null — EnsureLiveSessionAsync resumes lazily.
+    }
+
     public async ValueTask<IReadOnlyList<FilePath>> SuggestFileOrderAsync(
         string sessionKey,
         IReadOnlyList<FilePath> changedFiles,
@@ -143,6 +164,9 @@ internal sealed class AiReviewCoordinator(
 
     public async ValueTask<IReadOnlyList<AiChatMessage>> GetChatHistoryAsync(string prNodeId, CancellationToken ct = default) =>
         await resultStore.ListChatMessagesAsync(prNodeId, ct).ConfigureAwait(false);
+
+    public Task ClearChatHistoryAsync(string prNodeId, CancellationToken ct = default) =>
+        resultStore.ClearChatMessagesAsync(prNodeId, ct);
 
     // ---------------------------------------------------------------------
     // Connectivity.
@@ -268,7 +292,7 @@ internal sealed class AiReviewCoordinator(
 
     public async Task RequestFileDepthAsync(AiFileDepthRequest request, CancellationToken ct = default)
     {
-        var context = GetActiveContextOrThrow(request.PrNodeId);
+        var context = await EnsureLiveSessionAsync(request.PrNodeId, ct).ConfigureAwait(false);
         var gateReason = CheckGate(context.RepositoryKey);
         if (gateReason is not null)
             throw new InvalidOperationException(gateReason);
@@ -314,13 +338,34 @@ internal sealed class AiReviewCoordinator(
     public Task<string> AskAsync(AiQuestionRequest request, CancellationToken ct = default) =>
         RunTurnForTextAsync(request.PrNodeId, BuildExplanationPrompt(request), AiWorkPriority.ExplicitUser, ct);
 
-    private string BuildExplanationPrompt(AiQuestionRequest request)
+    private const int MaxChatHistoryMessages = 20;
+
+    private string BuildExplanationPrompt(
+        AiQuestionRequest request,
+        IReadOnlyList<AiChatMessage>? priorChat = null)
     {
         var context = new StringBuilder();
         if (!string.IsNullOrEmpty(request.Path))
-            context.AppendLine($"File: {request.Path}");
+        {
+            context.AppendLine($"Currently selected file: {request.Path}");
+            context.AppendLine(
+                "The reviewer's question most likely relates to this file. Answer in that file's context unless the question clearly refers to something else.");
+        }
+        else
+        {
+            context.AppendLine("No file is currently selected. Treat this as a pull-request-wide question.");
+        }
+
         if (!string.IsNullOrEmpty(request.SelectedLinesContext))
             context.AppendLine(request.SelectedLinesContext);
+
+        if (priorChat is { Count: > 0 })
+        {
+            context.AppendLine();
+            context.AppendLine("Conversation so far:");
+            foreach (var message in priorChat)
+                context.AppendLine($"{message.Role}: {message.Content}");
+        }
 
         return prompts.GetExplanationPrompt(new Dictionary<string, string>
         {
@@ -342,10 +387,19 @@ internal sealed class AiReviewCoordinator(
 
     public async Task<string> ChatAsync(AiQuestionRequest request, CancellationToken ct = default)
     {
+        var prior = await resultStore.ListChatMessagesAsync(request.PrNodeId, ct).ConfigureAwait(false);
+        IReadOnlyList<AiChatMessage> cappedPrior = prior.Count <= MaxChatHistoryMessages
+            ? prior
+            : prior.Skip(prior.Count - MaxChatHistoryMessages).ToList();
+
         await resultStore.AppendChatMessageAsync(
             request.PrNodeId, new AiChatMessage("user", request.Question, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
 
-        var answer = await RunTurnForTextAsync(request.PrNodeId, BuildExplanationPrompt(request), AiWorkPriority.ExplicitUser, ct)
+        var answer = await RunTurnForTextAsync(
+                request.PrNodeId,
+                BuildExplanationPrompt(request, cappedPrior),
+                AiWorkPriority.ExplicitUser,
+                ct)
             .ConfigureAwait(false);
 
         await resultStore.AppendChatMessageAsync(
@@ -380,32 +434,13 @@ internal sealed class AiReviewCoordinator(
         AgentPermissionPolicy? policy = null;
         try
         {
-            NotifyProgress(context, AiRunStage.Materialising, "Preparing a read-only working copy...");
-            var materialised = await materialiser.MaterialiseAsync(request.RepositoryPath, request.HeadSha, ct).ConfigureAwait(false);
-            context.MaterialisedPath = materialised.Path;
-
-            NotifyProgress(context, AiRunStage.Connecting, "Connecting to GitHub Copilot...");
-            var token = await ResolveTokenAsync(request.RepositoryPath, ct).ConfigureAwait(false);
-
             var capture = new TriageCapture();
-            var tools = BuildTools(context, capture);
-            policy = new AgentPermissionPolicy(settingsStore.Current.AiPathDenylist);
-
-            var options = new AgentSessionOptions(
-                Cwd: materialised.Path,
-                GitHubToken: token,
-                Model: context.Model,
-                ReasoningEffort: settingsStore.Current.AiReasoningEffort,
-                Tools: tools,
-                OnPermissionRequest: policy.Evaluate,
-                Streaming: true);
-
-            var session = context.CopilotSessionId is { Length: > 0 } existingSessionId
-                ? await agentClient.ResumeSessionAsync(existingSessionId, options, ct).ConfigureAwait(false)
-                : await agentClient.CreateSessionAsync(options, ct).ConfigureAwait(false);
-
-            context.Session = session;
-            context.CopilotSessionId = session.SessionId;
+            policy = await OpenOrResumeSessionAsync(
+                    context,
+                    resumeSessionId: context.CopilotSessionId,
+                    capture,
+                    ct)
+                .ConfigureAwait(false);
 
             NotifyProgress(context, AiRunStage.Triaging, "Reviewing changed files...");
             var placeholders = new Dictionary<string, string>
@@ -429,6 +464,44 @@ internal sealed class AiReviewCoordinator(
         {
             LogPermissionDenials(context, policy);
         }
+    }
+
+    /// <summary>
+    /// Materialises the review tree and creates or resumes a Copilot session on <paramref name="context"/>.
+    /// </summary>
+    private async Task<AgentPermissionPolicy> OpenOrResumeSessionAsync(
+        RunContext context,
+        string? resumeSessionId,
+        TriageCapture capture,
+        CancellationToken ct)
+    {
+        NotifyProgress(context, AiRunStage.Materialising, "Preparing a read-only working copy...");
+        var materialised = await materialiser.MaterialiseAsync(context.RepositoryPath, context.HeadSha, ct)
+            .ConfigureAwait(false);
+        context.MaterialisedPath = materialised.Path;
+
+        NotifyProgress(context, AiRunStage.Connecting, "Connecting to GitHub Copilot...");
+        var token = await ResolveTokenAsync(context.RepositoryPath, ct).ConfigureAwait(false);
+
+        var tools = BuildTools(context, capture);
+        var policy = new AgentPermissionPolicy(settingsStore.Current.AiPathDenylist);
+
+        var options = new AgentSessionOptions(
+            Cwd: materialised.Path,
+            GitHubToken: token,
+            Model: context.Model,
+            ReasoningEffort: settingsStore.Current.AiReasoningEffort,
+            Tools: tools,
+            OnPermissionRequest: policy.Evaluate,
+            Streaming: true);
+
+        var session = resumeSessionId is { Length: > 0 } existingSessionId
+            ? await agentClient.ResumeSessionAsync(existingSessionId, options, ct).ConfigureAwait(false)
+            : await agentClient.CreateSessionAsync(options, ct).ConfigureAwait(false);
+
+        context.Session = session;
+        context.CopilotSessionId = session.SessionId;
+        return policy;
     }
 
     private async Task SendTurnWithBudgetAsync(RunContext context, string prompt, CancellationToken ct)
@@ -494,7 +567,7 @@ internal sealed class AiReviewCoordinator(
 
     private async Task<string> RunTurnForTextAsync(string prNodeId, string prompt, AiWorkPriority priority, CancellationToken ct)
     {
-        var context = GetActiveContextOrThrow(prNodeId);
+        var context = await EnsureLiveSessionAsync(prNodeId, ct).ConfigureAwait(false);
         var gateReason = CheckGate(context.RepositoryKey);
         if (gateReason is not null)
             throw new InvalidOperationException(gateReason);
@@ -525,12 +598,51 @@ internal sealed class AiReviewCoordinator(
         return await completion.Task.ConfigureAwait(false);
     }
 
-    private RunContext GetActiveContextOrThrow(string prNodeId)
+    private async Task<RunContext> EnsureLiveSessionAsync(string prNodeId, CancellationToken ct)
     {
-        if (_runsByPr.TryGetValue(prNodeId, out var context) && context.Session is not null)
+        if (!_runsByPr.TryGetValue(prNodeId, out var context))
+        {
+            throw new InvalidOperationException(
+                $"No AI review context for PR '{prNodeId}'. Open the pull request after a completed AI review, or start a review first.");
+        }
+
+        if (context.Session is not null)
             return context;
 
-        throw new InvalidOperationException($"No active AI review session for PR '{prNodeId}'. Start a review first.");
+        if (string.IsNullOrEmpty(context.CopilotSessionId))
+        {
+            throw new InvalidOperationException(
+                $"The cached AI review for PR '{prNodeId}' has no resumable Copilot session. Start a new review first.");
+        }
+
+        await context.SessionGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (context.Session is not null)
+                return context;
+
+            try
+            {
+                await OpenOrResumeSessionAsync(
+                        context,
+                        resumeSessionId: context.CopilotSessionId,
+                        new TriageCapture(),
+                        ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to resume the Copilot session for PR '{prNodeId}'. The session may have expired. Start a new review. ({ex.Message})",
+                    ex);
+            }
+
+            return context;
+        }
+        finally
+        {
+            context.SessionGate.Release();
+        }
     }
 
     private RunContext RegisterRunContext(
@@ -795,6 +907,7 @@ internal sealed class AiReviewCoordinator(
         public string? CacheKey;
         public string? CopilotSessionId;
         public IAgentSession? Session;
+        public readonly SemaphoreSlim SessionGate = new(1, 1);
         public string? MaterialisedPath;
         public string? Model;
         public string? RulesHash;

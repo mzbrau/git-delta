@@ -100,6 +100,9 @@ internal sealed class FakeAgentSession(
 {
     public string SessionId { get; } = sessionId;
 
+    /// <summary>Prompts passed to <see cref="SendTurnAsync"/> (test spy).</summary>
+    public List<string> SentPrompts { get; } = [];
+
     public event Action<AgentToolCall>? ToolCallReceived;
 
     public event Action<string>? AssistantDelta;
@@ -107,6 +110,7 @@ internal sealed class FakeAgentSession(
     public async Task SendTurnAsync(string prompt, TimeSpan? waitTimeout = null, CancellationToken ct = default)
     {
         _ = waitTimeout;
+        SentPrompts.Add(prompt);
         var turn = script.NextTurn();
 
         if (turn.BeforeCalls is not null)

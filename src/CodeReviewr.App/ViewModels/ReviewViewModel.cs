@@ -184,6 +184,7 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private string? _aiFileAnswer;
     [ObservableProperty] private string _aiChatInput = "";
     [ObservableProperty] private bool _showAiChat;
+    [ObservableProperty] private bool _isAiChatBusy;
     [ObservableProperty] private bool _aiShowDismissedAnnotations;
     [ObservableProperty] private string? _aiLastError;
     [ObservableProperty] private string? _aiCopilotSessionId;
@@ -404,6 +405,8 @@ public partial class ReviewViewModel : ObservableObject
         SyncSelectedPrFileEntry();
         NotifyMarkdownPreviewStateChanged();
         NotifyAiFileBandChanged();
+        OnPropertyChanged(nameof(AiChatSelectedFileLabel));
+        OnPropertyChanged(nameof(AiChatPlaceholder));
         _ = LoadDiffForSelectionAsync(value);
         if (value is not null && !value.IsViewed && !value.IsViewedPending)
             _ = MarkFileViewedInternalAsync(value);
@@ -591,7 +594,19 @@ public partial class ReviewViewModel : ObservableObject
     public bool ShowAiFileBand =>
         !string.IsNullOrWhiteSpace(SelectedFileAiGuidance) || AiFileSummary is not null;
     public bool HasAiFileAnswer => !string.IsNullOrWhiteSpace(AiFileAnswer);
-    public bool CanSendAiChat => !string.IsNullOrWhiteSpace(AiChatInput) && !IsAiRunActive;
+    public bool CanSendAiChat =>
+        !string.IsNullOrWhiteSpace(AiChatInput) && !IsAiRunActive && !IsAiChatBusy;
+
+    public bool CanClearAiChat => _session is not null && AiChatMessages.Count > 0;
+
+    public string AiChatSelectedFileLabel =>
+        SelectedFile is null ? "No file selected" : SelectedFile.Path.Value;
+
+    public string AiChatPlaceholder =>
+        SelectedFile is null
+            ? "Ask about this pull request…"
+            : $"Ask about {SelectedFile.Name}…";
+
     public string? SelectedFileAiGuidance
     {
         get
@@ -783,6 +798,8 @@ public partial class ReviewViewModel : ObservableObject
     partial void OnAiFileAnswerChanged(string? value) => OnPropertyChanged(nameof(HasAiFileAnswer));
 
     partial void OnAiChatInputChanged(string value) => OnPropertyChanged(nameof(CanSendAiChat));
+
+    partial void OnIsAiChatBusyChanged(bool value) => OnPropertyChanged(nameof(CanSendAiChat));
 
     [RelayCommand]
     private void ToggleAiReviewSection() => AiReviewSectionExpanded = !AiReviewSectionExpanded;
@@ -1098,6 +1115,14 @@ public partial class ReviewViewModel : ObservableObject
             if (cached is null || ct.IsCancellationRequested || !ReferenceEquals(_session, session))
                 return;
 
+            // Hydrate coordinator memory so chat/ask can lazily ResumeSessionAsync after restart.
+            await _ai.AttachCachedRunAsync(
+                    BuildAiReviewRequest(session, discardCached: false, resume: false), ct)
+                .ConfigureAwait(false);
+
+            if (ct.IsCancellationRequested || !ReferenceEquals(_session, session))
+                return;
+
             await InvokeOnUiAsync(() => ApplyAiRunSnapshot(cached)).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -1134,6 +1159,7 @@ public partial class ReviewViewModel : ObservableObject
         ShowAiChat = false;
         AiChatInput = "";
         AiChatMessages.Clear();
+        OnPropertyChanged(nameof(CanClearAiChat));
     }
 
     [RelayCommand]
@@ -1262,6 +1288,7 @@ public partial class ReviewViewModel : ObservableObject
             {
                 foreach (var message in history)
                     AiChatMessages.Add(message);
+                OnPropertyChanged(nameof(CanClearAiChat));
             }).ConfigureAwait(false);
         }
         catch
@@ -1271,28 +1298,67 @@ public partial class ReviewViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task ClearAiChatAsync()
+    {
+        if (_session is null)
+            return;
+
+        var prNodeId = _session.Detail.Summary.NodeId;
+        AiChatMessages.Clear();
+        OnPropertyChanged(nameof(CanClearAiChat));
+
+        try
+        {
+            await _ai.ClearChatHistoryAsync(prNodeId).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to clear chat history: {ex.Message}", exception: ex);
+        }
+    }
+
+    [RelayCommand]
     private async Task SendAiChatAsync()
     {
-        if (_session is null || string.IsNullOrWhiteSpace(AiChatInput))
+        if (_session is null || string.IsNullOrWhiteSpace(AiChatInput) || IsAiChatBusy)
             return;
 
         var prNodeId = _session.Detail.Summary.NodeId;
         var question = AiChatInput.Trim();
         AiChatInput = "";
         AiChatMessages.Add(new AiChatMessage("user", question, DateTimeOffset.UtcNow));
+        OnPropertyChanged(nameof(CanClearAiChat));
+        IsAiChatBusy = true;
 
         try
         {
-            var reply = await _ai.ChatAsync(new AiQuestionRequest(prNodeId, SelectedFile?.Path.Value, question))
+            string? linesContext = null;
+            if (!string.IsNullOrWhiteSpace(SelectedFile?.AiGuidance))
+                linesContext = $"File guidance from triage:\n{SelectedFile.AiGuidance.Trim()}";
+
+            var reply = await _ai.ChatAsync(new AiQuestionRequest(
+                    prNodeId,
+                    SelectedFile?.Path.Value,
+                    question,
+                    linesContext))
                 .ConfigureAwait(false);
             await InvokeOnUiAsync(() =>
-                AiChatMessages.Add(new AiChatMessage("assistant", reply, DateTimeOffset.UtcNow))).ConfigureAwait(false);
+            {
+                AiChatMessages.Add(new AiChatMessage("assistant", reply, DateTimeOffset.UtcNow));
+                OnPropertyChanged(nameof(CanClearAiChat));
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             await InvokeOnUiAsync(() =>
-                AiChatMessages.Add(new AiChatMessage("assistant", $"Error: {ex.Message}", DateTimeOffset.UtcNow)))
-                .ConfigureAwait(false);
+            {
+                AiChatMessages.Add(new AiChatMessage("assistant", $"Error: {ex.Message}", DateTimeOffset.UtcNow));
+                OnPropertyChanged(nameof(CanClearAiChat));
+            }).ConfigureAwait(false);
+        }
+        finally
+        {
+            await InvokeOnUiAsync(() => IsAiChatBusy = false).ConfigureAwait(false);
         }
     }
 

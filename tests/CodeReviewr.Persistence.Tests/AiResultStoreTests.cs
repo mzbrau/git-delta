@@ -171,6 +171,24 @@ public sealed class AiResultStoreTests
     }
 
     [Test]
+    public async Task ClearChatMessages_RemovesOnlyThatPr()
+    {
+        var path = CreateDbPath();
+        using var durable = new SqliteDurableUserStore(path);
+        durable.EnsureSchema();
+        using var store = new SqliteAiResultStore(path);
+
+        await store.AppendChatMessageAsync("PR_1", new AiChatMessage("user", "hi", DateTimeOffset.UtcNow));
+        await store.AppendChatMessageAsync("PR_1", new AiChatMessage("assistant", "hello", DateTimeOffset.UtcNow));
+        await store.AppendChatMessageAsync("PR_2", new AiChatMessage("user", "other", DateTimeOffset.UtcNow));
+
+        await store.ClearChatMessagesAsync("PR_1");
+
+        Assert.That(await store.ListChatMessagesAsync("PR_1"), Is.Empty);
+        Assert.That(await store.ListChatMessagesAsync("PR_2"), Has.Count.EqualTo(1));
+    }
+
+    [Test]
     public async Task ClearAll_RemovesAllAiData()
     {
         var path = CreateDbPath();

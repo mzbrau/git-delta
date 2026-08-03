@@ -27,6 +27,7 @@ public interface IAiResultStore
 
     Task AppendChatMessageAsync(string prNodeId, AiChatMessage message, CancellationToken ct = default);
     Task<IReadOnlyList<AiChatMessage>> ListChatMessagesAsync(string prNodeId, CancellationToken ct = default);
+    Task ClearChatMessagesAsync(string prNodeId, CancellationToken ct = default);
 
     Task ClearAllAsync(CancellationToken ct = default);
 }
