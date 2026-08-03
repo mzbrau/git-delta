@@ -48,6 +48,7 @@ public partial class ReviewViewModel : ObservableObject
     private bool _deferPrFileRebuild;
     private bool _layoutManuallySetForCurrentPr;
     private IDisposable? _aiProgressSubscription;
+    private IDisposable? _aiActivityLogSubscription;
 
     /// <summary>Raised before <see cref="PrFileEntries"/> is cleared so the view can drop ListBox selection first.</summary>
     public event Action? SelectionClearRequested;
@@ -189,6 +190,10 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private string? _aiLastError;
     [ObservableProperty] private string? _aiCopilotSessionId;
     [ObservableProperty] private DateTimeOffset? _aiReviewFinishedUtc;
+    [ObservableProperty] private string _aiActivityLog = "";
+
+    /// <summary>Raised on the UI thread when <see cref="AiActivityLog"/> grows so the dialog can auto-scroll.</summary>
+    public event Action? AiActivityLogUpdated;
 
     public ObservableCollection<AiImportantFileItem> AiImportantFiles { get; } = [];
 
@@ -675,11 +680,14 @@ public partial class ReviewViewModel : ObservableObject
         get
         {
             var settings = _settings.Current;
+            var runTimeout = settings.AiRunTimeoutSeconds <= 0
+                ? "unlimited"
+                : $"{settings.AiRunTimeoutSeconds}s";
             var lines = new List<string>
             {
                 $"State: {AiRunState}",
-                $"Turn timeout: {settings.AiTurnTimeoutSeconds}s",
-                $"Run timeout: {settings.AiRunTimeoutSeconds}s",
+                $"Turn idle timeout: {settings.AiTurnTimeoutSeconds}s",
+                $"Run timeout: {runTimeout}",
                 $"Turn budget: {settings.AiTurnBudget}",
             };
 
@@ -698,12 +706,20 @@ public partial class ReviewViewModel : ObservableObject
             if (!string.IsNullOrWhiteSpace(AiLastError))
                 lines.Add($"Error: {AiLastError}");
 
+            if (!string.IsNullOrWhiteSpace(AiActivityLog))
+            {
+                lines.Add("");
+                lines.Add("--- Activity log ---");
+                lines.Add(AiActivityLog.TrimEnd());
+            }
+
             return string.Join(Environment.NewLine, lines);
         }
     }
 
     public bool HasAiDiagnostics =>
         !string.IsNullOrWhiteSpace(AiLastError) ||
+        !string.IsNullOrWhiteSpace(AiActivityLog) ||
         AiRunState is AiRunState.Failed or AiRunState.Incomplete or AiRunState.Running;
 
     public string AiButtonLabel => AiRunState switch
@@ -766,6 +782,13 @@ public partial class ReviewViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(AiProgressText));
         OnPropertyChanged(nameof(AiDiagnosticsText));
+    }
+
+    partial void OnAiActivityLogChanged(string value)
+    {
+        OnPropertyChanged(nameof(AiDiagnosticsText));
+        OnPropertyChanged(nameof(HasAiDiagnostics));
+        AiActivityLogUpdated?.Invoke();
     }
 
     partial void OnAiLastErrorChanged(string? value)
@@ -919,12 +942,21 @@ public partial class ReviewViewModel : ObservableObject
         var repositoryKey = session.Detail.Summary.NameWithOwner;
 
         _aiProgressSubscription?.Dispose();
+        _aiActivityLogSubscription?.Dispose();
         _aiProgressSubscription = _ai.ObserveProgress(repositoryKey, progress =>
             _ = InvokeOnUiAsync(() => AiProgress = progress));
+        _aiActivityLogSubscription = _ai.ObserveActivityLog(repositoryKey, line =>
+            _ = InvokeOnUiAsync(() =>
+            {
+                AiActivityLog = string.IsNullOrEmpty(AiActivityLog)
+                    ? line
+                    : AiActivityLog + Environment.NewLine + line;
+            }));
 
         await InvokeOnUiAsync(() =>
         {
             AiLastError = null;
+            AiActivityLog = "";
             AiRunState = AiRunState.Running;
             ShowAiProgressDialog = true;
         }).ConfigureAwait(false);
@@ -1138,6 +1170,8 @@ public partial class ReviewViewModel : ObservableObject
     {
         _aiProgressSubscription?.Dispose();
         _aiProgressSubscription = null;
+        _aiActivityLogSubscription?.Dispose();
+        _aiActivityLogSubscription = null;
         _aiFileCts?.Cancel();
         _aiFileCts = null;
         _layoutManuallySetForCurrentPr = false;
@@ -1152,6 +1186,7 @@ public partial class ReviewViewModel : ObservableObject
         AiFileAnswer = null;
         AiAdHocInstructions = "";
         AiLastError = null;
+        AiActivityLog = "";
         AiCopilotSessionId = null;
         AiReviewFinishedUtc = null;
         ShowAiProgressDialog = false;

@@ -223,10 +223,14 @@ internal sealed class AiReviewCoordinator(
         runContext.CacheKey = cacheKey;
         runContext.StartedUtc = startedUtc;
         runContext.UserCancelled = false;
+        runContext.TurnIdleTimedOut = false;
         runContext.RunCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var runTimeoutSeconds = Math.Max(30, settingsStore.Current.AiRunTimeoutSeconds);
+        var configuredRunTimeout = settingsStore.Current.AiRunTimeoutSeconds;
+        // 0 = unlimited; when enabled, enforce a small floor so tiny values are not accidental.
+        var runTimeoutSeconds = configuredRunTimeout <= 0 ? 0 : Math.Max(30, configuredRunTimeout);
         runContext.RunTimeoutSeconds = runTimeoutSeconds;
-        runContext.RunCts.CancelAfter(TimeSpan.FromSeconds(runTimeoutSeconds));
+        if (runTimeoutSeconds > 0)
+            runContext.RunCts.CancelAfter(TimeSpan.FromSeconds(runTimeoutSeconds));
 
         await resultStore.UpsertRunAsync(new AiRunRecord(
             runId, request.PrNodeId, request.HeadSha, request.MergeBaseSha, CopilotSessionId: resumeSessionId,
@@ -247,16 +251,16 @@ internal sealed class AiReviewCoordinator(
                 logger.LogError(ex, "AI triage timed out waiting for Copilot for PR {PrNodeId}.", request.PrNodeId);
                 var turnTimeout = Math.Max(10, settingsStore.Current.AiTurnTimeoutSeconds);
                 var message =
-                    $"AI review timed out after {turnTimeout}s waiting for Copilot (turn timeout). {ex.Message}";
+                    $"AI review timed out after {turnTimeout}s with no Copilot activity (turn idle timeout). {ex.Message}";
+                NotifyActivityLog(runContext, $"Error: {message}");
                 var incomplete = await FinishRunAsync(runContext, AiRunState.Incomplete, message, CancellationToken.None)
                     .ConfigureAwait(false);
                 completion.TrySetResult(incomplete);
             }
             catch (OperationCanceledException)
             {
-                var message = runContext.UserCancelled
-                    ? "The review was cancelled."
-                    : $"AI review timed out after {runContext.RunTimeoutSeconds}s (run timeout).";
+                var message = ClassifyCancellation(runContext);
+                NotifyActivityLog(runContext, $"Error: {message}");
                 var incomplete = await FinishRunAsync(runContext, AiRunState.Incomplete, message, CancellationToken.None)
                     .ConfigureAwait(false);
                 completion.TrySetResult(incomplete);
@@ -264,6 +268,7 @@ internal sealed class AiReviewCoordinator(
             catch (Exception ex)
             {
                 logger.LogError(ex, "AI triage failed for PR {PrNodeId}.", request.PrNodeId);
+                NotifyActivityLog(runContext, $"Error: {ex.Message}");
                 var failed = await FinishRunAsync(runContext, AiRunState.Failed, ex.Message, CancellationToken.None).ConfigureAwait(false);
                 completion.TrySetResult(failed);
             }
@@ -288,7 +293,10 @@ internal sealed class AiReviewCoordinator(
     }
 
     public IDisposable ObserveProgress(string repositoryKey, Action<AiRunProgress> handler) =>
-        _observersByRepo.GetOrAdd(repositoryKey, static _ => new RepoObservers()).Add(handler);
+        _observersByRepo.GetOrAdd(repositoryKey, static _ => new RepoObservers()).AddProgress(handler);
+
+    public IDisposable ObserveActivityLog(string repositoryKey, Action<string> handler) =>
+        _observersByRepo.GetOrAdd(repositoryKey, static _ => new RepoObservers()).AddActivityLog(handler);
 
     public async Task RequestFileDepthAsync(AiFileDepthRequest request, CancellationToken ct = default)
     {
@@ -303,7 +311,8 @@ internal sealed class AiReviewCoordinator(
             context.CurrentFileRequest = new FileDepthContext(request.Path, request.BeforeBlobOid, request.AfterBlobOid);
             try
             {
-                NotifyProgress(context, AiRunStage.FileDepth, $"Reviewing {request.Path}...");
+                NotifyProgress(context, AiRunStage.FileDepth, $"Waiting on: reviewing {request.Path}");
+                NotifyActivityLog(context, $"Waiting on: reviewing {request.Path}");
 
                 var placeholders = new Dictionary<string, string>
                 {
@@ -442,7 +451,8 @@ internal sealed class AiReviewCoordinator(
                     ct)
                 .ConfigureAwait(false);
 
-            NotifyProgress(context, AiRunStage.Triaging, "Reviewing changed files...");
+            NotifyProgress(context, AiRunStage.Triaging, "Waiting on: Copilot triage turn");
+            NotifyActivityLog(context, "Waiting on: Copilot triage turn");
             var placeholders = new Dictionary<string, string>
             {
                 ["rules"] = EffectiveRules(),
@@ -475,16 +485,24 @@ internal sealed class AiReviewCoordinator(
         TriageCapture capture,
         CancellationToken ct)
     {
-        NotifyProgress(context, AiRunStage.Materialising, "Preparing a read-only working copy...");
+        NotifyProgress(context, AiRunStage.Materialising, "Waiting on: materialising working copy");
+        NotifyActivityLog(context, "Waiting on: materialising working copy");
         var materialised = await materialiser.MaterialiseAsync(context.RepositoryPath, context.HeadSha, ct)
             .ConfigureAwait(false);
         context.MaterialisedPath = materialised.Path;
 
-        NotifyProgress(context, AiRunStage.Connecting, "Connecting to GitHub Copilot...");
+        NotifyProgress(context, AiRunStage.Connecting, "Waiting on: connecting to GitHub Copilot");
+        NotifyActivityLog(context, "Waiting on: connecting to GitHub Copilot");
         var token = await ResolveTokenAsync(context.RepositoryPath, ct).ConfigureAwait(false);
 
         var tools = BuildTools(context, capture);
         var policy = new AgentPermissionPolicy(settingsStore.Current.AiPathDenylist);
+
+        AgentPermissionDecision OnPermission(AgentPermissionRequest request)
+        {
+            context.ReportAgentActivity?.Invoke();
+            return policy.Evaluate(request);
+        }
 
         var options = new AgentSessionOptions(
             Cwd: materialised.Path,
@@ -492,7 +510,7 @@ internal sealed class AiReviewCoordinator(
             Model: context.Model,
             ReasoningEffort: settingsStore.Current.AiReasoningEffort,
             Tools: tools,
-            OnPermissionRequest: policy.Evaluate,
+            OnPermissionRequest: OnPermission,
             Streaming: true);
 
         var session = resumeSessionId is { Length: > 0 } existingSessionId
@@ -504,6 +522,11 @@ internal sealed class AiReviewCoordinator(
         return policy;
     }
 
+    /// <summary>
+    /// SDK treats null timeout as 60s; idle watchdog owns cancellation, so pass a large ceiling.
+    /// </summary>
+    private static readonly TimeSpan SdkTurnWaitCeiling = TimeSpan.FromDays(1);
+
     private async Task SendTurnWithBudgetAsync(RunContext context, string prompt, CancellationToken ct)
     {
         if (context.Session is null)
@@ -514,10 +537,11 @@ internal sealed class AiReviewCoordinator(
             throw new InvalidOperationException("The AI turn budget for this run has been reached.");
 
         var turnTimeoutSeconds = Math.Max(10, settingsStore.Current.AiTurnTimeoutSeconds);
-        var waitTimeout = TimeSpan.FromSeconds(turnTimeoutSeconds);
+        var idleTimeout = TimeSpan.FromSeconds(turnTimeoutSeconds);
+        context.TurnIdleTimedOut = false;
 
         logger.LogInformation(
-            "AI turn starting: runId={RunId} sessionId={SessionId} turnsUsed={TurnsUsed} budget={Budget} turnTimeoutSeconds={TurnTimeout} runTimeoutSeconds={RunTimeout}",
+            "AI turn starting: runId={RunId} sessionId={SessionId} turnsUsed={TurnsUsed} budget={Budget} turnIdleTimeoutSeconds={TurnTimeout} runTimeoutSeconds={RunTimeout}",
             context.RunId,
             context.CopilotSessionId,
             context.TurnsUsed,
@@ -525,9 +549,135 @@ internal sealed class AiReviewCoordinator(
             turnTimeoutSeconds,
             context.RunTimeoutSeconds);
 
+        NotifyActivityLog(context, $"--- Turn {context.TurnsUsed} starting (idle timeout {turnTimeoutSeconds}s) ---");
+        NotifyActivityLog(context, ">>> Prompt");
+        NotifyActivityLog(context, prompt);
+        NotifyActivityLog(context, "<<< End prompt");
+        NotifyProgress(context, GuessStage(context), "Waiting on: Copilot response");
+
         using var turnCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        turnCts.CancelAfter(waitTimeout);
-        await context.Session.SendTurnAsync(prompt, waitTimeout, turnCts.Token).ConfigureAwait(false);
+        turnCts.CancelAfter(idleTimeout);
+
+        var assistantBuffer = new StringBuilder();
+        var session = context.Session;
+        var toolsInFlight = 0;
+
+        void ResetIdle()
+        {
+            try
+            {
+                if (!turnCts.IsCancellationRequested && Volatile.Read(ref toolsInFlight) == 0)
+                    turnCts.CancelAfter(idleTimeout);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        void PauseIdleForTool()
+        {
+            Interlocked.Increment(ref toolsInFlight);
+            try
+            {
+                if (!turnCts.IsCancellationRequested)
+                    turnCts.CancelAfter(Timeout.InfiniteTimeSpan);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        void ResumeIdleAfterTool()
+        {
+            if (Interlocked.Decrement(ref toolsInFlight) == 0)
+                ResetIdle();
+        }
+
+        void FlushAssistant()
+        {
+            if (assistantBuffer.Length == 0)
+                return;
+
+            NotifyActivityLog(context, ">>> Assistant");
+            NotifyActivityLog(context, assistantBuffer.ToString());
+            NotifyActivityLog(context, "<<< End assistant");
+            assistantBuffer.Clear();
+        }
+
+        void OnDelta(string delta)
+        {
+            ResetIdle();
+            assistantBuffer.Append(delta);
+            if (assistantBuffer.Length >= 256 || delta.Contains('\n'))
+                FlushAssistant();
+        }
+
+        void OnToolStarted(string name, string argsJson)
+        {
+            PauseIdleForTool();
+            FlushAssistant();
+            NotifyActivityLog(context, $">>> Tool start: {name}");
+            NotifyActivityLog(context, argsJson);
+            NotifyProgress(context, GuessStage(context), $"Waiting on: tool {name}");
+        }
+
+        void OnToolCompleted(AgentToolCall call)
+        {
+            NotifyActivityLog(context, $"<<< Tool result: {call.Name}");
+            if (!string.IsNullOrEmpty(call.ResultJson))
+                NotifyActivityLog(context, call.ResultJson);
+            ResumeIdleAfterTool();
+            NotifyProgress(context, GuessStage(context), "Waiting on: Copilot response");
+        }
+
+        void OnExternalActivity() => ResetIdle();
+
+        context.ReportAgentActivity = OnExternalActivity;
+        session.AssistantDelta += OnDelta;
+        session.ToolActivityStarted += OnToolStarted;
+        session.ToolCallReceived += OnToolCompleted;
+        try
+        {
+            await session.SendTurnAsync(prompt, SdkTurnWaitCeiling, turnCts.Token).ConfigureAwait(false);
+            FlushAssistant();
+            NotifyActivityLog(context, $"--- Turn {context.TurnsUsed} completed ---");
+        }
+        catch (OperationCanceledException) when (!context.UserCancelled && turnCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            context.TurnIdleTimedOut = true;
+            FlushAssistant();
+            NotifyActivityLog(context,
+                $"Turn idle timeout after {turnTimeoutSeconds}s with no Copilot activity.");
+            throw new TimeoutException(
+                $"No Copilot activity for {turnTimeoutSeconds}s (turn idle timeout).");
+        }
+        finally
+        {
+            context.ReportAgentActivity = null;
+            session.AssistantDelta -= OnDelta;
+            session.ToolActivityStarted -= OnToolStarted;
+            session.ToolCallReceived -= OnToolCompleted;
+        }
+    }
+
+    private static AiRunStage GuessStage(RunContext context) =>
+        context.CurrentFileRequest is not null ? AiRunStage.FileDepth : AiRunStage.Triaging;
+
+    private string ClassifyCancellation(RunContext context)
+    {
+        if (context.UserCancelled)
+            return "The review was cancelled.";
+
+        if (context.TurnIdleTimedOut)
+        {
+            var turnTimeout = Math.Max(10, settingsStore.Current.AiTurnTimeoutSeconds);
+            return $"AI review timed out after {turnTimeout}s with no Copilot activity (turn idle timeout).";
+        }
+
+        if (context.RunTimeoutSeconds > 0)
+            return $"AI review timed out after {context.RunTimeoutSeconds}s (run timeout).";
+
+        return "The review was cancelled.";
     }
 
     private void LogPermissionDenials(RunContext context, AgentPermissionPolicy? policy)
@@ -559,6 +709,10 @@ internal sealed class AiReviewCoordinator(
             context.StartedUtc, context.FinishedUtc), ct).ConfigureAwait(false);
 
         NotifyProgress(context, AiRunStage.Done, errorMessage);
+        if (!string.IsNullOrWhiteSpace(errorMessage))
+            NotifyActivityLog(context, errorMessage);
+        else if (state == AiRunState.Complete)
+            NotifyActivityLog(context, "Review completed.");
 
         return new AiRunSnapshot(
             context.RunId!, context.PrNodeId, context.HeadSha, context.MergeBaseSha, state, context.CopilotSessionId,
@@ -676,8 +830,17 @@ internal sealed class AiReviewCoordinator(
             return;
 
         var elapsed = DateTimeOffset.UtcNow - context.StartedUtc;
-        observers.Notify(new AiRunProgress(
+        observers.NotifyProgress(new AiRunProgress(
             stage, context.TurnsUsed, settingsStore.Current.AiTurnBudget, FilesCompleted: 0, FilesTotal: 0, elapsed, message));
+    }
+
+    private void NotifyActivityLog(RunContext context, string line)
+    {
+        if (!_observersByRepo.TryGetValue(context.RepositoryKey, out var observers))
+            return;
+
+        var stamped = $"[{DateTimeOffset.UtcNow:HH:mm:ss}] {line}";
+        observers.NotifyActivityLog(stamped);
     }
 
     private string? CheckGate(string repositoryKey)
@@ -916,6 +1079,7 @@ internal sealed class AiReviewCoordinator(
         public int TurnsUsed;
         public int RunTimeoutSeconds;
         public bool UserCancelled;
+        public bool TurnIdleTimedOut;
         public AiRunState State = AiRunState.Idle;
         public AiPrTriageResult? Triage;
         public string? ErrorMessage;
@@ -923,40 +1087,71 @@ internal sealed class AiReviewCoordinator(
         public DateTimeOffset? FinishedUtc;
         public CancellationTokenSource? RunCts;
         public FileDepthContext? CurrentFileRequest;
+        public Action? ReportAgentActivity;
     }
 
     private sealed class RepoObservers
     {
         private readonly Lock _lock = new();
-        private readonly List<Action<AiRunProgress>> _handlers = [];
+        private readonly List<Action<AiRunProgress>> _progressHandlers = [];
+        private readonly List<Action<string>> _activityLogHandlers = [];
 
-        public IDisposable Add(Action<AiRunProgress> handler)
+        public IDisposable AddProgress(Action<AiRunProgress> handler)
         {
             lock (_lock)
-                _handlers.Add(handler);
+                _progressHandlers.Add(handler);
 
-            return new Subscription(this, handler);
+            return new ProgressSubscription(this, handler);
         }
 
-        public void Notify(AiRunProgress progress)
+        public IDisposable AddActivityLog(Action<string> handler)
+        {
+            lock (_lock)
+                _activityLogHandlers.Add(handler);
+
+            return new ActivityLogSubscription(this, handler);
+        }
+
+        public void NotifyProgress(AiRunProgress progress)
         {
             Action<AiRunProgress>[] snapshot;
             lock (_lock)
-                snapshot = [.. _handlers];
+                snapshot = [.. _progressHandlers];
 
             foreach (var handler in snapshot)
                 handler(progress);
         }
 
-        private void Remove(Action<AiRunProgress> handler)
+        public void NotifyActivityLog(string line)
         {
+            Action<string>[] snapshot;
             lock (_lock)
-                _handlers.Remove(handler);
+                snapshot = [.. _activityLogHandlers];
+
+            foreach (var handler in snapshot)
+                handler(line);
         }
 
-        private sealed class Subscription(RepoObservers owner, Action<AiRunProgress> handler) : IDisposable
+        private void RemoveProgress(Action<AiRunProgress> handler)
         {
-            public void Dispose() => owner.Remove(handler);
+            lock (_lock)
+                _progressHandlers.Remove(handler);
+        }
+
+        private void RemoveActivityLog(Action<string> handler)
+        {
+            lock (_lock)
+                _activityLogHandlers.Remove(handler);
+        }
+
+        private sealed class ProgressSubscription(RepoObservers owner, Action<AiRunProgress> handler) : IDisposable
+        {
+            public void Dispose() => owner.RemoveProgress(handler);
+        }
+
+        private sealed class ActivityLogSubscription(RepoObservers owner, Action<string> handler) : IDisposable
+        {
+            public void Dispose() => owner.RemoveActivityLog(handler);
         }
     }
 }

@@ -37,6 +37,9 @@ public interface IAIReviewService
 
     IDisposable ObserveProgress(string repositoryKey, Action<AiRunProgress> handler);
 
+    /// <summary>Append-only activity log lines (prompt, assistant text, tools, wait status).</summary>
+    IDisposable ObserveActivityLog(string repositoryKey, Action<string> handler);
+
     Task<AiConnectionProbeResult> TestConnectionAsync(CancellationToken ct = default);
 
     Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken ct = default);
@@ -133,6 +136,9 @@ public sealed class NullAIReviewService : IAIReviewService
     public Task CancelAsync(string repositoryKey, CancellationToken ct = default) => Task.CompletedTask;
 
     public IDisposable ObserveProgress(string repositoryKey, Action<AiRunProgress> handler) =>
+        NullDisposable.Instance;
+
+    public IDisposable ObserveActivityLog(string repositoryKey, Action<string> handler) =>
         NullDisposable.Instance;
 
     public Task<AiConnectionProbeResult> TestConnectionAsync(CancellationToken ct = default) =>

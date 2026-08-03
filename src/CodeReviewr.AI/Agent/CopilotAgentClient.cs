@@ -150,6 +150,7 @@ internal sealed class CopilotAgentClient(ILogger<CopilotAgentClient> logger) : I
             Func<string, CancellationToken, Task<string>> invoke =
                 async ([Description("JSON-encoded arguments for this tool call.")] string argsJson, CancellationToken ct) =>
                 {
+                    wrapper.RaiseToolActivityStarted(name, argsJson);
                     var result = await handler(argsJson, ct).ConfigureAwait(false);
                     wrapper.RaiseToolCallReceived(new AgentToolCall(name, argsJson, result));
                     return result;
@@ -213,6 +214,8 @@ internal sealed class CopilotAgentSession(bool streaming) : IAgentSession
 
     public string SessionId => _session?.SessionId ?? string.Empty;
 
+    public event Action<string, string>? ToolActivityStarted;
+
     public event Action<AgentToolCall>? ToolCallReceived;
 
     public event Action<string>? AssistantDelta;
@@ -222,6 +225,9 @@ internal sealed class CopilotAgentSession(bool streaming) : IAgentSession
         _session = session;
         _subscription = session.On<SessionEvent>(HandleEvent);
     }
+
+    internal void RaiseToolActivityStarted(string name, string argumentsJson) =>
+        ToolActivityStarted?.Invoke(name, argumentsJson);
 
     internal void RaiseToolCallReceived(AgentToolCall call) => ToolCallReceived?.Invoke(call);
 

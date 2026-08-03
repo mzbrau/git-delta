@@ -321,6 +321,8 @@ public sealed class ReviewViewModelTests
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
             .Returns(Substitute.For<IDisposable>());
+        ai.ObserveActivityLog(Arg.Any<string>(), Arg.Any<Action<string>>())
+            .Returns(Substitute.For<IDisposable>());
 
         var vm = CreateViewModel(
             pullRequests,
@@ -396,20 +398,22 @@ public sealed class ReviewViewModelTests
             AiAssistanceEnabled = true,
             AiDisclosureAcknowledged = true,
             AiTurnTimeoutSeconds = 180,
-            AiRunTimeoutSeconds = 1800,
+            AiRunTimeoutSeconds = 0,
         });
 
         var now = DateTimeOffset.UtcNow;
         var failed = new AiRunSnapshot(
             "run1", summary.NodeId, sha, sha, AiRunState.Failed, "session-abc",
             TurnsUsed: 1, AdHocInstructions: null, Triage: null,
-            ErrorMessage: "AI review timed out after 180s waiting for Copilot (turn timeout).",
+            ErrorMessage: "AI review timed out after 180s with no Copilot activity (turn idle timeout).",
             now, now);
 
         var ai = Substitute.For<IAIReviewService>();
         ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
+            .Returns(Substitute.For<IDisposable>());
+        ai.ObserveActivityLog(Arg.Any<string>(), Arg.Any<Action<string>>())
             .Returns(Substitute.For<IDisposable>());
         ai.StartReviewAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(failed);
@@ -429,7 +433,8 @@ public sealed class ReviewViewModelTests
         Assert.That(vm.AiRunState, Is.EqualTo(AiRunState.Failed));
         Assert.That(vm.ShowAiProgressDialog, Is.True);
         Assert.That(vm.AiLastError, Does.Contain("timed out"));
-        Assert.That(vm.AiDiagnosticsText, Does.Contain("Turn timeout: 180s"));
+        Assert.That(vm.AiDiagnosticsText, Does.Contain("Turn idle timeout: 180s"));
+        Assert.That(vm.AiDiagnosticsText, Does.Contain("Run timeout: unlimited"));
         Assert.That(vm.AiDiagnosticsText, Does.Contain("session-abc"));
         Assert.That(vm.AiStatusDialogTitle, Is.EqualTo("AI review failed"));
     }
@@ -2087,6 +2092,8 @@ public sealed class ReviewViewModelTests
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
             .Returns(Substitute.For<IDisposable>());
+        ai.ObserveActivityLog(Arg.Any<string>(), Arg.Any<Action<string>>())
+            .Returns(Substitute.For<IDisposable>());
         ai.StartReviewAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(complete);
 
@@ -2213,6 +2220,8 @@ public sealed class ReviewViewModelTests
         ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
+            .Returns(Substitute.For<IDisposable>());
+        ai.ObserveActivityLog(Arg.Any<string>(), Arg.Any<Action<string>>())
             .Returns(Substitute.For<IDisposable>());
         ai.StartReviewAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(complete);

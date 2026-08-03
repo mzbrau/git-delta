@@ -753,7 +753,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     partial void OnAiRunTimeoutSecondsChanged(int value)
     {
-        _settings.Update(s => s.AiRunTimeoutSeconds = Math.Max(1, value));
+        _settings.Update(s => s.AiRunTimeoutSeconds = Math.Max(0, value));
         _ = _settings.SaveAsync();
     }
 

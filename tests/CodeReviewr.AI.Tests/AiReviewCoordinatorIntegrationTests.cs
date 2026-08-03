@@ -169,11 +169,11 @@ public sealed class AiReviewCoordinatorIntegrationTests
 
         Assert.That(snapshot.State, Is.EqualTo(AiRunState.Incomplete));
         Assert.That(snapshot.ErrorMessage, Does.Contain("timed out after 120s"));
-        Assert.That(snapshot.ErrorMessage, Does.Contain("turn timeout"));
+        Assert.That(snapshot.ErrorMessage, Does.Contain("turn idle timeout"));
     }
 
     [Test]
-    public async Task StartReviewAsync_OperationCanceledWithoutUserCancel_ProducesTimeoutMessage()
+    public async Task StartReviewAsync_OperationCanceledWithoutUserCancel_ProducesRunTimeoutMessage()
     {
         var script = new FakeAgentScript().OnTurn(t => t.BeforeCalls(_ =>
             throw new OperationCanceledException()));
@@ -190,6 +190,90 @@ public sealed class AiReviewCoordinatorIntegrationTests
         Assert.That(snapshot.ErrorMessage, Does.Contain("timed out after 90s"));
         Assert.That(snapshot.ErrorMessage, Does.Contain("run timeout"));
         Assert.That(snapshot.ErrorMessage, Does.Not.Contain("cancelled"));
+    }
+
+    [Test]
+    public async Task StartReviewAsync_IdleSilence_ProducesTurnIdleTimeoutMessage()
+    {
+        var script = new FakeAgentScript().OnTurn(t => t.BlockUntilCancelled());
+        await using var harness = await Harness.CreateAsync(
+            _ => script,
+            configureSettings: s =>
+            {
+                s.AiTurnTimeoutSeconds = 10;
+                s.AiRunTimeoutSeconds = 0;
+            });
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_IDLE_TIMEOUT", head, head, [ChangedFile("src/App.cs", 1, 0)]);
+
+        var snapshot = await harness.Service.StartReviewAsync(request);
+
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Incomplete));
+        Assert.That(snapshot.ErrorMessage, Does.Contain("timed out after 10s"));
+        Assert.That(snapshot.ErrorMessage, Does.Contain("turn idle timeout"));
+        Assert.That(snapshot.ErrorMessage, Does.Not.Contain("run timeout"));
+    }
+
+    [Test]
+    public async Task StartReviewAsync_UnlimitedRunTimeout_CompletesSuccessfully()
+    {
+        await using var harness = await Harness.CreateAsync(
+            _ => FakeAgentScript.ForPrTriage(ToJson(BuildTriage("Unlimited run ok.", AiRiskLevel.Low, "src/App.cs"))),
+            configureSettings: s => s.AiRunTimeoutSeconds = 0);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_UNLIMITED", head, head, [ChangedFile("src/App.cs", 1, 0)]);
+
+        var snapshot = await harness.Service.StartReviewAsync(request);
+
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Complete));
+        Assert.That(snapshot.Triage!.Summary, Is.EqualTo("Unlimited run ok."));
+    }
+
+    [Test]
+    public async Task StartReviewAsync_ActivityLog_IncludesPromptAndToolIo()
+    {
+        var log = new List<string>();
+        await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.ForPrTriage(
+            ToJson(BuildTriage("Logged triage.", AiRiskLevel.Low, "src/App.cs"))));
+
+        using var _ = harness.Service.ObserveActivityLog(RepositoryKey, line => log.Add(line));
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_LOG", head, head, [ChangedFile("src/App.cs", 1, 0)]);
+        var snapshot = await harness.Service.StartReviewAsync(request);
+
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Complete));
+        Assert.That(log, Has.Some.Contain(">>> Prompt"));
+        Assert.That(log, Has.Some.Contain(">>> Tool start: submit_pr_triage"));
+        Assert.That(log, Has.Some.Contain("<<< Tool result: submit_pr_triage"));
+        Assert.That(log, Has.Some.Contain("Review completed."));
+    }
+
+    [Test]
+    public async Task StartReviewAsync_ToolInFlight_PausesIdleTimeout_Completes()
+    {
+        // Tool handler sleeps longer than the idle window; idle must stay paused until the tool finishes.
+        var triageJson = ToJson(BuildTriage("Kept alive.", AiRiskLevel.Low, "src/App.cs"));
+        await using var harness = await Harness.CreateAsync(
+            _ => new FakeAgentScript().OnTurn(t => t
+                .Text("thinking...\n")
+                .Call("submit_pr_triage", triageJson)
+                .DelayEachTool(TimeSpan.FromSeconds(12))),
+            configureSettings: s =>
+            {
+                s.AiTurnTimeoutSeconds = 10;
+                s.AiRunTimeoutSeconds = 0;
+            });
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_IDLE_RESET", head, head, [ChangedFile("src/App.cs", 1, 0)]);
+
+        var snapshot = await harness.Service.StartReviewAsync(request);
+
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Complete));
+        Assert.That(snapshot.Triage!.Summary, Is.EqualTo("Kept alive."));
     }
 
     [Test]
