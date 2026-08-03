@@ -7,6 +7,7 @@ using CodeReviewr.App.Controls;
 using CodeReviewr.App.Services;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
+using CodeReviewr.Core.AI;
 using CodeReviewr.Core.Diff;
 using CodeReviewr.Diff;
 using CodeReviewr.GitHub;
@@ -30,11 +31,13 @@ public partial class ReviewViewModel : ObservableObject
     private readonly IIntraLineDiffer _intraLine;
     private readonly IGitObjectReader _objects;
     private readonly ISyntaxTokenService? _syntaxTokens;
+    private readonly IAIReviewService _ai;
     private readonly List<PendingReviewMutation> _pending = [];
     private CancellationTokenSource? _diffCts;
     private CancellationTokenSource? _openCts;
     private CancellationTokenSource? _inboxCts;
     private CancellationTokenSource? _markdownCts;
+    private CancellationTokenSource? _aiFileCts;
     private ReviewSession? _session;
     private FileDiff? _currentDiff;
     private IReadOnlyList<ReviewThread> _allThreads = [];
@@ -42,6 +45,12 @@ public partial class ReviewViewModel : ObservableObject
     private static readonly TimeSpan InboxRefreshDebounce = TimeSpan.FromSeconds(30);
     private readonly Dictionary<string, bool> _prExpandState = new(StringComparer.Ordinal);
     private bool _suppressPrEntrySync;
+    private bool _deferPrFileRebuild;
+    private bool _layoutManuallySetForCurrentPr;
+    private IDisposable? _aiProgressSubscription;
+
+    /// <summary>Raised before <see cref="PrFileEntries"/> is cleared so the view can drop ListBox selection first.</summary>
+    public event Action? SelectionClearRequested;
 
     public ReviewViewModel(
         IPullRequestService pullRequestService,
@@ -56,7 +65,8 @@ public partial class ReviewViewModel : ObservableObject
         NotificationService notifications,
         IIntraLineDiffer intraLine,
         IGitObjectReader objects,
-        ISyntaxTokenService? syntaxTokens = null)
+        ISyntaxTokenService? syntaxTokens = null,
+        IAIReviewService? ai = null)
     {
         _pullRequests = pullRequestService;
         _reviewService = reviewService;
@@ -71,6 +81,7 @@ public partial class ReviewViewModel : ObservableObject
         _intraLine = intraLine;
         _objects = objects;
         _syntaxTokens = syntaxTokens;
+        _ai = ai ?? NullAIReviewService.Instance;
         ViewMode = settings.Current.DefaultDiffMode;
         _ignoreWhitespace = settings.Current.IgnoreWhitespace;
         _contextLines = settings.Current.ContextLines > 0 ? settings.Current.ContextLines : 3;
@@ -91,6 +102,7 @@ public partial class ReviewViewModel : ObservableObject
     public ObservableCollection<IDiffAnnotation> DiffAnnotations { get; } = [];
     public ObservableCollection<ReviewerStatusItem> Reviewers { get; } = [];
     public ObservableCollection<MentionableUser> MentionCandidates { get; } = [];
+    public ObservableCollection<AiChatMessage> AiChatMessages { get; } = [];
 
     [ObservableProperty] private PullRequestSummary? _selectedPullRequest;
     [ObservableProperty] private FileItemViewModel? _selectedFile;
@@ -156,6 +168,28 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private bool _isUnplaceableSectionExpanded;
     [ObservableProperty] private bool _isFileCommentsSectionExpanded;
     [ObservableProperty] private bool _forceSideThreadPanel;
+    [ObservableProperty] private bool _filterReviewCarefully;
+
+    // --- AI review surface (Phase 3.1–3.3) ---
+    [ObservableProperty] private AiRunState _aiRunState = AiRunState.Idle;
+    [ObservableProperty] private AiRunProgress? _aiProgress;
+    [ObservableProperty] private AiPrTriageResult? _aiTriage;
+    [ObservableProperty] private bool _aiReviewSectionExpanded = true;
+    [ObservableProperty] private string _aiAdHocInstructions = "";
+    [ObservableProperty] private bool _showAiProgressDialog;
+    [ObservableProperty] private bool _showAiInstructionsDialog;
+    [ObservableProperty] private AiFileSummaryResult? _aiFileSummary;
+    [ObservableProperty] private bool _aiFileBandExpanded = true;
+    [ObservableProperty] private string _aiFileQuestion = "";
+    [ObservableProperty] private string? _aiFileAnswer;
+    [ObservableProperty] private string _aiChatInput = "";
+    [ObservableProperty] private bool _showAiChat;
+    [ObservableProperty] private bool _aiShowDismissedAnnotations;
+    [ObservableProperty] private string? _aiLastError;
+    [ObservableProperty] private string? _aiCopilotSessionId;
+    [ObservableProperty] private DateTimeOffset? _aiReviewFinishedUtc;
+
+    public ObservableCollection<AiImportantFileItem> AiImportantFiles { get; } = [];
 
     private int _mentionTokenStart = -1;
     private CancellationTokenSource? _mentionCts;
@@ -174,6 +208,12 @@ public partial class ReviewViewModel : ObservableObject
         !HasDraftCommentAnchor &&
         !ForceSideThreadPanel;
 
+    public AiLineAnnotation? SelectedAiAnnotation => SelectedAnnotation as AiLineAnnotation;
+
+    /// <summary>True when an AI annotation marker is selected and should render as an inline card.</summary>
+    public bool HasExpandedAiAnnotation =>
+        SelectedAiAnnotation is not null && !HasDraftCommentAnchor && !ForceSideThreadPanel;
+
     /// <summary>
     /// Side panel for file-level / unplaceable threads, or when the user explicitly opens a placeable thread in the sidebar.
     /// </summary>
@@ -184,12 +224,14 @@ public partial class ReviewViewModel : ObservableObject
 
     public bool HasFileFilter => !string.IsNullOrWhiteSpace(FileFilter);
     public bool HasActivePrFilters =>
-        FilterViewed != ViewedFilter.All || FilterStale || FilterCommented || FilterUnresolved;
+        FilterViewed != ViewedFilter.All || FilterStale || FilterCommented || FilterUnresolved ||
+        FilterReviewCarefully;
     public bool IsFilterViewedAll => FilterViewed == ViewedFilter.All;
     public bool IsFilterViewedOnly => FilterViewed == ViewedFilter.Viewed;
     public bool IsFilterNotViewed => FilterViewed == ViewedFilter.NotViewed;
     public bool IsPullRequestFlatLayout => PullRequestFileListLayout == FileListLayoutMode.Flat;
     public bool IsPullRequestTreeLayout => PullRequestFileListLayout == FileListLayoutMode.Tree;
+    public bool IsPullRequestAiSuggestedLayout => PullRequestFileListLayout == FileListLayoutMode.AiSuggested;
     public bool IsUnifiedView => ViewMode == DiffViewMode.Unified;
     public bool IsSideBySideView => ViewMode == DiffViewMode.SideBySide;
     public bool IsSelectedThreadPendingSync => SelectedThread?.IsPendingSync == true;
@@ -215,9 +257,12 @@ public partial class ReviewViewModel : ObservableObject
             ? Material.Icons.MaterialIconKind.ChevronDown
             : Material.Icons.MaterialIconKind.ChevronRight;
     public Material.Icons.MaterialIconKind PullRequestLayoutIcon =>
-        PullRequestFileListLayout == FileListLayoutMode.Tree
-            ? Material.Icons.MaterialIconKind.FileTree
-            : Material.Icons.MaterialIconKind.FormatListBulleted;
+        PullRequestFileListLayout switch
+        {
+            FileListLayoutMode.Tree => Material.Icons.MaterialIconKind.FileTree,
+            FileListLayoutMode.AiSuggested => Material.Icons.MaterialIconKind.Star,
+            _ => Material.Icons.MaterialIconKind.FormatListBulleted,
+        };
     public int ViewedFileCount => PrFiles.Count(f => f.IsViewed);
     public int TotalFileCount => PrFiles.Count;
     public int CommentCount => _allThreads.Sum(t => t.Comments.Count);
@@ -358,6 +403,7 @@ public partial class ReviewViewModel : ObservableObject
             IsConversationSelected = false;
         SyncSelectedPrFileEntry();
         NotifyMarkdownPreviewStateChanged();
+        NotifyAiFileBandChanged();
         _ = LoadDiffForSelectionAsync(value);
         if (value is not null && !value.IsViewed && !value.IsViewedPending)
             _ = MarkFileViewedInternalAsync(value);
@@ -382,14 +428,20 @@ public partial class ReviewViewModel : ObservableObject
     {
         _settings.Update(s => s.PullRequestFileListLayout = value);
         _ = _settings.SaveAsync();
-        RebuildPrFileEntries();
+        if (!_deferPrFileRebuild)
+            RebuildPrFileEntries();
         OnPropertyChanged(nameof(IsPullRequestFlatLayout));
         OnPropertyChanged(nameof(IsPullRequestTreeLayout));
+        OnPropertyChanged(nameof(IsPullRequestAiSuggestedLayout));
         OnPropertyChanged(nameof(PullRequestLayoutIcon));
     }
 
     [RelayCommand]
-    private void SetPullRequestFileListLayout(FileListLayoutMode mode) => PullRequestFileListLayout = mode;
+    private void SetPullRequestFileListLayout(FileListLayoutMode mode)
+    {
+        _layoutManuallySetForCurrentPr = true;
+        PullRequestFileListLayout = mode;
+    }
 
     [RelayCommand]
     private void TogglePrFolder(string? folderKey)
@@ -448,6 +500,12 @@ public partial class ReviewViewModel : ObservableObject
         ApplyPrFileFilter();
     }
 
+    partial void OnFilterReviewCarefullyChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasActivePrFilters));
+        ApplyPrFileFilter();
+    }
+
     partial void OnFilterFocusRequestedChanged(bool value)
     {
         if (value)
@@ -469,6 +527,12 @@ public partial class ReviewViewModel : ObservableObject
         if (value is not null)
             ForceSideThreadPanel = false;
         SelectedThread = value is ReviewThreadAnnotation annotation ? annotation.Thread : null;
+        OnPropertyChanged(nameof(SelectedAiAnnotation));
+        OnPropertyChanged(nameof(HasExpandedAiAnnotation));
+        ExpandedThreadChanged?.Invoke();
+
+        if (value is AiLineAnnotation { Result.ReadState: AiAnnotationReadState.Unread } ai)
+            _ = MarkAiAnnotationReadCommand.ExecuteAsync(ai.Result);
     }
 
     partial void OnSelectedThreadChanged(ReviewThread? value)
@@ -486,6 +550,7 @@ public partial class ReviewViewModel : ObservableObject
     partial void OnHasDraftCommentAnchorChanged(bool value)
     {
         OnPropertyChanged(nameof(HasExpandedInlineThread));
+        OnPropertyChanged(nameof(HasExpandedAiAnnotation));
         OnPropertyChanged(nameof(ShowSideThreadPanel));
         ExpandedThreadChanged?.Invoke();
     }
@@ -493,6 +558,7 @@ public partial class ReviewViewModel : ObservableObject
     partial void OnForceSideThreadPanelChanged(bool value)
     {
         OnPropertyChanged(nameof(HasExpandedInlineThread));
+        OnPropertyChanged(nameof(HasExpandedAiAnnotation));
         OnPropertyChanged(nameof(ShowSideThreadPanel));
         ExpandedThreadChanged?.Invoke();
     }
@@ -512,7 +578,775 @@ public partial class ReviewViewModel : ObservableObject
 
     partial void OnIsMentionPopupOpenChanged(bool value) => MentionPopupChanged?.Invoke();
 
-    partial void OnIsOfflineChanged(bool value) { }
+    partial void OnIsOfflineChanged(bool value) => NotifyAiButtonStateChanged();
+
+    // --- AI review surface (Phase 3.1–3.3) ---
+
+    public bool HasAiTriage => AiTriage is not null;
+    public bool HasAiImportantFiles => AiImportantFiles.Count > 0;
+    public bool IsAiRunActive => AiRunState == AiRunState.Running;
+    public bool CanResumeAiReview => AiRunState is AiRunState.Incomplete or AiRunState.PausedBudget;
+    public bool CanRerunAiReview => AiRunState is AiRunState.Complete or AiRunState.Failed;
+    public bool HasAiFileSummary => AiFileSummary is not null;
+    public bool ShowAiFileBand =>
+        !string.IsNullOrWhiteSpace(SelectedFileAiGuidance) || AiFileSummary is not null;
+    public bool HasAiFileAnswer => !string.IsNullOrWhiteSpace(AiFileAnswer);
+    public bool CanSendAiChat => !string.IsNullOrWhiteSpace(AiChatInput) && !IsAiRunActive;
+    public string? SelectedFileAiGuidance
+    {
+        get
+        {
+            var guidance = SelectedFile?.AiGuidance;
+            return string.IsNullOrWhiteSpace(guidance) ? null : guidance;
+        }
+    }
+    public Material.Icons.MaterialIconKind AiFileBandChevron =>
+        AiFileBandExpanded
+            ? Material.Icons.MaterialIconKind.ChevronDown
+            : Material.Icons.MaterialIconKind.ChevronRight;
+
+    public bool IsRepositoryExcludedFromAi =>
+        _session is not null &&
+        _settings.Current.AiExcludedRepositories.Contains(
+            _session.Detail.Summary.NameWithOwner, StringComparer.OrdinalIgnoreCase);
+
+    public string AiRiskBadgeText => AiTriage?.Risk switch
+    {
+        AiRiskLevel.Low => "LOW RISK",
+        AiRiskLevel.Medium => "MEDIUM RISK",
+        AiRiskLevel.High => "HIGH RISK",
+        AiRiskLevel.Critical => "CRITICAL RISK",
+        _ => "",
+    };
+
+    public string? AiMeasuredFactsText => AiTriage is { Measured: { } measured }
+        ? $"{measured.FilesChanged} files changed, +{measured.LinesAdded} -{measured.LinesRemoved} lines"
+        : null;
+
+    public string AiProgressText
+    {
+        get
+        {
+            var progress = AiProgress;
+            if (progress is null) return "";
+
+            var stage = progress.Stage.ToString();
+            var elapsed = progress.Elapsed < TimeSpan.FromHours(1)
+                ? progress.Elapsed.ToString(@"mm\:ss")
+                : progress.Elapsed.ToString(@"h\:mm\:ss");
+            var turns = progress.TurnBudget is > 0
+                ? $"{progress.TurnsUsed}/{progress.TurnBudget} turns"
+                : $"{progress.TurnsUsed} turns";
+            var files = progress.FilesTotal > 0
+                ? $" · {progress.FilesCompleted}/{progress.FilesTotal} files"
+                : "";
+            var message = string.IsNullOrWhiteSpace(progress.Message) ? "" : $" — {progress.Message}";
+            return $"{stage} · {elapsed} · {turns}{files}{message}";
+        }
+    }
+
+    public string AiStatusDialogTitle => AiRunState switch
+    {
+        AiRunState.Running => "AI review in progress",
+        AiRunState.Complete => "AI review complete",
+        AiRunState.Failed => "AI review failed",
+        AiRunState.Incomplete => "AI review incomplete",
+        AiRunState.PausedBudget => "AI review paused",
+        _ => "AI review status",
+    };
+
+    public string AiDiagnosticsText
+    {
+        get
+        {
+            var settings = _settings.Current;
+            var lines = new List<string>
+            {
+                $"State: {AiRunState}",
+                $"Turn timeout: {settings.AiTurnTimeoutSeconds}s",
+                $"Run timeout: {settings.AiRunTimeoutSeconds}s",
+                $"Turn budget: {settings.AiTurnBudget}",
+            };
+
+            if (AiProgress is { } progress)
+            {
+                lines.Add($"Stage: {progress.Stage}");
+                lines.Add($"Elapsed: {progress.Elapsed:g}");
+                lines.Add($"Turns used: {progress.TurnsUsed}");
+                if (!string.IsNullOrWhiteSpace(progress.Message))
+                    lines.Add($"Progress: {progress.Message}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(AiCopilotSessionId))
+                lines.Add($"Copilot session: {AiCopilotSessionId}");
+
+            if (!string.IsNullOrWhiteSpace(AiLastError))
+                lines.Add($"Error: {AiLastError}");
+
+            return string.Join(Environment.NewLine, lines);
+        }
+    }
+
+    public bool HasAiDiagnostics =>
+        !string.IsNullOrWhiteSpace(AiLastError) ||
+        AiRunState is AiRunState.Failed or AiRunState.Incomplete or AiRunState.Running;
+
+    public string AiButtonLabel => AiRunState switch
+    {
+        AiRunState.Running => "Reviewing…",
+        AiRunState.Incomplete or AiRunState.PausedBudget => "Resume AI review",
+        AiRunState.Complete => "Re-run AI review",
+        AiRunState.Failed => "Retry AI review",
+        _ => "AI review",
+    };
+
+    public bool AiButtonEnabled =>
+        _session is not null &&
+        !IsOffline &&
+        _settings.Current.AiAssistanceEnabled &&
+        !IsRepositoryExcludedFromAi;
+
+    public string AiButtonTooltip
+    {
+        get
+        {
+            if (_session is null) return "Open a pull request first";
+            if (!_settings.Current.AiAssistanceEnabled) return "Enable AI assistance in Settings → AI";
+            if (IsRepositoryExcludedFromAi) return "This repository is excluded from AI assistance";
+            if (IsOffline) return "AI review requires a network connection";
+            if (IsAiRunActive) return "Show AI review status";
+            return "Run an AI-assisted triage of this pull request";
+        }
+    }
+
+    /// <summary>Recomputes AI button bindings after settings or repository context change.</summary>
+    public void NotifyAiButtonStateChanged()
+    {
+        // NotifyCanExecuteChanged reaches Avalonia Button handlers that require the UI thread.
+        _ = InvokeOnUiAsync(() =>
+        {
+            OnPropertyChanged(nameof(AiButtonLabel));
+            OnPropertyChanged(nameof(AiButtonEnabled));
+            OnPropertyChanged(nameof(AiButtonTooltip));
+            OnPropertyChanged(nameof(IsRepositoryExcludedFromAi));
+            OnPropertyChanged(nameof(AiStatusDialogTitle));
+            OnPropertyChanged(nameof(AiDiagnosticsText));
+            OnPropertyChanged(nameof(HasAiDiagnostics));
+            RequestAiReviewCommand.NotifyCanExecuteChanged();
+        });
+    }
+
+    partial void OnAiRunStateChanged(AiRunState value)
+    {
+        OnPropertyChanged(nameof(IsAiRunActive));
+        OnPropertyChanged(nameof(CanResumeAiReview));
+        OnPropertyChanged(nameof(CanRerunAiReview));
+        OnPropertyChanged(nameof(CanSendAiChat));
+        OnPropertyChanged(nameof(AiStatusDialogTitle));
+        OnPropertyChanged(nameof(HasAiDiagnostics));
+        NotifyAiButtonStateChanged();
+    }
+
+    partial void OnAiProgressChanged(AiRunProgress? value)
+    {
+        OnPropertyChanged(nameof(AiProgressText));
+        OnPropertyChanged(nameof(AiDiagnosticsText));
+    }
+
+    partial void OnAiLastErrorChanged(string? value)
+    {
+        OnPropertyChanged(nameof(AiDiagnosticsText));
+        OnPropertyChanged(nameof(HasAiDiagnostics));
+    }
+
+    partial void OnAiCopilotSessionIdChanged(string? value) => OnPropertyChanged(nameof(AiDiagnosticsText));
+
+    partial void OnAiTriageChanged(AiPrTriageResult? value)
+    {
+        RebuildAiImportantFiles();
+        OnPropertyChanged(nameof(HasAiTriage));
+        OnPropertyChanged(nameof(AiRiskBadgeText));
+        OnPropertyChanged(nameof(AiMeasuredFactsText));
+        OnPropertyChanged(nameof(HasAiImportantFiles));
+        NotifyAiFileBandChanged();
+    }
+
+    partial void OnAiFileSummaryChanged(AiFileSummaryResult? value)
+    {
+        OnPropertyChanged(nameof(HasAiFileSummary));
+        NotifyAiFileBandChanged();
+    }
+
+    partial void OnAiFileBandExpandedChanged(bool value) =>
+        OnPropertyChanged(nameof(AiFileBandChevron));
+
+    partial void OnAiFileAnswerChanged(string? value) => OnPropertyChanged(nameof(HasAiFileAnswer));
+
+    partial void OnAiChatInputChanged(string value) => OnPropertyChanged(nameof(CanSendAiChat));
+
+    [RelayCommand]
+    private void ToggleAiReviewSection() => AiReviewSectionExpanded = !AiReviewSectionExpanded;
+
+    [RelayCommand]
+    private void ToggleAiFileBand() => AiFileBandExpanded = !AiFileBandExpanded;
+
+    [RelayCommand]
+    private void SelectAiImportantFile(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        var file = PrFiles.FirstOrDefault(f =>
+            string.Equals(f.Path.Value, path, StringComparison.Ordinal));
+        if (file is null)
+            return;
+
+        SelectedFile = file;
+    }
+
+    [RelayCommand(CanExecute = nameof(AiButtonEnabled))]
+    private async Task RequestAiReviewAsync()
+    {
+        if (_session is null || !AiButtonEnabled)
+            return;
+
+        if (IsAiRunActive)
+        {
+            ShowAiProgressDialog = true;
+            return;
+        }
+
+        if (!_settings.Current.AiDisclosureAcknowledged)
+        {
+            var acknowledged = await _confirm.ConfirmAsync(
+                    "Send code to GitHub Copilot?",
+                    "AI review sends this pull request's changed files and metadata to GitHub Copilot. " +
+                    "Nothing is sent unless you start a review.",
+                    "I understand, continue")
+                .ConfigureAwait(false);
+            if (!acknowledged)
+                return;
+
+            _settings.Update(s => s.AiDisclosureAcknowledged = true);
+            await _settings.SaveAsync().ConfigureAwait(false);
+        }
+
+        if (PrFiles.Count > _settings.Current.AiLargePrFileThreshold)
+        {
+            var proceed = await _confirm.ConfirmAsync(
+                    "Large pull request",
+                    $"This pull request changes {PrFiles.Count} files, which may take a while and use " +
+                    "a large turn budget. Continue?",
+                    "Start review")
+                .ConfigureAwait(false);
+            if (!proceed)
+                return;
+        }
+
+        AiAdHocInstructions = "";
+        ShowAiInstructionsDialog = true;
+    }
+
+    [RelayCommand]
+    private void CancelAiInstructions() => ShowAiInstructionsDialog = false;
+
+    [RelayCommand]
+    private void DismissAiProgressDialog() => ShowAiProgressDialog = false;
+
+    [RelayCommand]
+    private async Task ConfirmStartAiReviewAsync()
+    {
+        ShowAiInstructionsDialog = false;
+        await StartAiReviewAsync(discardCached: false, resume: false).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    private async Task ResumeAiReviewAsync()
+    {
+        if (!CanResumeAiReview) return;
+        await StartAiReviewAsync(discardCached: false, resume: true).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    private async Task RerunAiReviewAsync()
+    {
+        if (!CanRerunAiReview) return;
+        await StartAiReviewAsync(discardCached: true, resume: false).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    private async Task ConfirmIncrementalRereviewAsync()
+    {
+        if (_session is null || !HeadHasMoved) return;
+        await StartAiReviewAsync(discardCached: false, resume: true).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    private async Task CancelAiReviewAsync()
+    {
+        if (_session is null) return;
+        try
+        {
+            await _ai.CancelAsync(_session.Detail.Summary.NameWithOwner).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to cancel AI review: {ex.Message}", exception: ex);
+        }
+    }
+
+    private async Task StartAiReviewAsync(bool discardCached, bool resume)
+    {
+        if (_session is null) return;
+        var session = _session;
+        var repositoryKey = session.Detail.Summary.NameWithOwner;
+
+        _aiProgressSubscription?.Dispose();
+        _aiProgressSubscription = _ai.ObserveProgress(repositoryKey, progress =>
+            _ = InvokeOnUiAsync(() => AiProgress = progress));
+
+        await InvokeOnUiAsync(() =>
+        {
+            AiLastError = null;
+            AiRunState = AiRunState.Running;
+            ShowAiProgressDialog = true;
+        }).ConfigureAwait(false);
+
+        try
+        {
+            var request = BuildAiReviewRequest(session, discardCached, resume);
+            var snapshot = await _ai.StartReviewAsync(request, CancellationToken.None).ConfigureAwait(false);
+            if (!ReferenceEquals(_session, session)) return;
+
+            await InvokeOnUiAsync(() => ApplyAiRunSnapshot(snapshot)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            if (!ReferenceEquals(_session, session)) return;
+            await InvokeOnUiAsync(() =>
+            {
+                AiRunState = AiRunState.Failed;
+                AiLastError = ex.Message;
+                ShowAiProgressDialog = true;
+                _notifications.Error(
+                    $"AI review failed: {ex.Message}",
+                    () => _ = StartAiReviewAsync(discardCached, resume),
+                    ex,
+                    detail: AiDiagnosticsText);
+            }).ConfigureAwait(false);
+        }
+    }
+
+    private AiReviewRequest BuildAiReviewRequest(ReviewSession session, bool discardCached, bool resume)
+    {
+        var summary = session.Detail.Summary;
+        var files = session.Detail.Files
+            .Select(f => new AiChangedFileFact(
+                f.Path,
+                f.ChangeType,
+                BeforeBlobOid: null,
+                AfterBlobOid: null,
+                LinesAdded: f.Additions,
+                LinesRemoved: f.Deletions))
+            .ToList();
+
+        return new AiReviewRequest(
+            PrNodeId: summary.NodeId,
+            RepositoryPath: session.RepositoryPath,
+            RepositoryKey: summary.NameWithOwner,
+            HeadSha: session.Head.Value,
+            MergeBaseSha: session.MergeBase.Value,
+            Title: summary.Title,
+            Body: session.Detail.Body,
+            Author: summary.AuthorLogin,
+            BaseBranch: summary.BaseRefName,
+            HeadBranch: summary.HeadRefName,
+            ChangedFiles: files,
+            AdHocInstructions: string.IsNullOrWhiteSpace(AiAdHocInstructions) ? null : AiAdHocInstructions.Trim(),
+            DiscardCached: discardCached,
+            Resume: resume);
+    }
+
+    private void ApplyAiRunSnapshot(AiRunSnapshot snapshot)
+    {
+        AiRunState = snapshot.State;
+        AiCopilotSessionId = snapshot.CopilotSessionId;
+        AiLastError = snapshot.ErrorMessage;
+        AiReviewFinishedUtc = snapshot.FinishedUtc ?? snapshot.StartedUtc;
+        ApplyAiTriageFields(snapshot.Triage);
+
+        if (snapshot.State == AiRunState.Complete)
+            ShowAiProgressDialog = false;
+        else if (snapshot.State is AiRunState.Failed or AiRunState.Incomplete)
+            ShowAiProgressDialog = true;
+
+        if ((snapshot.State is AiRunState.Failed or AiRunState.Incomplete) &&
+            !string.IsNullOrWhiteSpace(snapshot.ErrorMessage))
+        {
+            _notifications.Error(
+                $"AI review: {snapshot.ErrorMessage}",
+                detail: AiDiagnosticsText);
+        }
+
+        // Defer layout rebuild so triage filter + AiSuggested layout share one PrFileEntries rebuild.
+        if (snapshot.State == AiRunState.Complete &&
+            !_layoutManuallySetForCurrentPr &&
+            PullRequestFileListLayout != FileListLayoutMode.AiSuggested)
+        {
+            _deferPrFileRebuild = true;
+            try
+            {
+                PullRequestFileListLayout = FileListLayoutMode.AiSuggested;
+            }
+            finally
+            {
+                _deferPrFileRebuild = false;
+            }
+        }
+
+        ApplyPrFileFilter();
+        NotifyAiFileBandChanged();
+    }
+
+    private void ApplyAiTriageFields(AiPrTriageResult? triage)
+    {
+        AiTriage = triage;
+        var byPath = triage?.Files.ToDictionary(f => f.Path, StringComparer.Ordinal)
+                     ?? new Dictionary<string, AiFileTriage>(StringComparer.Ordinal);
+
+        foreach (var file in PrFiles)
+        {
+            if (byPath.TryGetValue(file.Path.Value, out var fileTriage))
+            {
+                file.AiPriorityStars = fileTriage.PriorityStars;
+                file.AiClassification = fileTriage.Classification.ToString();
+                file.AiGuidance = fileTriage.Guidance;
+            }
+            else
+            {
+                file.AiPriorityStars = 0;
+                file.AiClassification = null;
+                file.AiGuidance = null;
+            }
+        }
+    }
+
+    private void RebuildAiImportantFiles()
+    {
+        AiImportantFiles.Clear();
+        if (AiTriage is null)
+        {
+            OnPropertyChanged(nameof(HasAiImportantFiles));
+            return;
+        }
+
+        var reasons = AiTriage.Justifications
+            .GroupBy(j => j.FilePath, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Reason, StringComparer.Ordinal);
+
+        var orderIndex = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (var i = 0; i < AiTriage.SuggestedOrder.Count; i++)
+            orderIndex.TryAdd(AiTriage.SuggestedOrder[i], i);
+
+        var important = AiTriage.Files
+            .Where(f => f.Classification == AiFileClassification.ReviewCarefully || f.PriorityStars >= 4)
+            .OrderBy(f => orderIndex.TryGetValue(f.Path, out var index) ? index : int.MaxValue)
+            .ThenByDescending(f => f.PriorityStars)
+            .ThenBy(f => f.Path, StringComparer.Ordinal);
+
+        foreach (var file in important)
+        {
+            string label;
+            if (!string.IsNullOrWhiteSpace(file.Guidance))
+                label = TruncateAiLabel(file.Guidance);
+            else if (reasons.TryGetValue(file.Path, out var reason) && !string.IsNullOrWhiteSpace(reason))
+                label = TruncateAiLabel(reason);
+            else if (file.Classification == AiFileClassification.ReviewCarefully)
+                label = "Review carefully";
+            else
+                label = $"{file.PriorityStars}★ priority";
+
+            AiImportantFiles.Add(new AiImportantFileItem(file.Path, label));
+        }
+
+        OnPropertyChanged(nameof(HasAiImportantFiles));
+    }
+
+    private static string TruncateAiLabel(string text, int maxLength = 120)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Length <= maxLength)
+            return trimmed;
+        return trimmed[..(maxLength - 1)].TrimEnd() + "…";
+    }
+
+    private void NotifyAiFileBandChanged()
+    {
+        OnPropertyChanged(nameof(SelectedFileAiGuidance));
+        OnPropertyChanged(nameof(ShowAiFileBand));
+        OnPropertyChanged(nameof(HasAiFileSummary));
+    }
+
+    private async Task LoadCachedAiRunAsync(ReviewSession session, CancellationToken ct)
+    {
+        if (!_settings.Current.AiAssistanceEnabled)
+            return;
+
+        try
+        {
+            var cached = await _ai.GetCachedRunAsync(session.Detail.Summary.NodeId, ct).ConfigureAwait(false);
+            if (cached is null || ct.IsCancellationRequested || !ReferenceEquals(_session, session))
+                return;
+
+            await InvokeOnUiAsync(() => ApplyAiRunSnapshot(cached)).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // Cached-run lookup is best-effort and must never block opening the pull request.
+        }
+    }
+
+    private void ResetAiState()
+    {
+        _aiProgressSubscription?.Dispose();
+        _aiProgressSubscription = null;
+        _aiFileCts?.Cancel();
+        _aiFileCts = null;
+        _layoutManuallySetForCurrentPr = false;
+        AiRunState = AiRunState.Idle;
+        AiProgress = null;
+        AiTriage = null;
+        AiImportantFiles.Clear();
+        OnPropertyChanged(nameof(HasAiImportantFiles));
+        AiFileSummary = null;
+        AiFileBandExpanded = true;
+        AiFileQuestion = "";
+        AiFileAnswer = null;
+        AiAdHocInstructions = "";
+        AiLastError = null;
+        AiCopilotSessionId = null;
+        AiReviewFinishedUtc = null;
+        ShowAiProgressDialog = false;
+        ShowAiInstructionsDialog = false;
+        ShowAiChat = false;
+        AiChatInput = "";
+        AiChatMessages.Clear();
+    }
+
+    [RelayCommand]
+    private async Task AskFileQuestionAsync()
+    {
+        if (_session is null || SelectedFile is null || string.IsNullOrWhiteSpace(AiFileQuestion))
+            return;
+
+        var question = AiFileQuestion.Trim();
+        try
+        {
+            var answer = await _ai.AskAsync(new AiQuestionRequest(
+                    _session.Detail.Summary.NodeId, SelectedFile.Path.Value, question))
+                .ConfigureAwait(false);
+            await InvokeOnUiAsync(() => AiFileAnswer = answer).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await InvokeOnUiAsync(() => AiFileAnswer = $"Error: {ex.Message}").ConfigureAwait(false);
+        }
+    }
+
+    [RelayCommand]
+    private void InsertAiAnnotationAsComment(AiAnnotationResult? annotation)
+    {
+        if (annotation is null || SelectedFile is null)
+            return;
+
+        BeginLineComment(new LineCommentRequest(
+            annotation.Side,
+            annotation.EndLine,
+            annotation.StartLine != annotation.EndLine ? annotation.StartLine : null));
+        NewCommentBody = annotation.Body;
+    }
+
+    [RelayCommand]
+    private async Task DismissAiAnnotationAsync(AiAnnotationResult? annotation)
+    {
+        if (annotation is null) return;
+        await SetAiAnnotationReadStateAsync(annotation, AiAnnotationReadState.Dismissed).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    private async Task MarkAiAnnotationReadAsync(AiAnnotationResult? annotation)
+    {
+        if (annotation is null || annotation.ReadState != AiAnnotationReadState.Unread) return;
+        await SetAiAnnotationReadStateAsync(annotation, AiAnnotationReadState.Read).ConfigureAwait(false);
+    }
+
+    private async Task SetAiAnnotationReadStateAsync(AiAnnotationResult annotation, AiAnnotationReadState state)
+    {
+        try
+        {
+            await _ai.SetAnnotationReadStateAsync(annotation.Id, state).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Best-effort; the overlay still updates locally below.
+        }
+
+        await InvokeOnUiAsync(() =>
+        {
+            var existing = DiffAnnotations.OfType<AiLineAnnotation>()
+                .FirstOrDefault(a => a.Result.Id == annotation.Id);
+            if (existing is null) return;
+
+            var index = DiffAnnotations.IndexOf(existing);
+            var updated = annotation with { ReadState = state };
+            if (state == AiAnnotationReadState.Dismissed && !AiShowDismissedAnnotations)
+                DiffAnnotations.RemoveAt(index);
+            else
+                DiffAnnotations[index] = new AiLineAnnotation(updated, existing.Range);
+        }).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    private async Task RunAiInlineActionAsync(string? action)
+    {
+        if (_session is null || SelectedFile is null || string.IsNullOrWhiteSpace(action) || DraftCommentLine is not int endLine)
+            return;
+
+        var lines = ResolveDraftLineTexts();
+        if (lines.Count == 0)
+        {
+            _notifications.Info("No line content available for this action.");
+            return;
+        }
+
+        var startLine = DraftCommentStartLine ?? endLine;
+        var context = string.Join('\n', lines);
+        try
+        {
+            var result = await _ai.RunInlineActionAsync(new AiInlineActionRequest(
+                    _session.Detail.Summary.NodeId,
+                    SelectedFile.Path.Value,
+                    action,
+                    context,
+                    startLine,
+                    endLine))
+                .ConfigureAwait(false);
+
+            await InvokeOnUiAsync(() =>
+            {
+                NewCommentBody = string.IsNullOrWhiteSpace(NewCommentBody)
+                    ? result
+                    : NewCommentBody.TrimEnd() + "\n\n" + result;
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"AI action failed: {ex.Message}", exception: ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ToggleAiChatAsync()
+    {
+        ShowAiChat = !ShowAiChat;
+        if (!ShowAiChat || _session is null || AiChatMessages.Count > 0)
+            return;
+
+        try
+        {
+            var history = await _ai.GetChatHistoryAsync(_session.Detail.Summary.NodeId).ConfigureAwait(false);
+            await InvokeOnUiAsync(() =>
+            {
+                foreach (var message in history)
+                    AiChatMessages.Add(message);
+            }).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Chat history is best-effort.
+        }
+    }
+
+    [RelayCommand]
+    private async Task SendAiChatAsync()
+    {
+        if (_session is null || string.IsNullOrWhiteSpace(AiChatInput))
+            return;
+
+        var prNodeId = _session.Detail.Summary.NodeId;
+        var question = AiChatInput.Trim();
+        AiChatInput = "";
+        AiChatMessages.Add(new AiChatMessage("user", question, DateTimeOffset.UtcNow));
+
+        try
+        {
+            var reply = await _ai.ChatAsync(new AiQuestionRequest(prNodeId, SelectedFile?.Path.Value, question))
+                .ConfigureAwait(false);
+            await InvokeOnUiAsync(() =>
+                AiChatMessages.Add(new AiChatMessage("assistant", reply, DateTimeOffset.UtcNow))).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await InvokeOnUiAsync(() =>
+                AiChatMessages.Add(new AiChatMessage("assistant", $"Error: {ex.Message}", DateTimeOffset.UtcNow)))
+                .ConfigureAwait(false);
+        }
+    }
+
+    private async Task LoadAiFileDetailAsync(FileItemViewModel file, FileDiff diff, CancellationToken ct)
+    {
+        if (_session is null || !_settings.Current.AiAssistanceEnabled)
+            return;
+
+        var prNodeId = _session.Detail.Summary.NodeId;
+        try
+        {
+            var summary = await _ai.GetFileSummaryAsync(prNodeId, file.Path.Value, ct).ConfigureAwait(false);
+            if (summary is null)
+            {
+                var beforeOid = diff.OldContent.IsEmpty ? null : diff.OldContent.Value;
+                var afterOid = diff.NewContent.IsEmpty ? null : diff.NewContent.Value;
+                _ = _ai.RequestFileDepthAsync(
+                    new AiFileDepthRequest(prNodeId, file.Path.Value, beforeOid, afterOid),
+                    CancellationToken.None);
+            }
+
+            var annotations = await _ai
+                .GetFileAnnotationsAsync(prNodeId, file.Path.Value, AiShowDismissedAnnotations, ct)
+                .ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
+
+            await InvokeOnUiAsync(() =>
+            {
+                if (!ReferenceEquals(SelectedFile, file) || !ReferenceEquals(_currentDiff, diff))
+                    return;
+
+                AiFileSummary = summary;
+
+                foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
+                    DiffAnnotations.Remove(stale);
+
+                foreach (var annotation in annotations)
+                {
+                    var content = annotation.Side == DiffSide.Old ? diff.OldContent : diff.NewContent;
+                    var start = new DiffAnchor(annotation.Side, content, annotation.StartLine);
+                    var end = new DiffAnchor(annotation.Side, content, annotation.EndLine);
+                    DiffAnnotations.Add(new AiLineAnnotation(annotation, new AnnotationRange(start, end)));
+                }
+            }).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // AI file overlay is best-effort and must never block the diff view.
+        }
+    }
 
     [RelayCommand]
     private void ClearFileFilter() => FileFilter = "";
@@ -528,6 +1362,17 @@ public partial class ReviewViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleFilterUnresolved() => FilterUnresolved = !FilterUnresolved;
+
+    [RelayCommand]
+    private void ToggleFilterReviewCarefully() => FilterReviewCarefully = !FilterReviewCarefully;
+
+    [RelayCommand]
+    private void ToggleAiShowDismissedAnnotations()
+    {
+        AiShowDismissedAnnotations = !AiShowDismissedAnnotations;
+        if (SelectedFile is not null && _currentDiff is not null)
+            _ = LoadAiFileDetailAsync(SelectedFile, _currentDiff, CancellationToken.None);
+    }
 
     [RelayCommand]
     private void ToggleShowFullFile() => ShowFullFile = !ShowFullFile;
@@ -657,11 +1502,15 @@ public partial class ReviewViewModel : ObservableObject
 
     private void RebuildPrFileEntries()
     {
-        // Suppress for the whole rebuild: PrFileEntries.Clear() makes the ListBox
-        // TwoWay-null SelectedPrFileEntry, which would clear SelectedFile and wipe DiffRows.
+        // Suppress BEFORE clearing selection: ListBox TwoWay SelectedItem=null would otherwise
+        // write SelectedPrFileEntry → SelectedFile=null → LoadDiff(null) and race PrFileEntries.Clear
+        // (Avalonia InternalSelectionModel.CopyTo ArgumentException → "Failed to load diff").
         _suppressPrEntrySync = true;
         try
         {
+            SelectedPrFileEntry = null;
+            SelectionClearRequested?.Invoke();
+
             FileListLayoutHelper.Rebuild(
                 PrFileEntries,
                 FilteredPrFiles,
@@ -731,6 +1580,8 @@ public partial class ReviewViewModel : ObservableObject
         if (FilterCommented && !file.HasCommentThreads)
             return false;
         if (FilterUnresolved && file.UnresolvedThreadCount == 0)
+            return false;
+        if (FilterReviewCarefully && !file.IsAiReviewCarefully)
             return false;
 
         return true;
@@ -895,7 +1746,7 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Could not open URL: {ex.Message}");
+            _notifications.Error($"Could not open URL: {ex.Message}", exception: ex);
         }
     }
 
@@ -1093,7 +1944,7 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to queue delete: {ex.Message}");
+            _notifications.Error($"Failed to queue delete: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1124,7 +1975,7 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to queue reply: {ex.Message}");
+            _notifications.Error($"Failed to queue reply: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1187,7 +2038,7 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to queue comment: {ex.Message}");
+            _notifications.Error($"Failed to queue comment: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1227,7 +2078,7 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to queue edit: {ex.Message}");
+            _notifications.Error($"Failed to queue edit: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1347,7 +2198,7 @@ public partial class ReviewViewModel : ObservableObject
             await InvokeOnUiAsync(() =>
             {
                 DismissMentionPopup();
-                _notifications.Error($"Could not load mentions: {ex.Message}");
+                _notifications.Error($"Could not load mentions: {ex.Message}", exception: ex);
             }).ConfigureAwait(false);
         }
     }
@@ -1699,7 +2550,7 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to toggle viewed: {ex.Message}");
+            _notifications.Error($"Failed to toggle viewed: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1737,7 +2588,7 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to update thread: {ex.Message}");
+            _notifications.Error($"Failed to update thread: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1789,11 +2640,11 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (HeadMovedException ex)
         {
-            _notifications.Error($"Cannot submit: head moved from {ex.ExpectedSha[..7]} to {ex.ActualSha[..7]}.");
+            _notifications.Error($"Cannot submit: head moved from {ex.ExpectedSha[..7]} to {ex.ActualSha[..7]}.", exception: ex);
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to submit review: {ex.Message}");
+            _notifications.Error($"Failed to submit review: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1846,7 +2697,7 @@ public partial class ReviewViewModel : ObservableObject
         {
             IsOffline = true;
             _notifications.Error($"Failed to refresh pull requests: {ex.Message}",
-                () => _ = RefreshInboxAsync());
+                () => _ = RefreshInboxAsync(), ex);
         }
         finally
         {
@@ -1878,6 +2729,7 @@ public partial class ReviewViewModel : ObservableObject
             UnplaceableThreads.Clear();
             FileLevelThreads.Clear();
             DiffAnnotations.Clear();
+            ResetAiState();
             IsUnplaceableSectionExpanded = false;
             IsFileCommentsSectionExpanded = false;
             ForceSideThreadPanel = false;
@@ -1909,9 +2761,10 @@ public partial class ReviewViewModel : ObservableObject
                 return;
             }
 
-            _session = session;
             await InvokeOnUiAsync(() =>
             {
+                _session = session;
+                NotifyAiButtonStateChanged();
                 WorkspaceMode = WorkspaceMode.PullRequest;
                 PullRequestTitle = $"#{session.Detail.Summary.Number} {session.Detail.Summary.Title}";
                 PullRequestSubtitle =
@@ -1931,6 +2784,9 @@ public partial class ReviewViewModel : ObservableObject
             await RefreshPendingCommentCountAsync().ConfigureAwait(false);
             await _outbox.DrainAsync(ct).ConfigureAwait(false);
             IsOffline = _outbox.IsOffline;
+
+            // Cached-run lookup only — never triggers a Copilot call on PR open.
+            await LoadCachedAiRunAsync(session, ct).ConfigureAwait(false);
 
             if (ct.IsCancellationRequested)
                 return;
@@ -1962,7 +2818,7 @@ public partial class ReviewViewModel : ObservableObject
         catch (Exception ex)
         {
             _notifications.Error($"Failed to open pull request: {ex.Message}",
-                () => _ = SelectPullRequestAsync(summary));
+                () => _ = SelectPullRequestAsync(summary), ex);
             await InvokeOnUiAsync(() =>
             {
                 WorkspaceMode = WorkspaceMode.FileStatus;
@@ -1988,6 +2844,8 @@ public partial class ReviewViewModel : ObservableObject
         SelectedPullRequest = null;
         SelectedFile = null;
         _session = null;
+        ResetAiState();
+        NotifyAiButtonStateChanged();
         PrFiles.Clear();
         FilteredPrFiles.Clear();
         DiffRows.Clear();
@@ -2015,6 +2873,7 @@ public partial class ReviewViewModel : ObservableObject
         FilterStale = false;
         FilterCommented = false;
         FilterUnresolved = false;
+        FilterReviewCarefully = false;
         OnPropertyChanged(nameof(StatusChecks));
         OnPropertyChanged(nameof(Timeline));
         FileThreadSummary = string.Empty;
@@ -2066,21 +2925,33 @@ public partial class ReviewViewModel : ObservableObject
         _diffCts = cts;
         _markdownCts?.Cancel();
         _markdownCts = null;
+        _aiFileCts?.Cancel();
+        _aiFileCts = null;
         var ct = cts.Token;
+
+        await InvokeOnUiAsync(() =>
+        {
+            AiFileSummary = null;
+            AiFileQuestion = "";
+            AiFileAnswer = null;
+        });
 
         if (file is null || _session is null)
         {
-            DiffRows.Clear();
-            _currentDiff = null;
-            MarkdownPreviewText = null;
-            DiffEmptyMessage = SelectedPullRequest is null
-                ? "Select a pull request"
-                : "Select a file to view its diff";
-            NotifyMarkdownPreviewStateChanged();
+            await InvokeOnUiAsync(() =>
+            {
+                DiffRows.Clear();
+                _currentDiff = null;
+                MarkdownPreviewText = null;
+                DiffEmptyMessage = SelectedPullRequest is null
+                    ? "Select a pull request"
+                    : "Select a file to view its diff";
+                NotifyMarkdownPreviewStateChanged();
+            });
             return;
         }
 
-        IsLoadingDiff = true;
+        await InvokeOnUiAsync(() => IsLoadingDiff = true);
         try
         {
             var options = BuildDiffOptions();
@@ -2108,6 +2979,14 @@ public partial class ReviewViewModel : ObservableObject
 
             await LoadSyntaxTokensAsync(file, _currentDiff!, ct).ConfigureAwait(false);
             await UpdateThreadAnnotationsAsync(file, diff, ct).ConfigureAwait(false);
+
+            if (!ReferenceEquals(_diffCts, cts) || ct.IsCancellationRequested)
+                return;
+
+            var aiCts = new CancellationTokenSource();
+            _aiFileCts = aiCts;
+            _ = LoadAiFileDetailAsync(file, _currentDiff!, aiCts.Token);
+
             if (ShowMarkdownPreviewPane)
                 await LoadMarkdownPreviewTextAsync(file, _currentDiff!, ct).ConfigureAwait(false);
             else
@@ -2128,21 +3007,27 @@ public partial class ReviewViewModel : ObservableObject
         {
             if (!ReferenceEquals(_diffCts, cts))
                 return;
-            DiffRows.Clear();
-            LeftSyntaxTokens = null;
-            RightSyntaxTokens = null;
-            MarkdownPreviewText = null;
-            DiffEmptyMessage = ex.Message;
+            await InvokeOnUiAsync(() =>
+            {
+                DiffRows.Clear();
+                LeftSyntaxTokens = null;
+                RightSyntaxTokens = null;
+                MarkdownPreviewText = null;
+                DiffEmptyMessage = ex.Message;
+            });
         }
         catch (Exception ex)
         {
             if (!ReferenceEquals(_diffCts, cts))
                 return;
-            DiffRows.Clear();
-            LeftSyntaxTokens = null;
-            RightSyntaxTokens = null;
-            MarkdownPreviewText = null;
-            DiffEmptyMessage = $"Failed to load diff: {ex.Message}";
+            await InvokeOnUiAsync(() =>
+            {
+                DiffRows.Clear();
+                LeftSyntaxTokens = null;
+                RightSyntaxTokens = null;
+                MarkdownPreviewText = null;
+                DiffEmptyMessage = $"Failed to load diff: {ex.Message}";
+            });
         }
         finally
         {
@@ -2150,8 +3035,11 @@ public partial class ReviewViewModel : ObservableObject
             // not hide loading for the newer request.
             if (ReferenceEquals(_diffCts, cts))
             {
-                IsLoadingDiff = false;
-                OnPropertyChanged(nameof(DiffFooterText));
+                await InvokeOnUiAsync(() =>
+                {
+                    IsLoadingDiff = false;
+                    OnPropertyChanged(nameof(DiffFooterText));
+                });
             }
         }
     }
@@ -2255,7 +3143,7 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to refresh threads: {ex.Message}");
+            _notifications.Error($"Failed to refresh threads: {ex.Message}", exception: ex);
         }
 
         ApplyPrFileFilter();
@@ -2380,7 +3268,7 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to save notes: {ex.Message}");
+            _notifications.Error($"Failed to save notes: {ex.Message}", exception: ex);
         }
     }
 
@@ -2648,6 +3536,9 @@ public partial class ReviewViewModel : ObservableObject
         ResolveThread,
     }
 }
+
+/// <summary>High-priority file highlighted in the Conversation AI review card.</summary>
+public sealed record AiImportantFileItem(string Path, string Label);
 
 public partial class ReviewThreadViewModel : ObservableObject
 {

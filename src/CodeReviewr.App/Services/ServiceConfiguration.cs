@@ -1,3 +1,4 @@
+using CodeReviewr.AI;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core.Abstractions;
 using CodeReviewr.Core.Caching;
@@ -39,7 +40,7 @@ public static class ServiceConfiguration
         services.AddCodeReviewrDiff();
         services.AddCodeReviewrGitHub();
         services.AddCodeReviewrReview();
-        services.AddSingleton<IAIReviewService>(_ => NullAIReviewService.Instance);
+        services.AddCodeReviewrAI();
         services.AddSingleton<MainWindowViewModel>();
         services.AddTransient<WorkingCopyViewModel>();
         services.AddTransient<ReviewViewModel>();

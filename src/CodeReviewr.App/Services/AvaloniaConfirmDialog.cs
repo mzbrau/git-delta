@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 
 namespace CodeReviewr.App.Services;
 
@@ -14,6 +15,12 @@ public sealed class AvaloniaConfirmDialog : IConfirmDialog
         if (Owner is null)
             return true;
 
+        return await Dispatcher.UIThread.InvokeAsync(() => ShowDialogCoreAsync(title, message, confirmLabel))
+            .ConfigureAwait(false);
+    }
+
+    private async Task<bool> ShowDialogCoreAsync(string title, string message, string confirmLabel)
+    {
         var result = false;
         var dialog = new Window
         {
@@ -70,7 +77,7 @@ public sealed class AvaloniaConfirmDialog : IConfirmDialog
         root.Children.Add(messageBlock);
         dialog.Content = root;
 
-        await dialog.ShowDialog(Owner);
+        await dialog.ShowDialog(Owner!);
         return result;
     }
 }

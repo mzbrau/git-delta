@@ -46,7 +46,7 @@ public sealed class MarkdownFilePreview : UserControl
 
     private readonly ScrollViewer _scroll;
     private readonly StackPanel _rowsPanel;
-    private readonly TextBlock _empty;
+    private readonly SelectableTextBlock _empty;
     private readonly List<BlockRow> _rows = [];
     private INotifyCollectionChanged? _annotationsNotify;
     private int _hoverRowIndex = -1;
@@ -65,16 +65,17 @@ public sealed class MarkdownFilePreview : UserControl
     {
         _rowsPanel = new StackPanel
         {
-            Spacing = 4,
+            Spacing = 8,
             Margin = new Thickness(0, 8, 12, 16),
         };
-        _empty = new TextBlock
+        _empty = new SelectableTextBlock
         {
             Text = EmptyMessage,
             Opacity = 0.6,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             IsVisible = false,
+            TextWrapping = TextWrapping.Wrap,
         };
         var host = new Panel();
         host.Children.Add(_empty);
@@ -295,7 +296,7 @@ public sealed class MarkdownFilePreview : UserControl
         var root = new Border
         {
             Child = rowGrid,
-            Padding = new Thickness(8, 2, 8, 2),
+            Padding = new Thickness(8, 4, 8, 4),
             CornerRadius = new CornerRadius(4),
             Background = Brushes.Transparent,
             Tag = index,

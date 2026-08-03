@@ -4,6 +4,7 @@
         xmlns:controls="using:CodeReviewr.App.Controls"
         xmlns:conv="using:CodeReviewr.App.Converters"
         xmlns:core="using:CodeReviewr.Core"
+        xmlns:ai="using:CodeReviewr.Core.AI"
         xmlns:icons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
         xmlns:svc="using:CodeReviewr.App.Services"
         xmlns:gh="using:CodeReviewr.GitHub"
@@ -991,6 +992,32 @@
                           ToolTip.Tip="Open on GitHub">
                     <icons:MaterialIcon Kind="Github" Width="18" Height="18" />
                   </Button>
+                  <Button DockPanel.Dock="Right" Classes="IconOnly" Width="24" Height="24" Padding="3"
+                          Margin="0,0,4,0"
+                          Command="{Binding Review.CancelAiReviewCommand}"
+                          IsVisible="{Binding Review.IsAiRunActive}"
+                          ToolTip.Tip="Cancel AI review">
+                    <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                  </Button>
+                  <Button DockPanel.Dock="Right" Classes="Ghost" Padding="6,3" Margin="0,0,4,0"
+                          FontSize="11"
+                          Command="{Binding Review.RequestAiReviewCommand}"
+                          IsEnabled="{Binding Review.AiButtonEnabled}"
+                          ToolTip.Tip="{Binding Review.AiButtonTooltip}">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
+                                          Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                      <TextBlock Text="{Binding Review.AiButtonLabel}" />
+                    </StackPanel>
+                  </Button>
+                  <Button DockPanel.Dock="Right" Classes="IconOnly" Width="28" Height="28" Padding="4"
+                          Margin="0,0,4,0"
+                          Command="{Binding Review.ToggleAiChatCommand}"
+                          IsEnabled="{Binding Review.HasAiTriage}"
+                          ToolTip.Tip="AI chat">
+                    <icons:MaterialIcon Kind="ChatOutline" Width="16" Height="16"
+                                        Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                  </Button>
                   <TextBlock Text="Pull request files" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </DockPanel>
                 <TextBlock Text="{Binding Review.ProgressSummary}" FontSize="10" Opacity="0.75"
@@ -1015,6 +1042,12 @@
                                 CommandParameter="{x:Static core:FileListLayoutMode.Tree}"
                                 ToggleType="Radio"
                                 IsChecked="{Binding Review.IsPullRequestTreeLayout, Mode=OneWay}" />
+                      <MenuItem Header="AI suggested order"
+                                Command="{Binding Review.SetPullRequestFileListLayoutCommand}"
+                                CommandParameter="{x:Static core:FileListLayoutMode.AiSuggested}"
+                                ToggleType="Radio"
+                                IsVisible="{Binding Review.HasAiTriage}"
+                                IsChecked="{Binding Review.IsPullRequestAiSuggestedLayout, Mode=OneWay}" />
                     </MenuFlyout>
                   </Button.Flyout>
                   <StackPanel Orientation="Horizontal" Spacing="2">
@@ -1055,6 +1088,16 @@
                                 Command="{Binding Review.ToggleFilterUnresolvedCommand}"
                                 ToggleType="CheckBox"
                                 IsChecked="{Binding Review.FilterUnresolved, Mode=OneWay}" />
+                      <MenuItem Header="Review carefully (AI)"
+                                Command="{Binding Review.ToggleFilterReviewCarefullyCommand}"
+                                ToggleType="CheckBox"
+                                IsVisible="{Binding Review.HasAiTriage}"
+                                IsChecked="{Binding Review.FilterReviewCarefully, Mode=OneWay}" />
+                      <MenuItem Header="Show dismissed AI annotations"
+                                Command="{Binding Review.ToggleAiShowDismissedAnnotationsCommand}"
+                                ToggleType="CheckBox"
+                                IsVisible="{Binding Review.HasAiTriage}"
+                                IsChecked="{Binding Review.AiShowDismissedAnnotations, Mode=OneWay}" />
                     </MenuFlyout>
                   </Button.Flyout>
                   <Panel>
@@ -1103,7 +1146,8 @@
                     <TextBlock Text="Conversation" FontWeight="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
                   </StackPanel>
                 </Button>
-                <ListBox ItemsSource="{Binding Review.PrFileEntries}"
+                <ListBox x:Name="PrFileList"
+                         ItemsSource="{Binding Review.PrFileEntries}"
                          SelectedItem="{Binding Review.SelectedPrFileEntry}"
                          SelectionMode="Single"
                          Margin="0">
@@ -1132,6 +1176,11 @@
                                       IsVisible="{Binding File.UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
                                 <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
                               </Border>
+                              <TextBlock Text="{Binding File.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
+                                         FontSize="10" VerticalAlignment="Center"
+                                         Foreground="{DynamicResource ForgeAiAccentBrush}"
+                                         IsVisible="{Binding File.HasAiStars}"
+                                         ToolTip.Tip="{Binding File.AiGuidanceTooltip}" />
                               <Border CornerRadius="2" Padding="4,1"
                                       Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
                                 <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
@@ -1140,6 +1189,7 @@
                             </StackPanel>
                             <TextBlock Text="{Binding Label}" Classes="MonoPath PrFileLabel"
                                        Classes.Unviewed="{Binding File.IsViewed, Converter={x:Static conv:ForgeConverters.InvertBool}}"
+                                       Classes.AiSkip="{Binding File.IsAiSkip}"
                                        TextTrimming="CharacterEllipsis" />
                           </DockPanel>
                         </Border>
@@ -1368,7 +1418,13 @@
           <Border DockPanel.Dock="Top" Padding="12,8"
                   Background="{DynamicResource ForgeBannerBrush}"
                   IsVisible="{Binding Review.HeadHasMoved}">
-            <TextBlock Text="{Binding Review.HeadMovedBanner}" TextWrapping="Wrap" FontSize="12" />
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Classes="Ghost" Content="Re-run AI review" FontSize="11"
+                      Command="{Binding Review.ConfirmIncrementalRereviewCommand}"
+                      IsVisible="{Binding Review.HasAiTriage}" />
+              <TextBlock Text="{Binding Review.HeadMovedBanner}" TextWrapping="Wrap" FontSize="12"
+                         VerticalAlignment="Center" />
+            </DockPanel>
           </Border>
           <Border DockPanel.Dock="Top" MinHeight="52" Padding="12,6"
                   Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
@@ -1521,6 +1577,72 @@
           <Panel ClipToBounds="True">
             <ScrollViewer IsVisible="{Binding Review.IsConversationSelected}">
               <StackPanel Spacing="16" Margin="16">
+                <!-- AI review -->
+                <Border Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                        CornerRadius="8" Padding="12"
+                        IsVisible="{Binding Review.HasAiTriage}">
+                  <StackPanel Spacing="10">
+                    <DockPanel>
+                      <Button DockPanel.Dock="Right" Classes="Ghost" FontSize="11"
+                              Content="Re-run"
+                              IsVisible="{Binding Review.CanRerunAiReview}"
+                              Command="{Binding Review.RerunAiReviewCommand}" />
+                      <Button DockPanel.Dock="Right" Classes="Ghost" FontSize="11" Margin="0,0,4,0"
+                              Content="Resume"
+                              IsVisible="{Binding Review.CanResumeAiReview}"
+                              Command="{Binding Review.ResumeAiReviewCommand}" />
+                      <icons:MaterialIcon DockPanel.Dock="Right" Width="16" Height="16" Margin="0,0,8,0"
+                                          Kind="{Binding Review.AiReviewSectionExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                          Opacity="0.7" />
+                      <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left"
+                              Command="{Binding Review.ToggleAiReviewSectionCommand}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                          <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
+                                              Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                          <TextBlock Text="AI REVIEW" Classes="PanelHeader" Opacity="0.7" />
+                          <Border CornerRadius="2" Padding="6,2"
+                                  Background="{Binding Review.AiTriage.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBackground}}">
+                            <TextBlock Text="{Binding Review.AiRiskBadgeText}" FontSize="10" FontWeight="SemiBold"
+                                       Foreground="{Binding Review.AiTriage.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBrush}}" />
+                          </Border>
+                          <TextBlock Text="{Binding Review.AiReviewFinishedUtc, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
+                                     FontSize="11" Opacity="0.6" VerticalAlignment="Center"
+                                     IsVisible="{Binding Review.AiReviewFinishedUtc, Converter={x:Static conv:ForgeConverters.IsNotNull}}" />
+                        </StackPanel>
+                      </Button>
+                    </DockPanel>
+                    <StackPanel Spacing="10" IsVisible="{Binding Review.AiReviewSectionExpanded}">
+                      <controls:MarkdownView Markdown="{Binding Review.AiTriage.Summary}" />
+                      <SelectableTextBlock Text="{Binding Review.AiMeasuredFactsText}"
+                                 FontSize="11" Opacity="0.7"
+                                 IsVisible="{Binding Review.AiMeasuredFactsText, Converter={x:Static conv:ForgeConverters.IsNotNull}}" />
+                      <StackPanel Spacing="6"
+                                  IsVisible="{Binding Review.HasAiImportantFiles}">
+                        <TextBlock Text="IMPORTANT FILES" Classes="PanelHeader" Opacity="0.7" FontSize="11" />
+                        <ItemsControl ItemsSource="{Binding Review.AiImportantFiles}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AiImportantFileItem">
+                              <Button Classes="Ghost" Padding="4,4" HorizontalAlignment="Stretch"
+                                      HorizontalContentAlignment="Left"
+                                      Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.SelectAiImportantFileCommand}"
+                                      CommandParameter="{Binding Path}">
+                                <DockPanel>
+                                  <TextBlock DockPanel.Dock="Left" Text="{Binding Path}" Classes="MonoPath"
+                                             FontSize="11" FontWeight="SemiBold" Margin="0,0,8,0"
+                                             TextTrimming="CharacterEllipsis" MaxWidth="220" />
+                                  <TextBlock Text="{Binding Label}" FontSize="11" TextWrapping="NoWrap"
+                                             TextTrimming="CharacterEllipsis"
+                                             Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                                </DockPanel>
+                              </Button>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+
                 <!-- Description -->
                 <Border Background="{DynamicResource ForgeSurfaceContainerBrush}"
                         CornerRadius="8" Padding="12">
@@ -1640,6 +1762,97 @@
               </StackPanel>
             </ScrollViewer>
             <DockPanel IsVisible="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+              <Border DockPanel.Dock="Bottom" Height="240" Padding="10"
+                      Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      BorderBrush="{DynamicResource ForgeAiAccentBrush}" BorderThickness="0,1,0,0"
+                      IsVisible="{Binding Review.ShowAiChat}">
+                <DockPanel>
+                  <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                    <Button DockPanel.Dock="Right" Classes="Ghost" Content="Close" FontSize="11"
+                            Command="{Binding Review.ToggleAiChatCommand}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                      <icons:MaterialIcon Kind="ChatOutline" Width="14" Height="14"
+                                          Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                      <TextBlock Text="AI CHAT" Classes="PanelHeader" Opacity="0.7" />
+                    </StackPanel>
+                  </DockPanel>
+                  <DockPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                    <Button DockPanel.Dock="Right" Classes="Primary" Content="Send" Margin="6,0,0,0"
+                            Command="{Binding Review.SendAiChatCommand}"
+                            IsEnabled="{Binding Review.CanSendAiChat}" />
+                    <TextBox Text="{Binding Review.AiChatInput}" FontSize="12"
+                             PlaceholderText="Ask about this pull request…"
+                             KeyDown="OnAiChatKeyDown" />
+                  </DockPanel>
+                  <ScrollViewer>
+                    <ItemsControl ItemsSource="{Binding Review.AiChatMessages}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="ai:AiChatMessage">
+                          <Border Margin="0,0,0,8" Padding="8" CornerRadius="6"
+                                  Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="{Binding Role}" FontSize="10" FontWeight="SemiBold"
+                                         Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                              <controls:MarkdownView Markdown="{Binding Content}" />
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
+              <Border DockPanel.Dock="Top" Padding="10" MaxHeight="220"
+                      Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1"
+                      IsVisible="{Binding Review.ShowAiFileBand}">
+                <DockPanel>
+                  <Button DockPanel.Dock="Top" Classes="Ghost" HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Left" Padding="0,0,0,6"
+                          Command="{Binding Review.ToggleAiFileBandCommand}">
+                    <DockPanel>
+                      <icons:MaterialIcon DockPanel.Dock="Right" Width="16" Height="16"
+                                          Kind="{Binding Review.AiFileBandChevron}"
+                                          Opacity="0.7" />
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
+                                            Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                        <TextBlock Text="AI GUIDANCE" Classes="PanelHeader" Opacity="0.7"
+                                   VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding Review.SelectedFile.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
+                                   FontSize="11" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource ForgeAiAccentBrush}"
+                                   IsVisible="{Binding Review.SelectedFile.HasAiStars}" />
+                      </StackPanel>
+                    </DockPanel>
+                  </Button>
+                  <ScrollViewer MaxHeight="180" IsVisible="{Binding Review.AiFileBandExpanded}">
+                    <StackPanel Spacing="6">
+                      <SelectableTextBlock Text="{Binding Review.SelectedFileAiGuidance}" FontSize="12"
+                                 TextWrapping="Wrap"
+                                 IsVisible="{Binding Review.SelectedFileAiGuidance, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+                      <SelectableTextBlock Text="{Binding Review.AiFileSummary.Purpose}" FontSize="12" TextWrapping="Wrap"
+                                 IsVisible="{Binding Review.HasAiFileSummary}" />
+                      <SelectableTextBlock Text="{Binding Review.AiFileSummary.InterestingChanges}" FontSize="12"
+                                 TextWrapping="Wrap"
+                                 IsVisible="{Binding Review.HasAiFileSummary}"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                      <SelectableTextBlock Text="{Binding Review.AiFileSummary.ReviewFocus}" FontSize="12" FontStyle="Italic"
+                                 TextWrapping="Wrap"
+                                 IsVisible="{Binding Review.HasAiFileSummary}"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                      <DockPanel Margin="0,6,0,0" IsVisible="{Binding Review.HasAiFileSummary}">
+                        <Button DockPanel.Dock="Right" Classes="Ghost" Content="Ask" FontSize="11" Margin="6,0,0,0"
+                                Command="{Binding Review.AskFileQuestionCommand}" />
+                        <TextBox Text="{Binding Review.AiFileQuestion}" FontSize="12"
+                                 PlaceholderText="Ask a question about this file…" />
+                      </DockPanel>
+                      <controls:MarkdownView Markdown="{Binding Review.AiFileAnswer}"
+                                             IsVisible="{Binding Review.HasAiFileAnswer}" />
+                    </StackPanel>
+                  </ScrollViewer>
+                </DockPanel>
+              </Border>
               <Border DockPanel.Dock="Bottom" MaxHeight="180" Padding="8"
                       Background="{DynamicResource ForgeSurfaceContainerBrush}"
                       BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
@@ -1848,8 +2061,63 @@
                           <Button Classes="Primary" Content="{Binding Review.DraftPrimaryActionLabel}"
                                   Command="{Binding Review.AddCommentCommand}" />
                         </StackPanel>
-                        <TextBlock />
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <Button Classes="Ghost" Content="Explain" FontSize="10" Padding="4,0"
+                                  Command="{Binding Review.RunAiInlineActionCommand}"
+                                  CommandParameter="explain"
+                                  ToolTip.Tip="Ask AI to explain the selected lines" />
+                          <Button Classes="Ghost" Content="Review" FontSize="10" Padding="4,0"
+                                  Command="{Binding Review.RunAiInlineActionCommand}"
+                                  CommandParameter="review"
+                                  ToolTip.Tip="Ask AI to review the selected lines" />
+                          <Button Classes="Ghost" Content="Find bugs" FontSize="10" Padding="4,0"
+                                  Command="{Binding Review.RunAiInlineActionCommand}"
+                                  CommandParameter="find_bugs"
+                                  ToolTip.Tip="Ask AI to look for bugs in the selected lines" />
+                          <Button Classes="Ghost" Content="Suggest tests" FontSize="10" Padding="4,0"
+                                  Command="{Binding Review.RunAiInlineActionCommand}"
+                                  CommandParameter="suggest_tests"
+                                  ToolTip.Tip="Ask AI to suggest tests for the selected lines" />
+                        </StackPanel>
                       </DockPanel>
+                    </StackPanel>
+                  </Border>
+                </Canvas>
+                <Canvas IsVisible="{Binding Review.HasExpandedAiAnnotation}">
+                  <Border x:Name="InlineAiAnnotationCard"
+                          Width="520" MaxWidth="640"
+                          Padding="12"
+                          Background="{DynamicResource ForgeSurfaceContainerHighestBrush}"
+                          BorderBrush="{DynamicResource ForgeAiAccentBrush}"
+                          BorderThickness="1"
+                          CornerRadius="8"
+                          BoxShadow="0 4 16 0 #40000000">
+                    <StackPanel Spacing="8">
+                      <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                          <Button Classes="Ghost" Content="Insert comment" FontSize="11"
+                                  Command="{Binding Review.InsertAiAnnotationAsCommentCommand}"
+                                  CommandParameter="{Binding Review.SelectedAiAnnotation.Result}" />
+                          <Button Classes="Ghost" Content="Dismiss" FontSize="11"
+                                  Command="{Binding Review.DismissAiAnnotationCommand}"
+                                  CommandParameter="{Binding Review.SelectedAiAnnotation.Result}" />
+                          <Button Classes="Ghost" Content="Close" FontSize="11"
+                                  Command="{Binding Review.ClearExpandedThreadCommand}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                          <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
+                                              Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                          <TextBlock Text="AI annotation" FontSize="11" FontWeight="SemiBold"
+                                     Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                          <Border CornerRadius="2" Padding="6,1"
+                                  Background="{DynamicResource ForgeAiAccentBadgeBgBrush}">
+                            <TextBlock FontSize="10" FontWeight="SemiBold"
+                                       Text="{Binding Review.SelectedAiAnnotation.Result.Severity}"
+                                       Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                          </Border>
+                        </StackPanel>
+                      </DockPanel>
+                      <controls:MarkdownView Markdown="{Binding Review.SelectedAiAnnotation.Result.Body}" />
                     </StackPanel>
                   </Border>
                 </Canvas>
@@ -2419,6 +2687,12 @@
                       Click="OnNotificationDismiss" Tag="{Binding}" Margin="4,0,0,0">
                 <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
               </Button>
+              <Button DockPanel.Dock="Right" Classes="IconOnly" Width="22" Height="22" Padding="2"
+                      ToolTip.Tip="Copy error"
+                      IsVisible="{Binding IsError}"
+                      Click="OnNotificationCopy" Tag="{Binding}" Margin="4,0,0,0">
+                <icons:MaterialIcon Kind="ContentCopy" Width="14" Height="14" />
+              </Button>
               <Button DockPanel.Dock="Right" Classes="Link"
                       Content="{Binding ActionLabel}"
                       IsVisible="{Binding ActionLabel, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
@@ -2640,6 +2914,100 @@
                   </StackPanel>
                 </ScrollViewer>
 
+                <!-- AI -->
+                <ScrollViewer IsVisible="{Binding IsSettingsAi}" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel Spacing="12">
+                    <TextBlock Text="AI" Classes="PanelHeader" Opacity="0.7" />
+                    <CheckBox Content="Enable AI assistance" IsChecked="{Binding AiAssistanceEnabled}" />
+                    <StackPanel Spacing="12" IsEnabled="{Binding AiAssistanceEnabled}">
+                      <Border Background="{DynamicResource ForgeSurfaceContainerBrush}" CornerRadius="6" Padding="10"
+                              IsVisible="{Binding AiDisclosureAcknowledged, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                        <StackPanel Spacing="6">
+                          <TextBlock Text="AI review sends PR file contents to GitHub Copilot for analysis. Review and acknowledge before enabling."
+                                     FontSize="12" TextWrapping="Wrap" />
+                          <CheckBox Content="I understand and acknowledge" IsChecked="{Binding AiDisclosureAcknowledged}" />
+                        </StackPanel>
+                      </Border>
+
+                      <CheckBox Content="Use dedicated Copilot token (separate from GitHub account)"
+                                IsChecked="{Binding AiUseDedicatedCopilotToken}" />
+
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Model override" FontSize="12" Opacity="0.7" />
+                        <ComboBox ItemsSource="{Binding AiAvailableModels}"
+                                  SelectedItem="{Binding AiModelOverride}"
+                                  HorizontalAlignment="Stretch" />
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Reasoning effort" FontSize="12" Opacity="0.7" />
+                        <ComboBox ItemsSource="{Binding AiReasoningEffortOptions}"
+                                  SelectedItem="{Binding AiReasoningEffort}"
+                                  HorizontalAlignment="Stretch" />
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Review rules / instructions" FontSize="12" Opacity="0.7" />
+                        <TextBox Text="{Binding AiReviewRules}" AcceptsReturn="True" MinHeight="80"
+                                 TextWrapping="Wrap" />
+                      </StackPanel>
+
+                      <StackPanel Orientation="Horizontal" Spacing="16">
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Turn budget" FontSize="12" Opacity="0.7" />
+                          <NumericUpDown Value="{Binding AiTurnBudget}" Minimum="1" Width="120" />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Turn timeout (s)" FontSize="12" Opacity="0.7" />
+                          <NumericUpDown Value="{Binding AiTurnTimeoutSeconds}" Minimum="1" Width="120" />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Run timeout (s)" FontSize="12" Opacity="0.7" />
+                          <NumericUpDown Value="{Binding AiRunTimeoutSeconds}" Minimum="1" Width="120" />
+                        </StackPanel>
+                      </StackPanel>
+
+                      <StackPanel Orientation="Horizontal" Spacing="16">
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Export retention (days)" FontSize="12" Opacity="0.7" />
+                          <NumericUpDown Value="{Binding AiExportRetentionDays}" Minimum="1" Width="120" />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Large PR file threshold" FontSize="12" Opacity="0.7" />
+                          <NumericUpDown Value="{Binding AiLargePrFileThreshold}" Minimum="1" Width="120" />
+                        </StackPanel>
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Path denylist (one glob per line)" FontSize="12" Opacity="0.7" />
+                        <TextBox Text="{Binding AiPathDenylistText}" AcceptsReturn="True" MinHeight="60"
+                                 TextWrapping="Wrap" FontFamily="{DynamicResource ForgeCodeFont}" />
+                      </StackPanel>
+
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="Excluded repositories (one owner/repo per line)" FontSize="12" Opacity="0.7" />
+                        <TextBox Text="{Binding AiExcludedRepositoriesText}" AcceptsReturn="True" MinHeight="60"
+                                 TextWrapping="Wrap" FontFamily="{DynamicResource ForgeCodeFont}" />
+                      </StackPanel>
+
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Test connection" Command="{Binding TestAiConnectionCommand}"
+                                IsEnabled="{Binding IsTestingAiConnection, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                        <Button Content="Refresh models" Command="{Binding RefreshAiModelsCommand}"
+                                IsEnabled="{Binding IsRefreshingAiModels, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                      </StackPanel>
+                      <TextBlock Text="{Binding AiConnectionTestResult}" FontSize="12" TextWrapping="Wrap"
+                                 IsVisible="{Binding AiConnectionTestResult, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+
+                      <Border Height="1" Background="{DynamicResource ForgeOutlineVariantBrush}" Margin="0,4" />
+
+                      <Button Content="Clear all AI data" Classes="Ghost" HorizontalAlignment="Left"
+                              Command="{Binding ClearAiDataCommand}"
+                              IsEnabled="{Binding IsClearingAiData, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                    </StackPanel>
+                  </StackPanel>
+                </ScrollViewer>
+
                 <!-- Diagnostics -->
                 <ScrollViewer IsVisible="{Binding IsSettingsDiagnostics}" HorizontalScrollBarVisibility="Disabled">
                   <StackPanel Spacing="12">
@@ -2668,6 +3036,85 @@
               </Panel>
             </Border>
           </Grid>
+        </DockPanel>
+      </Border>
+    </Border>
+
+    <!-- AI instructions dialog -->
+    <Border IsVisible="{Binding Review.ShowAiInstructionsDialog}"
+            Background="{DynamicResource ForgeSettingsScrimBrush}" ZIndex="210">
+      <Border Width="480" MaxHeight="360" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
+              CornerRadius="10" Padding="16">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
+            <icons:MaterialIcon Kind="Creation" Width="18" Height="18"
+                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+            <TextBlock Text="Start AI review" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                      HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel" Classes="Ghost" Command="{Binding Review.CancelAiInstructionsCommand}" />
+            <Button Content="Start review" Classes="Primary" Command="{Binding Review.ConfirmStartAiReviewCommand}" />
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Text="Optional instructions for this review (focus areas, concerns, etc.)"
+                       FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
+            <TextBox Text="{Binding Review.AiAdHocInstructions}" AcceptsReturn="True" MinHeight="100"
+                     TextWrapping="Wrap" PlaceholderText="e.g. Pay close attention to the auth changes…" />
+          </StackPanel>
+        </DockPanel>
+      </Border>
+    </Border>
+
+    <!-- AI progress / status overlay (dismissible; does not cancel the background run) -->
+    <Border IsVisible="{Binding Review.ShowAiProgressDialog}"
+            Background="{DynamicResource ForgeSettingsScrimBrush}" ZIndex="211">
+      <Border Width="440" MaxHeight="420" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
+              CornerRadius="10" Padding="20">
+        <DockPanel>
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+            <Button DockPanel.Dock="Right" Classes="IconOnly" Width="24" Height="24" Padding="3"
+                    ToolTip.Tip="Close (review continues in the background)"
+                    Command="{Binding Review.DismissAiProgressDialogCommand}">
+              <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+            </Button>
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <icons:MaterialIcon Kind="Creation" Width="18" Height="18"
+                                  Foreground="{DynamicResource ForgeAiAccentBrush}" />
+              <TextBlock Text="{Binding Review.AiStatusDialogTitle}" FontSize="14" FontWeight="SemiBold"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </DockPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                      HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel review" Classes="Ghost"
+                    IsVisible="{Binding Review.IsAiRunActive}"
+                    Command="{Binding Review.CancelAiReviewCommand}" />
+            <Button Content="Close" Classes="Primary"
+                    Command="{Binding Review.DismissAiProgressDialogCommand}" />
+          </StackPanel>
+          <StackPanel Spacing="10">
+            <ProgressBar IsIndeterminate="True" Height="4"
+                         IsVisible="{Binding Review.IsAiRunActive}" />
+            <SelectableTextBlock Text="{Binding Review.AiProgressText}" FontSize="12"
+                       TextWrapping="Wrap"
+                       Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+            <SelectableTextBlock Text="{Binding Review.AiLastError}" FontSize="12" TextWrapping="Wrap"
+                       IsVisible="{Binding Review.AiLastError, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
+                       Foreground="{DynamicResource ForgeErrorBrush}" />
+            <Border IsVisible="{Binding Review.HasAiDiagnostics}"
+                    Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                    CornerRadius="6" Padding="10" Margin="0,4,0,0">
+              <SelectableTextBlock Text="{Binding Review.AiDiagnosticsText}" FontSize="11"
+                         FontFamily="Menlo, Consolas, monospace"
+                         TextWrapping="Wrap"
+                         Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+            </Border>
+          </StackPanel>
         </DockPanel>
       </Border>
     </Border>

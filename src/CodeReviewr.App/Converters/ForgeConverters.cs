@@ -3,6 +3,7 @@ using Avalonia.Data.Converters;
 using Avalonia.Media;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
+using CodeReviewr.Core.AI;
 using Material.Icons;
 
 namespace CodeReviewr.App.Converters;
@@ -88,7 +89,8 @@ public static class ForgeConverters
         new FuncValueConverter<DateTimeOffset, string>(WorkingCopyViewModel.FormatCommitDate);
 
     public static readonly IValueConverter RelativeTime =
-        new FuncValueConverter<DateTimeOffset, string>(FormatRelativeTime);
+        new FuncValueConverter<DateTimeOffset?, string>(date =>
+            date is null ? string.Empty : FormatRelativeTime(date.Value));
 
     public static string FormatRelativeTime(DateTimeOffset date)
     {
@@ -113,6 +115,36 @@ public static class ForgeConverters
             ? local.ToString("d MMM")
             : local.ToString("d MMM yyyy");
     }
+
+    public static readonly IValueConverter AiStarsDisplay =
+        new FuncValueConverter<int, string>(v => new string('★', Math.Clamp(v, 0, 5)));
+
+    public static readonly IValueConverter AiRiskBadgeBackground =
+        new FuncValueConverter<AiRiskLevel, IBrush>(risk => risk switch
+        {
+            AiRiskLevel.Low => Brush("ForgeStatusAddedBadgeBgBrush"),
+            AiRiskLevel.Medium => Brush("ForgeStatusModifiedBadgeBgBrush"),
+            AiRiskLevel.High or AiRiskLevel.Critical => Brush("ForgeStatusDeletedBadgeBgBrush"),
+            _ => Brush("ForgeStatusUntrackedBadgeBgBrush"),
+        });
+
+    public static readonly IValueConverter AiRiskBadgeBrush =
+        new FuncValueConverter<AiRiskLevel, IBrush>(risk => risk switch
+        {
+            AiRiskLevel.Low => Brush("ForgeStatusAddedBrush"),
+            AiRiskLevel.Medium => Brush("ForgeStatusModifiedBrush"),
+            AiRiskLevel.High or AiRiskLevel.Critical => Brush("ForgeStatusDeletedBrush"),
+            _ => Brush("ForgeOnSurfaceVariantBrush"),
+        });
+
+    public static readonly IValueConverter AiAnnotationSeverityBrush =
+        new FuncValueConverter<AiAnnotationSeverity, IBrush>(severity => severity switch
+        {
+            AiAnnotationSeverity.Risk => Brush("ForgeStatusDeletedBrush"),
+            AiAnnotationSeverity.Warning => Brush("ForgeStatusModifiedBrush"),
+            AiAnnotationSeverity.Suggestion => Brush("ForgeAiAccentBrush"),
+            _ => Brush("ForgeOnSurfaceVariantBrush"),
+        });
 
     public static readonly IValueConverter GitConsoleLineBrush =
         new FuncValueConverter<GitConsoleLineKind, IBrush>(kind => kind switch

@@ -887,7 +887,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"View Remote failed: {ex.Message}");
+            _notifications.Error($"View Remote failed: {ex.Message}", exception: ex);
         }
     }
 
@@ -1109,7 +1109,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to load commit files: {ex.Message}");
+            _notifications.Error($"Failed to load commit files: {ex.Message}", exception: ex);
         }
     }
 
@@ -1210,7 +1210,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to load history: {ex.Message}");
+            _notifications.Error($"Failed to load history: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1266,7 +1266,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to refresh history: {ex.Message}");
+            _notifications.Error($"Failed to refresh history: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1407,7 +1407,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Failed to load stash: {ex.Message}");
+            _notifications.Error($"Failed to load stash: {ex.Message}", exception: ex);
         }
     }
 
@@ -1426,7 +1426,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Apply stash failed: {ex.Message}");
+            _notifications.Error($"Apply stash failed: {ex.Message}", exception: ex);
         }
     }
 
@@ -1463,7 +1463,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Delete stash failed: {ex.Message}");
+            _notifications.Error($"Delete stash failed: {ex.Message}", exception: ex);
         }
     }
 
@@ -1494,7 +1494,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                _notifications.Error($"Stash pop failed: {ex.Message}");
+                _notifications.Error($"Stash pop failed: {ex.Message}", exception: ex);
             }
             finally
             {
@@ -1521,7 +1521,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Stash failed: {ex.Message}");
+            _notifications.Error($"Stash failed: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -1698,7 +1698,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             _currentDiff = null;
             ClearDiffCacheState();
             DiffEmptyMessage = ex.Message;
-            _notifications.Error(ex.Message);
+            _notifications.Error(ex.Message, exception: ex);
         }
         catch (Exception ex)
         {
@@ -1708,7 +1708,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             DiffRows.Clear();
             _currentDiff = null;
             ClearDiffCacheState();
-            _notifications.Error($"Diff failed: {ex.Message}", () => _ = LoadDiffForSelectionAsync(file));
+            _notifications.Error($"Diff failed: {ex.Message}", () => _ = LoadDiffForSelectionAsync(file), ex);
         }
         finally
         {
@@ -1897,7 +1897,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            _notifications.Error($"Diff refresh failed: {ex.Message}", () => _ = ForceRefreshDiffAsync());
+            _notifications.Error($"Diff refresh failed: {ex.Message}", () => _ = ForceRefreshDiffAsync(), ex);
         }
         finally
         {
@@ -2648,7 +2648,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Stage failed: {ex.Message}", () => _ = StageFileAsync(file));
+            _notifications.Error($"Stage failed: {ex.Message}", () => _ = StageFileAsync(file), ex);
         }
         finally
         {
@@ -2671,7 +2671,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Unstage failed: {ex.Message}", () => _ = UnstageFileAsync(file));
+            _notifications.Error($"Unstage failed: {ex.Message}", () => _ = UnstageFileAsync(file), ex);
         }
         finally
         {
@@ -2711,7 +2711,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Stage failed: {ex.Message}", () => _ = StageManyAsync(files));
+            _notifications.Error($"Stage failed: {ex.Message}", () => _ = StageManyAsync(files), ex);
         }
         finally
         {
@@ -2736,7 +2736,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Unstage failed: {ex.Message}", () => _ = UnstageManyAsync(files));
+            _notifications.Error($"Unstage failed: {ex.Message}", () => _ = UnstageManyAsync(files), ex);
         }
         finally
         {
@@ -2766,7 +2766,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Fetch failed: {ex.Message}", () => _ = FetchAsync());
+            _notifications.Error($"Fetch failed: {ex.Message}", () => _ = FetchAsync(), ex);
         }
         finally
         {
@@ -2828,7 +2828,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"{(stage ? "Stage" : "Unstage")} hunk failed: {ex.Message}");
+            _notifications.Error($"{(stage ? "Stage" : "Unstage")} hunk failed: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -2864,7 +2864,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Stage lines failed: {ex.Message}");
+            _notifications.Error($"Stage lines failed: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -2885,7 +2885,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Unstage lines failed: {ex.Message}");
+            _notifications.Error($"Unstage lines failed: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -2970,7 +2970,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Discard failed: {ex.Message}");
+            _notifications.Error($"Discard failed: {ex.Message}", exception: ex);
             await RefreshAsync();
         }
     }
@@ -3001,7 +3001,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Discard hunk failed: {ex.Message}");
+            _notifications.Error($"Discard hunk failed: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -3028,7 +3028,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Discard lines failed: {ex.Message}");
+            _notifications.Error($"Discard lines failed: {ex.Message}", exception: ex);
         }
         finally
         {
@@ -3075,7 +3075,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                _notifications.Error($"Commit failed: {ex.Message}", () => _ = CommitAsync());
+                _notifications.Error($"Commit failed: {ex.Message}", () => _ = CommitAsync(), ex);
                 return;
             }
 
@@ -3093,7 +3093,7 @@ public partial class WorkingCopyViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                _notifications.Error($"Failed to refresh after commit: {ex.Message}");
+                _notifications.Error($"Failed to refresh after commit: {ex.Message}", exception: ex);
             }
         }
         finally
@@ -3122,7 +3122,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Push failed: {ex.Message}", () => _ = PushAsync());
+            _notifications.Error($"Push failed: {ex.Message}", () => _ = PushAsync(), ex);
         }
         finally
         {
@@ -3145,7 +3145,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Pull failed: {ex.Message}", () => _ = PullAsync());
+            _notifications.Error($"Pull failed: {ex.Message}", () => _ = PullAsync(), ex);
         }
         finally
         {
@@ -3202,7 +3202,7 @@ public partial class WorkingCopyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            _notifications.Error($"Checkout failed: {ex.Message}");
+            _notifications.Error($"Checkout failed: {ex.Message}", exception: ex);
         }
     }
 
@@ -3435,6 +3435,50 @@ public partial class FileItemViewModel : ObservableObject
     [ObservableProperty] private bool _isViewedPending;
     [ObservableProperty] private bool _hasCommentThreads;
     [ObservableProperty] private bool _hasStaleThreads;
+
+    /// <summary>AI-suggested review priority, 0 (no signal) to 5 (highest).</summary>
+    [ObservableProperty] private int _aiPriorityStars;
+
+    /// <summary>AI file classification: <c>Skip</c>, <c>ReviewCarefully</c>, or <c>Normal</c> (null = no AI signal yet).</summary>
+    [ObservableProperty] private string? _aiClassification;
+
+    /// <summary>Short AI guidance for reviewing this file, if provided by the triage.</summary>
+    [ObservableProperty] private string? _aiGuidance;
+
+    public bool HasAiStars => AiPriorityStars > 0;
+    public bool IsAiSkip => string.Equals(AiClassification, "Skip", StringComparison.OrdinalIgnoreCase);
+    public bool IsAiReviewCarefully => string.Equals(AiClassification, "ReviewCarefully", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Tooltip for the file-list stars/AI badge: stars plus guidance when present.</summary>
+    public string? AiGuidanceTooltip
+    {
+        get
+        {
+            var stars = HasAiStars ? new string('★', Math.Clamp(AiPriorityStars, 0, 5)) : null;
+            var guidance = string.IsNullOrWhiteSpace(AiGuidance) ? null : AiGuidance.Trim();
+            if (stars is null && guidance is null)
+                return null;
+            if (stars is null)
+                return guidance;
+            if (guidance is null)
+                return stars;
+            return $"{stars}\n{guidance}";
+        }
+    }
+
+    partial void OnAiPriorityStarsChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasAiStars));
+        OnPropertyChanged(nameof(AiGuidanceTooltip));
+    }
+
+    partial void OnAiGuidanceChanged(string? value) => OnPropertyChanged(nameof(AiGuidanceTooltip));
+
+    partial void OnAiClassificationChanged(string? value)
+    {
+        OnPropertyChanged(nameof(IsAiSkip));
+        OnPropertyChanged(nameof(IsAiReviewCarefully));
+    }
 
     public string StatusBadge => Kind switch
     {

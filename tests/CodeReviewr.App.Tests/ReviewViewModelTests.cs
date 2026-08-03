@@ -4,6 +4,7 @@ using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
+using CodeReviewr.Core.AI;
 using CodeReviewr.Core.Diff;
 using CodeReviewr.Diff;
 using CodeReviewr.GitHub;
@@ -206,6 +207,231 @@ public sealed class ReviewViewModelTests
         Assert.That(vm.ApproveTooltip, Does.Contain("cannot review your own"));
         Assert.That(vm.CanSubmitPendingComments, Is.True);
         Assert.That(vm.SubmitCommentReviewCommand.CanExecute(null), Is.True);
+    }
+
+    [Test]
+    public async Task OpeningPullRequest_OnlyChecksAiCache_NeverStartsReview()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            []);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { AiAssistanceEnabled = true });
+
+        var ai = Substitute.For<IAIReviewService>();
+        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
+
+        var vm = CreateViewModel(
+            pullRequests,
+            settings,
+            reviewService: reviewService,
+            comments: comments,
+            outbox: outbox,
+            durable: durable,
+            ai: ai);
+
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+
+        await ai.Received(1).GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>());
+        await ai.DidNotReceive().StartReviewAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task AiProgressDialog_DismissDoesNotCancel_AndButtonReopensWhileRunning()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            []);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings
+        {
+            AiAssistanceEnabled = true,
+            AiDisclosureAcknowledged = true,
+        });
+
+        var ai = Substitute.For<IAIReviewService>();
+        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
+        ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
+            .Returns(Substitute.For<IDisposable>());
+
+        var vm = CreateViewModel(
+            pullRequests,
+            settings,
+            reviewService: reviewService,
+            comments: comments,
+            outbox: outbox,
+            durable: durable,
+            ai: ai);
+
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+
+        vm.AiRunState = AiRunState.Running;
+        vm.ShowAiProgressDialog = true;
+        vm.NotifyAiButtonStateChanged();
+
+        Assert.That(vm.AiButtonEnabled, Is.True);
+        Assert.That(vm.RequestAiReviewCommand.CanExecute(null), Is.True);
+        Assert.That(vm.AiButtonTooltip, Is.EqualTo("Show AI review status"));
+
+        vm.DismissAiProgressDialogCommand.Execute(null);
+        Assert.That(vm.ShowAiProgressDialog, Is.False);
+        await ai.DidNotReceive().CancelAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+
+        await vm.RequestAiReviewCommand.ExecuteAsync(null);
+        Assert.That(vm.ShowAiProgressDialog, Is.True);
+        Assert.That(vm.ShowAiInstructionsDialog, Is.False);
+        await ai.DidNotReceive().StartReviewAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task AiProgressDialog_FailedSnapshot_KeepsDialogOpenWithDiagnostics()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            []);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings
+        {
+            AiAssistanceEnabled = true,
+            AiDisclosureAcknowledged = true,
+            AiTurnTimeoutSeconds = 180,
+            AiRunTimeoutSeconds = 1800,
+        });
+
+        var now = DateTimeOffset.UtcNow;
+        var failed = new AiRunSnapshot(
+            "run1", summary.NodeId, sha, sha, AiRunState.Failed, "session-abc",
+            TurnsUsed: 1, AdHocInstructions: null, Triage: null,
+            ErrorMessage: "AI review timed out after 180s waiting for Copilot (turn timeout).",
+            now, now);
+
+        var ai = Substitute.For<IAIReviewService>();
+        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
+        ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
+            .Returns(Substitute.For<IDisposable>());
+        ai.StartReviewAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
+            .Returns(failed);
+
+        var vm = CreateViewModel(
+            pullRequests,
+            settings,
+            reviewService: reviewService,
+            comments: comments,
+            outbox: outbox,
+            durable: durable,
+            ai: ai);
+
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await vm.ConfirmStartAiReviewCommand.ExecuteAsync(null);
+
+        Assert.That(vm.AiRunState, Is.EqualTo(AiRunState.Failed));
+        Assert.That(vm.ShowAiProgressDialog, Is.True);
+        Assert.That(vm.AiLastError, Does.Contain("timed out"));
+        Assert.That(vm.AiDiagnosticsText, Does.Contain("Turn timeout: 180s"));
+        Assert.That(vm.AiDiagnosticsText, Does.Contain("session-abc"));
+        Assert.That(vm.AiStatusDialogTitle, Is.EqualTo("AI review failed"));
     }
 
     [Test]
@@ -1490,6 +1716,439 @@ public sealed class ReviewViewModelTests
         Assert.That(vm.MarkdownPreviewText, Is.Null);
     }
 
+    [Test]
+    public void AiRiskBadgeText_Formats_Risk_Levels()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        Assert.That(vm.AiRiskBadgeText, Is.EqualTo(""));
+
+        vm.AiTriage = CreateTriage(AiRiskLevel.Low);
+        Assert.That(vm.AiRiskBadgeText, Is.EqualTo("LOW RISK"));
+
+        vm.AiTriage = CreateTriage(AiRiskLevel.Medium);
+        Assert.That(vm.AiRiskBadgeText, Is.EqualTo("MEDIUM RISK"));
+
+        vm.AiTriage = CreateTriage(AiRiskLevel.High);
+        Assert.That(vm.AiRiskBadgeText, Is.EqualTo("HIGH RISK"));
+
+        vm.AiTriage = CreateTriage(AiRiskLevel.Critical);
+        Assert.That(vm.AiRiskBadgeText, Is.EqualTo("CRITICAL RISK"));
+    }
+
+    [Test]
+    public void PrFileListRebuild_Raises_SelectionClear_Before_Mutation()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        var file = new FileItemViewModel(FilePath.From("src/a.cs"), ChangeKind.Modified, isStagedList: false);
+        vm.PrFiles.Add(file);
+        vm.FilteredPrFiles.Add(file);
+
+        // Seed entries so the subsequent rebuild mutates a non-empty collection.
+        vm.PullRequestFileListLayout = FileListLayoutMode.Tree;
+        Assert.That(vm.PrFileEntries.Count, Is.GreaterThan(0));
+
+        var events = new List<string>();
+        var entriesAtClear = -1;
+        vm.SelectionClearRequested += () =>
+        {
+            events.Add("clear");
+            entriesAtClear = vm.PrFileEntries.Count;
+            // Mimic MainWindow ClearPrFileListSelection TwoWay write.
+            vm.SelectedPrFileEntry = null;
+        };
+        vm.PrFileEntries.CollectionChanged += (_, e) =>
+        {
+            if (e.Action is NotifyCollectionChangedAction.Reset or NotifyCollectionChangedAction.Remove)
+                events.Add("mutate");
+        };
+
+        vm.PullRequestFileListLayout = FileListLayoutMode.Flat;
+
+        var clearIndex = events.IndexOf("clear");
+        var mutateIndex = events.FindIndex(e => e == "mutate");
+        Assert.That(clearIndex, Is.GreaterThanOrEqualTo(0), "SelectionClearRequested should fire on rebuild");
+        Assert.That(mutateIndex, Is.GreaterThanOrEqualTo(0), "PrFileEntries should mutate on rebuild");
+        Assert.That(clearIndex, Is.LessThan(mutateIndex), "Clear must precede ItemsSource mutation");
+        Assert.That(entriesAtClear, Is.GreaterThan(0), "Clear should fire before the collection is emptied");
+    }
+
+    [Test]
+    public void PrFileListRebuild_SelectionClear_DoesNotClearSelectedFile()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        var file = new FileItemViewModel(FilePath.From("src/a.cs"), ChangeKind.Modified, isStagedList: false);
+        vm.PrFiles.Add(file);
+        vm.FilteredPrFiles.Add(file);
+        vm.PullRequestFileListLayout = FileListLayoutMode.Tree;
+        vm.SelectedFile = file;
+        Assert.That(vm.SelectedFile, Is.SameAs(file));
+        Assert.That(vm.SelectedPrFileEntry, Is.Not.Null);
+
+        // Mimic ClearPrFileListSelection: TwoWay SelectedItem=null → SelectedPrFileEntry=null.
+        // Must not cascade to SelectedFile=null (that races PrFileEntries.Clear / LoadDiff).
+        vm.SelectionClearRequested += () => vm.SelectedPrFileEntry = null;
+
+        vm.PullRequestFileListLayout = FileListLayoutMode.Flat;
+
+        Assert.That(vm.SelectedFile, Is.SameAs(file));
+        Assert.That(vm.DiffEmptyMessage, Does.Not.Contain("Source array was not long enough"));
+    }
+
+    [Test]
+    public async Task ApplyAiRunSnapshot_Complete_PreservesSelection_SingleRebuild()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var path = FilePath.From("src/auth.cs");
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(path, ChangeKind.Modified)]);
+
+        var hunk = new DiffHunk(
+            OldStart: 1,
+            OldCount: 1,
+            NewStart: 1,
+            NewCount: 1,
+            Header: "@@ -1,1 +1,1 @@",
+            Lines:
+            [
+                new DiffLine(DiffLineKind.Removed, 1, null, "old\n".AsMemory()),
+                new DiffLine(DiffLineKind.Added, null, 1, "new\n".AsMemory()),
+            ]);
+        var fileDiff = new FileDiff(
+            new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+            path,
+            path,
+            ChangeKind.Modified,
+            ContentId.Empty,
+            ContentId.Empty,
+            IsBinary: false,
+            Hunks: [hunk],
+            RawPatch: "");
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(
+                session,
+                path,
+                Arg.Any<DiffOptions>(),
+                Arg.Any<CancellationToken>())
+            .Returns(fileDiff);
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+        comments.ResolveAnchorsAsync(
+                session,
+                Arg.Any<IReadOnlyList<ReviewThread>>(),
+                path,
+                Arg.Any<FileDiff>(),
+                Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings
+        {
+            AiAssistanceEnabled = true,
+            AiDisclosureAcknowledged = true,
+            PullRequestFileListLayout = FileListLayoutMode.Flat,
+        });
+
+        var triage = new AiPrTriageResult(
+            Summary: "Summary",
+            Risk: AiRiskLevel.Medium,
+            Justifications: [new AiRiskJustification(path.Value, "Touches auth")],
+            SuggestedOrder: [path.Value],
+            Files:
+            [
+                new AiFileTriage(path.Value, AiFileClassification.ReviewCarefully, 5, "Check auth paths"),
+            ],
+            Measured: new AiMeasuredFacts(1, 1, 1));
+
+        var finished = DateTimeOffset.UtcNow;
+        var complete = new AiRunSnapshot(
+            "run1", summary.NodeId, sha, sha, AiRunState.Complete, "session-abc",
+            TurnsUsed: 2, AdHocInstructions: null, Triage: triage,
+            ErrorMessage: null, finished.AddMinutes(-2), finished);
+
+        var ai = Substitute.For<IAIReviewService>();
+        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
+        ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
+            .Returns(Substitute.For<IDisposable>());
+        ai.StartReviewAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
+            .Returns(complete);
+
+        var vm = CreateViewModel(
+            pullRequests,
+            settings,
+            reviewService: reviewService,
+            comments: comments,
+            outbox: outbox,
+            durable: durable,
+            ai: ai);
+
+        // Mimic ListBox TwoWay clear on SelectionClearRequested and on ItemsSource Clear.
+        vm.SelectionClearRequested += () => vm.SelectedPrFileEntry = null;
+        vm.PrFileEntries.CollectionChanged += (_, e) =>
+        {
+            if (e.Action is NotifyCollectionChangedAction.Reset or NotifyCollectionChangedAction.Remove)
+                vm.SelectedPrFileEntry = null;
+        };
+
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && vm.DiffRows.Count > 0);
+
+        var selectedBefore = vm.SelectedFile;
+        Assert.That(selectedBefore, Is.Not.Null);
+        Assert.That(vm.PullRequestFileListLayout, Is.EqualTo(FileListLayoutMode.Flat));
+
+        var rebuildMutations = 0;
+        void OnEntriesChanged(object? _, NotifyCollectionChangedEventArgs e)
+        {
+            if (e.Action is NotifyCollectionChangedAction.Reset or NotifyCollectionChangedAction.Remove)
+                rebuildMutations++;
+        }
+
+        vm.PrFileEntries.CollectionChanged += OnEntriesChanged;
+        try
+        {
+            await vm.ConfirmStartAiReviewCommand.ExecuteAsync(null);
+            await WaitUntilAsync(() => vm.AiRunState == AiRunState.Complete);
+        }
+        finally
+        {
+            vm.PrFileEntries.CollectionChanged -= OnEntriesChanged;
+        }
+
+        Assert.That(vm.SelectedFile, Is.SameAs(selectedBefore));
+        Assert.That(vm.PullRequestFileListLayout, Is.EqualTo(FileListLayoutMode.AiSuggested));
+        Assert.That(rebuildMutations, Is.EqualTo(1),
+            "Triage + AiSuggested layout must share a single PrFileEntries rebuild");
+        Assert.That(vm.DiffEmptyMessage, Does.Not.Contain("Source array was not long enough"));
+        Assert.That(vm.DiffEmptyMessage, Does.Not.Contain("Failed to load diff"));
+    }
+
+    [Test]
+    public void AiGuidanceTooltip_Includes_Stars_And_Guidance()
+    {
+        var file = new FileItemViewModel(FilePath.From("src/a.cs"), ChangeKind.Modified, isStagedList: false);
+        Assert.That(file.AiGuidanceTooltip, Is.Null);
+
+        file.AiPriorityStars = 4;
+        Assert.That(file.AiGuidanceTooltip, Is.EqualTo("★★★★"));
+
+        file.AiGuidance = "Check auth";
+        Assert.That(file.AiGuidanceTooltip, Is.EqualTo("★★★★\nCheck auth"));
+
+        file.AiPriorityStars = 0;
+        Assert.That(file.AiGuidanceTooltip, Is.EqualTo("Check auth"));
+    }
+
+    [Test]
+    public async Task ApplyAiRunSnapshot_Sets_FinishedUtc_For_Conversation_Timestamp()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            []);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings
+        {
+            AiAssistanceEnabled = true,
+            AiDisclosureAcknowledged = true,
+        });
+
+        var finished = DateTimeOffset.UtcNow.AddMinutes(-12);
+        var started = finished.AddMinutes(-3);
+        var complete = new AiRunSnapshot(
+            "run1", summary.NodeId, sha, sha, AiRunState.Complete, "session-abc",
+            TurnsUsed: 2, AdHocInstructions: null, Triage: CreateTriage(AiRiskLevel.Low),
+            ErrorMessage: null, started, finished);
+
+        var ai = Substitute.For<IAIReviewService>();
+        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
+        ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
+            .Returns(Substitute.For<IDisposable>());
+        ai.StartReviewAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
+            .Returns(complete);
+
+        var vm = CreateViewModel(
+            pullRequests,
+            settings,
+            reviewService: reviewService,
+            comments: comments,
+            outbox: outbox,
+            durable: durable,
+            ai: ai);
+
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await vm.ConfirmStartAiReviewCommand.ExecuteAsync(null);
+
+        Assert.That(vm.AiRunState, Is.EqualTo(AiRunState.Complete));
+        Assert.That(vm.AiReviewFinishedUtc, Is.EqualTo(finished));
+        Assert.That(vm.HasAiTriage, Is.True);
+    }
+
+    [Test]
+    public void AiImportantFiles_Includes_ReviewCarefully_Or_HighStars_Only()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        vm.AiTriage = new AiPrTriageResult(
+            Summary: "Summary",
+            Risk: AiRiskLevel.Medium,
+            Justifications:
+            [
+                new AiRiskJustification("a/careful.cs", "Touches auth"),
+                new AiRiskJustification("b/star.cs", "Large rewrite"),
+            ],
+            SuggestedOrder: ["b/star.cs", "a/careful.cs", "c/normal.cs"],
+            Files:
+            [
+                new AiFileTriage("c/normal.cs", AiFileClassification.Normal, 2, "Ignore me"),
+                new AiFileTriage("a/careful.cs", AiFileClassification.ReviewCarefully, 3, "Check auth paths"),
+                new AiFileTriage("b/star.cs", AiFileClassification.Normal, 5, null),
+                new AiFileTriage("d/skip.cs", AiFileClassification.Skip, 1, null),
+            ],
+            Measured: new AiMeasuredFacts(4, 10, 2));
+
+        Assert.That(vm.HasAiImportantFiles, Is.True);
+        Assert.That(vm.AiImportantFiles.Select(f => f.Path), Is.EqualTo(new[] { "b/star.cs", "a/careful.cs" }));
+        Assert.That(vm.AiImportantFiles[0].Label, Is.EqualTo("Large rewrite"));
+        Assert.That(vm.AiImportantFiles[1].Label, Is.EqualTo("Check auth paths"));
+    }
+
+    [Test]
+    public void SelectAiImportantFile_Selects_Matching_PrFile()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        var careful = new FileItemViewModel(FilePath.From("a/careful.cs"), ChangeKind.Modified, isStagedList: false);
+        var other = new FileItemViewModel(FilePath.From("other.cs"), ChangeKind.Modified, isStagedList: false);
+        vm.PrFiles.Add(careful);
+        vm.PrFiles.Add(other);
+        vm.IsConversationSelected = true;
+
+        vm.SelectAiImportantFileCommand.Execute("a/careful.cs");
+
+        Assert.That(vm.SelectedFile, Is.SameAs(careful));
+        Assert.That(vm.IsConversationSelected, Is.False);
+    }
+
+    [Test]
+    public void ShowAiFileBand_Visible_For_Guidance_Or_Summary_And_Toggle_Keeps_Data()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        Assert.That(vm.ShowAiFileBand, Is.False);
+        Assert.That(vm.AiFileBandExpanded, Is.True);
+
+        var file = new FileItemViewModel(FilePath.From("src/App.cs"), ChangeKind.Modified, isStagedList: false)
+        {
+            AiGuidance = "Watch the DI registration.",
+        };
+        vm.SelectedFile = file;
+        Assert.That(vm.ShowAiFileBand, Is.True);
+        Assert.That(vm.SelectedFileAiGuidance, Is.EqualTo("Watch the DI registration."));
+
+        vm.ToggleAiFileBandCommand.Execute(null);
+        Assert.That(vm.AiFileBandExpanded, Is.False);
+        Assert.That(vm.ShowAiFileBand, Is.True);
+        Assert.That(vm.SelectedFileAiGuidance, Is.EqualTo("Watch the DI registration."));
+
+        vm.SelectedFile = new FileItemViewModel(FilePath.From("src/Empty.cs"), ChangeKind.Modified, isStagedList: false);
+        Assert.That(vm.ShowAiFileBand, Is.False);
+
+        vm.AiFileSummary = new AiFileSummaryResult(
+            "src/Empty.cs",
+            "Purpose",
+            "Interesting",
+            "Focus");
+        Assert.That(vm.ShowAiFileBand, Is.True);
+        Assert.That(vm.HasAiFileSummary, Is.True);
+    }
+
+    private static AiPrTriageResult CreateTriage(AiRiskLevel risk) =>
+        new(
+            Summary: "Summary",
+            Risk: risk,
+            Justifications: [],
+            SuggestedOrder: [],
+            Files: [],
+            Measured: new AiMeasuredFacts(0, 0, 0));
+
     private static ReviewViewModel CreateViewModel(
         IPullRequestService pullRequests,
         ISettingsStore settings,
@@ -1498,7 +2157,8 @@ public sealed class ReviewViewModelTests
         IReviewOutbox? outbox = null,
         IDurableUserStore? durable = null,
         IReviewSubmitDialog? reviewSubmit = null,
-        IGitObjectReader? objects = null)
+        IGitObjectReader? objects = null,
+        IAIReviewService? ai = null)
     {
         outbox ??= Substitute.For<IReviewOutbox>();
         outbox.IsOffline.Returns(false);
@@ -1516,7 +2176,8 @@ public sealed class ReviewViewModelTests
             settings,
             new NotificationService(),
             new IntraLineDiffer(),
-            objects ?? Substitute.For<IGitObjectReader>());
+            objects ?? Substitute.For<IGitObjectReader>(),
+            ai: ai ?? NullAIReviewService.Instance);
     }
 
     private static PullRequestSummary CreateSummary(

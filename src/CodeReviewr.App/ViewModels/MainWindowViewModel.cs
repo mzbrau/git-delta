@@ -21,6 +21,8 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly NotificationService _notifications;
     private readonly IAccountService _accounts;
     private readonly IRepositoryLocator _repositoryLocator;
+    private readonly IAIReviewService _ai;
+    private readonly IConfirmDialog _confirm;
     private readonly SemaphoreSlim _openGate = new(1, 1);
     private CancellationTokenSource? _catalogCts;
     private string? _requestedOpenPath;
@@ -36,7 +38,9 @@ public partial class MainWindowViewModel : ObservableObject
         ISettingsStore settings,
         NotificationService notifications,
         IAccountService accounts,
-        IRepositoryLocator repositoryLocator)
+        IRepositoryLocator repositoryLocator,
+        IConfirmDialog confirm,
+        IAIReviewService? ai = null)
     {
         WorkingCopy = workingCopy;
         Review = review;
@@ -46,6 +50,8 @@ public partial class MainWindowViewModel : ObservableObject
         _notifications = notifications;
         _accounts = accounts;
         _repositoryLocator = repositoryLocator;
+        _confirm = confirm;
+        _ai = ai ?? NullAIReviewService.Instance;
         RecentRepositories = new(_settings.Current.RecentRepositories);
         DevelopmentFolder = _settings.Current.DevelopmentFolder ?? "";
         GitHubAccounts = new(_settings.Current.Accounts);
@@ -104,6 +110,20 @@ public partial class MainWindowViewModel : ObservableObject
         _isNavigatorCollapsed = _settings.Current.NavigatorCollapsed;
         _windowWidth = _settings.Current.WindowWidth;
         _windowHeight = _settings.Current.WindowHeight;
+
+        _aiAssistanceEnabled = _settings.Current.AiAssistanceEnabled;
+        _aiUseDedicatedCopilotToken = _settings.Current.AiUseDedicatedCopilotToken;
+        _aiModelOverride = _settings.Current.AiModelOverride ?? "";
+        _aiReasoningEffort = _settings.Current.AiReasoningEffort ?? "";
+        _aiReviewRules = _settings.Current.AiReviewRules;
+        _aiTurnBudget = _settings.Current.AiTurnBudget;
+        _aiTurnTimeoutSeconds = _settings.Current.AiTurnTimeoutSeconds;
+        _aiRunTimeoutSeconds = _settings.Current.AiRunTimeoutSeconds;
+        _aiPathDenylistText = string.Join('\n', _settings.Current.AiPathDenylist);
+        _aiExcludedRepositoriesText = string.Join('\n', _settings.Current.AiExcludedRepositories);
+        _aiDisclosureAcknowledged = _settings.Current.AiDisclosureAcknowledged;
+        _aiExportRetentionDays = _settings.Current.AiExportRetentionDays;
+        _aiLargePrFileThreshold = _settings.Current.AiLargePrFileThreshold;
     }
 
     public WorkingCopyViewModel WorkingCopy { get; }
@@ -115,7 +135,7 @@ public partial class MainWindowViewModel : ObservableObject
     public System.Collections.ObjectModel.ObservableCollection<GitHubAccountSettings> GitHubAccounts { get; }
     public System.Collections.ObjectModel.ObservableCollection<string> EnterpriseHostUrls { get; }
 
-    public string[] SettingsCategories { get; } = ["General", "Accounts", "Diff", "Git", "Diagnostics"];
+    public string[] SettingsCategories { get; } = ["General", "Accounts", "Diff", "Git", "AI", "Diagnostics"];
 
     [ObservableProperty] private string _selectedSettingsCategory = "General";
     [ObservableProperty] private GitHubAccountSettings? _selectedGitHubAccount;
@@ -143,6 +163,28 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _repositoryFilter = "";
     [ObservableProperty] private bool _isScanningRepositories;
     [ObservableProperty] private bool _isOpeningRepository;
+
+    // --- AI settings (Phase 3) ---
+    [ObservableProperty] private bool _aiAssistanceEnabled;
+    [ObservableProperty] private bool _aiUseDedicatedCopilotToken;
+    [ObservableProperty] private string _aiModelOverride = "";
+    [ObservableProperty] private string _aiReasoningEffort = "";
+    [ObservableProperty] private string _aiReviewRules = "";
+    [ObservableProperty] private int _aiTurnBudget = 25;
+    [ObservableProperty] private int _aiTurnTimeoutSeconds = 180;
+    [ObservableProperty] private int _aiRunTimeoutSeconds = 1800;
+    [ObservableProperty] private string _aiPathDenylistText = "";
+    [ObservableProperty] private string _aiExcludedRepositoriesText = "";
+    [ObservableProperty] private bool _aiDisclosureAcknowledged;
+    [ObservableProperty] private int _aiExportRetentionDays = 14;
+    [ObservableProperty] private int _aiLargePrFileThreshold = 30;
+    [ObservableProperty] private bool _isTestingAiConnection;
+    [ObservableProperty] private string? _aiConnectionTestResult;
+    [ObservableProperty] private bool _isRefreshingAiModels;
+    [ObservableProperty] private bool _isClearingAiData;
+
+    public ObservableCollection<string> AiAvailableModels { get; } = [];
+    public string[] AiReasoningEffortOptions { get; } = ["", "low", "medium", "high", "xhigh"];
 
     public ObservableCollection<string> RecentRepositories { get; }
     public ObservableCollection<RepositoryEntryViewModel> ScannedRepositories { get; } = [];
@@ -188,6 +230,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool IsSettingsAccounts => SelectedSettingsCategory == "Accounts";
     public bool IsSettingsDiff => SelectedSettingsCategory == "Diff";
     public bool IsSettingsGit => SelectedSettingsCategory == "Git";
+    public bool IsSettingsAi => SelectedSettingsCategory == "AI";
     public bool IsSettingsDiagnostics => SelectedSettingsCategory == "Diagnostics";
     public bool ShowAddAccountForm => IsAddingGitHubAccount || SelectedGitHubAccount is null;
     public bool ShowAccountDetail => !IsAddingGitHubAccount && SelectedGitHubAccount is not null;
@@ -207,10 +250,14 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSettingsAccounts));
         OnPropertyChanged(nameof(IsSettingsDiff));
         OnPropertyChanged(nameof(IsSettingsGit));
+        OnPropertyChanged(nameof(IsSettingsAi));
         OnPropertyChanged(nameof(IsSettingsDiagnostics));
 
         if (value == "Accounts" && !IsAddingGitHubAccount && SelectedGitHubAccount is null && GitHubAccounts.Count > 0)
             SelectedGitHubAccount = GitHubAccounts[0];
+
+        if (value == "AI" && AiAvailableModels.Count == 0)
+            _ = RefreshAiModelsAsync();
     }
 
     partial void OnSelectedGitHubAccountChanged(GitHubAccountSettings? value)
@@ -317,7 +364,7 @@ public partial class MainWindowViewModel : ObservableObject
                         continue;
 
                     _notifications.Error($"Failed to open repository: {ex.Message}",
-                        () => _ = OpenRepositoryPathAsync(target));
+                        () => _ = OpenRepositoryPathAsync(target), ex);
                     StatusText = "Failed to open repository";
                 }
             }
@@ -411,7 +458,7 @@ public partial class MainWindowViewModel : ObservableObject
         {
             await InvokeOnUiAsync(() =>
                 _notifications.Error($"Failed to scan repositories: {ex.Message}",
-                    () => _ = RefreshRepositoryCatalogAsync())).ConfigureAwait(false);
+                    () => _ = RefreshRepositoryCatalogAsync(), ex)).ConfigureAwait(false);
         }
         finally
         {
@@ -661,6 +708,161 @@ public partial class MainWindowViewModel : ObservableObject
         NotifyRepositorySwitcherDisplayChanged();
     }
 
+    partial void OnAiAssistanceEnabledChanged(bool value)
+    {
+        _settings.Update(s => s.AiAssistanceEnabled = value);
+        _ = _settings.SaveAsync();
+        Review.NotifyAiButtonStateChanged();
+    }
+
+    partial void OnAiUseDedicatedCopilotTokenChanged(bool value)
+    {
+        _settings.Update(s => s.AiUseDedicatedCopilotToken = value);
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiModelOverrideChanged(string value)
+    {
+        _settings.Update(s => s.AiModelOverride = string.IsNullOrWhiteSpace(value) ? null : value.Trim());
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiReasoningEffortChanged(string value)
+    {
+        _settings.Update(s => s.AiReasoningEffort = string.IsNullOrWhiteSpace(value) ? null : value.Trim());
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiReviewRulesChanged(string value)
+    {
+        _settings.Update(s => s.AiReviewRules = value);
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiTurnBudgetChanged(int value)
+    {
+        _settings.Update(s => s.AiTurnBudget = Math.Max(1, value));
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiTurnTimeoutSecondsChanged(int value)
+    {
+        _settings.Update(s => s.AiTurnTimeoutSeconds = Math.Max(1, value));
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiRunTimeoutSecondsChanged(int value)
+    {
+        _settings.Update(s => s.AiRunTimeoutSeconds = Math.Max(1, value));
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiPathDenylistTextChanged(string value)
+    {
+        _settings.Update(s => s.AiPathDenylist = SplitLines(value));
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiExcludedRepositoriesTextChanged(string value)
+    {
+        _settings.Update(s => s.AiExcludedRepositories = SplitLines(value));
+        _ = _settings.SaveAsync();
+        Review.NotifyAiButtonStateChanged();
+    }
+
+    partial void OnAiDisclosureAcknowledgedChanged(bool value)
+    {
+        _settings.Update(s => s.AiDisclosureAcknowledged = value);
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiExportRetentionDaysChanged(int value)
+    {
+        _settings.Update(s => s.AiExportRetentionDays = Math.Max(1, value));
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiLargePrFileThresholdChanged(int value)
+    {
+        _settings.Update(s => s.AiLargePrFileThreshold = Math.Max(1, value));
+        _ = _settings.SaveAsync();
+    }
+
+    private static List<string> SplitLines(string value) =>
+        value
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+
+    [RelayCommand]
+    private async Task TestAiConnectionAsync()
+    {
+        IsTestingAiConnection = true;
+        AiConnectionTestResult = null;
+        try
+        {
+            var result = await _ai.TestConnectionAsync().ConfigureAwait(true);
+            AiConnectionTestResult = result.Succeeded
+                ? $"Connected — {result.Message}"
+                : $"Failed — {result.Message}";
+        }
+        catch (Exception ex)
+        {
+            AiConnectionTestResult = $"Failed — {ex.Message}";
+        }
+        finally
+        {
+            IsTestingAiConnection = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RefreshAiModelsAsync()
+    {
+        IsRefreshingAiModels = true;
+        try
+        {
+            var models = await _ai.ListModelsAsync().ConfigureAwait(true);
+            AiAvailableModels.Clear();
+            foreach (var model in models)
+                AiAvailableModels.Add(model);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to load AI models: {ex.Message}", exception: ex);
+        }
+        finally
+        {
+            IsRefreshingAiModels = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ClearAiDataAsync()
+    {
+        var confirmed = await _confirm.ConfirmAsync(
+                "Clear AI data?",
+                "This deletes cached AI triage results, file summaries, annotations, and chat history " +
+                "for all pull requests. This cannot be undone.",
+                "Clear")
+            .ConfigureAwait(true);
+        if (!confirmed) return;
+
+        IsClearingAiData = true;
+        try
+        {
+            await _ai.ClearAiDataAsync().ConfigureAwait(true);
+            _notifications.Info("AI data cleared.");
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to clear AI data: {ex.Message}", exception: ex);
+        }
+        finally
+        {
+            IsClearingAiData = false;
+        }
+    }
+
     [RelayCommand]
     private async Task AddGitHubAccountAsync()
     {
@@ -685,7 +887,7 @@ public partial class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             _notifications.Error($"Failed to add GitHub account: {ex.Message}",
-                () => _ = AddGitHubAccountAsync());
+                () => _ = AddGitHubAccountAsync(), ex);
         }
     }
 
@@ -713,7 +915,7 @@ public partial class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             _notifications.Error($"Failed to re-authenticate: {ex.Message}",
-                () => _ = ReauthGitHubAccountAsync(account));
+                () => _ = ReauthGitHubAccountAsync(account), ex);
         }
     }
 
@@ -800,7 +1002,7 @@ public partial class MainWindowViewModel : ObservableObject
         catch (Exception ex)
         {
             _notifications.Error($"Failed to remove GitHub account: {ex.Message}",
-                () => _ = RemoveGitHubAccountAsync(account));
+                () => _ = RemoveGitHubAccountAsync(account), ex);
         }
     }
 

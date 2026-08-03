@@ -5,6 +5,7 @@ using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Platform.Storage;
@@ -56,6 +57,7 @@ public partial class MainWindow : Window
         {
             vm.WorkingCopy.SelectionClearRequested += ClearFileStatusListSelection;
             vm.WorkingCopy.SelectionSyncRequested += ApplySelectionToListBoxes;
+            vm.Review.SelectionClearRequested += ClearPrFileListSelection;
             _selectionSyncSubscribed = true;
         }
 
@@ -77,6 +79,8 @@ public partial class MainWindow : Window
                 draft.PropertyChanged += OnInlineCardLayoutChanged;
             if (this.FindControl<Border>("InlineThreadCard") is { } card)
                 card.PropertyChanged += OnInlineCardLayoutChanged;
+            if (this.FindControl<Border>("InlineAiAnnotationCard") is { } aiCard)
+                aiCard.PropertyChanged += OnInlineCardLayoutChanged;
             if (this.FindControl<DiffViewer>("PrDiffViewer") is { } viewer)
             {
                 viewer.PropertyChanged += OnPrDiffViewerPropertyChanged;
@@ -205,6 +209,20 @@ public partial class MainWindow : Window
                     viewer.ClearInlineInset();
                 else
                     ApplyInlineInset(viewer, side, range.End.Line, card);
+                return;
+            }
+
+            if (vm.Review.HasExpandedAiAnnotation &&
+                vm.Review.SelectedAiAnnotation is { } aiAnnotation &&
+                this.FindControl<Border>("InlineAiAnnotationCard") is { } aiCard)
+            {
+                var side = aiAnnotation.Range.End.Side == DiffSide.Old ? "LEFT" : "RIGHT";
+                var line = aiAnnotation.Range.End.Line;
+                PositionInlineCard(vm, aiCard, side, line, clampReserve: 200);
+                if (vm.Review.ShowMarkdownPreviewPane)
+                    viewer.ClearInlineInset();
+                else
+                    ApplyInlineInset(viewer, side, line, aiCard);
                 return;
             }
 
@@ -442,6 +460,21 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnAiChatKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            return;
+
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+
+        if (vm.Review.SendAiChatCommand.CanExecute(null))
+        {
+            _ = vm.Review.SendAiChatCommand.ExecuteAsync(null);
+            e.Handled = true;
+        }
+    }
+
     private void OnMentionCandidatePressed(object? sender, PointerPressedEventArgs e)
     {
         if (sender is not Control { DataContext: MentionableUser user } ||
@@ -654,6 +687,18 @@ public partial class MainWindow : Window
             Vm.Notifications.Dismiss(n);
     }
 
+    private void OnNotificationCopy(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: AppNotification n })
+            return;
+
+        var clipboard = TopLevel.GetTopLevel(this)?.Clipboard;
+        if (clipboard is null)
+            return;
+
+        _ = clipboard.SetTextAsync(n.CopyText);
+    }
+
     private void OnToggleWorkspace(object? sender, RoutedEventArgs e) =>
         Vm.WorkingCopy.WorkspaceExpanded = !Vm.WorkingCopy.WorkspaceExpanded;
 
@@ -836,6 +881,15 @@ public partial class MainWindow : Window
         {
             _suppressSelectionSync = false;
         }
+    }
+
+    private void ClearPrFileListSelection()
+    {
+        if (this.FindControl<ListBox>("PrFileList") is not { } prFiles)
+            return;
+
+        prFiles.SelectedItem = null;
+        prFiles.SelectedItems?.Clear();
     }
 
     private void ApplySelectionToListBoxes()

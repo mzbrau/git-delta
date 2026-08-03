@@ -59,12 +59,52 @@ public sealed class ArchitectureTests
                 "CodeReviewr.GitHub",
                 "CodeReviewr.Review",
                 "CodeReviewr.Persistence",
+                "CodeReviewr.AI",
                 "CodeReviewr.App",
                 "CliWrap",
-                "Avalonia")
+                "Avalonia",
+                "GitHub.Copilot.SDK")
             .GetResult();
 
         Assert.That(result.IsSuccessful, Is.True,
             () => "Core leaked implementation deps: " + string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Test]
+    public void AI_Must_Not_Reference_Avalonia()
+    {
+        var result = Types.InAssembly(typeof(CodeReviewr.AI.AiPromptCatalog).Assembly)
+            .ShouldNot()
+            .HaveDependencyOn("Avalonia")
+            .GetResult();
+
+        Assert.That(result.IsSuccessful, Is.True,
+            () => "Forbidden Avalonia references in AI: " + string.Join(", ", result.FailingTypeNames ?? []));
+    }
+
+    [Test]
+    public void Copilot_SDK_May_Only_Be_Referenced_From_AI()
+    {
+        var forbidden = new[]
+        {
+            typeof(FilePath).Assembly,
+            typeof(CodeReviewr.Git.GitProcessRunner).Assembly,
+            typeof(CodeReviewr.Diff.PatchParser).Assembly,
+            typeof(CodeReviewr.GitHub.GitHubClient).Assembly,
+            typeof(CodeReviewr.Review.RepositoryLocator).Assembly,
+            typeof(CodeReviewr.Persistence.PlatformTokenStore).Assembly,
+        };
+
+        foreach (var assembly in forbidden)
+        {
+            var refs = assembly.GetReferencedAssemblies().Select(a => a.Name);
+            Assert.That(refs, Does.Not.Contain("GitHub.Copilot.SDK"),
+                $"{assembly.GetName().Name} must not reference GitHub.Copilot.SDK");
+        }
+
+        var aiRefs = typeof(CodeReviewr.AI.AiPromptCatalog).Assembly
+            .GetReferencedAssemblies()
+            .Select(a => a.Name);
+        Assert.That(aiRefs, Does.Contain("GitHub.Copilot.SDK"));
     }
 }
