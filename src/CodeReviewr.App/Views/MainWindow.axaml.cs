@@ -1,8 +1,12 @@
 using System;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Presenters;
 using Avalonia.Controls.Primitives;
+using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media.TextFormatting;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -10,6 +14,7 @@ using CodeReviewr.App.Controls;
 using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
+using CodeReviewr.GitHub;
 using CodeReviewr.Review;
 
 namespace CodeReviewr.App.Views;
@@ -20,6 +25,9 @@ public partial class MainWindow : Window
     private bool _multiSelectModifiers;
     private bool _selectionSyncSubscribed;
     private bool _gitConsoleSubscribed;
+    private bool _inlineCommentLayoutHooked;
+    private bool _syncingInlineCommentLayout;
+    private TextBox? _activeMentionComposer;
 
     public MainWindow()
     {
@@ -59,14 +67,46 @@ public partial class MainWindow : Window
 
         vm.Review.FocusCommentDraftRequested += FocusPrCommentDraft;
         vm.Review.FocusFileFilterRequested += FocusPrFileFilter;
-        vm.Review.ExpandedThreadChanged += PositionInlineThreadCard;
+        vm.Review.ExpandedThreadChanged += SyncInlineCommentLayout;
+        vm.Review.MentionPopupChanged += PositionMentionPopup;
+
+        if (!_inlineCommentLayoutHooked)
+        {
+            _inlineCommentLayoutHooked = true;
+            if (this.FindControl<Border>("InlineCommentDraft") is { } draft)
+                draft.PropertyChanged += OnInlineCardLayoutChanged;
+            if (this.FindControl<Border>("InlineThreadCard") is { } card)
+                card.PropertyChanged += OnInlineCardLayoutChanged;
+            if (this.FindControl<DiffViewer>("PrDiffViewer") is { } viewer)
+            {
+                viewer.PropertyChanged += OnPrDiffViewerPropertyChanged;
+                viewer.ViewportChanged += SyncInlineCommentLayout;
+            }
+        }
+    }
+
+    private void OnInlineCardLayoutChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == BoundsProperty || e.Property == Visual.IsVisibleProperty)
+            SyncInlineCommentLayout();
+    }
+
+    private void OnPrDiffViewerPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == BoundsProperty)
+            SyncInlineCommentLayout();
     }
 
     private void FocusPrCommentDraft()
     {
-        if (DataContext is MainWindowViewModel { Review.HasDraftCommentAnchor: true } vm)
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+
+        // Prefer the draft/edit composer over a sticky reply mention target so @
+        // autocomplete anchors to the box the user just opened.
+        if (vm.Review.HasDraftCommentAnchor)
         {
-            PositionInlineCommentDraft(vm);
+            SyncInlineCommentLayout();
             if (this.FindControl<TextBox>("InlineCommentDraftBox") is { } inlineBox)
             {
                 Dispatcher.UIThread.Post(() =>
@@ -78,53 +118,114 @@ public partial class MainWindow : Window
             }
         }
 
-        if (this.FindControl<TextBox>("PrCommentDraftBox") is { } box)
+        if (vm.Review.IsEditingComment &&
+            this.FindControl<TextBox>("SideThreadEditBox") is { } editBox)
         {
-            box.Focus();
-            box.CaretIndex = box.Text?.Length ?? 0;
+            Dispatcher.UIThread.Post(() =>
+            {
+                editBox.Focus();
+                editBox.CaretIndex = editBox.Text?.Length ?? 0;
+            }, DispatcherPriority.Input);
+            return;
+        }
+
+        if (vm.Review.MentionTargetsReply ||
+            (vm.Review.HasExpandedInlineThread || vm.Review.ShowSideThreadPanel) &&
+            !string.IsNullOrEmpty(vm.Review.ReplyBody))
+        {
+            TextBox? replyBox = null;
+            if (vm.Review.HasExpandedInlineThread &&
+                this.FindControl<TextBox>("InlineThreadReplyBox") is { } inlineReply &&
+                IsEffectivelyShown(inlineReply))
+            {
+                replyBox = inlineReply;
+            }
+            else if (vm.Review.ShowSideThreadPanel &&
+                     this.FindControl<TextBox>("SideThreadReplyBox") is { } sideReply &&
+                     IsEffectivelyShown(sideReply))
+            {
+                replyBox = sideReply;
+            }
+
+            if (replyBox is not null)
+            {
+                var box = replyBox;
+                Dispatcher.UIThread.Post(() =>
+                {
+                    box.Focus();
+                    box.CaretIndex = box.Text?.Length ?? 0;
+                }, DispatcherPriority.Input);
+            }
         }
     }
 
-    private void PositionInlineCommentDraft(MainWindowViewModel vm)
+    private void SyncInlineCommentLayout()
     {
-        if (this.FindControl<Border>("InlineCommentDraft") is not { } draft)
+        if (_syncingInlineCommentLayout)
             return;
 
-        var side = string.Equals(vm.Review.DraftCommentSide, "LEFT", StringComparison.OrdinalIgnoreCase)
+        if (DataContext is not MainWindowViewModel vm ||
+            this.FindControl<DiffViewer>("PrDiffViewer") is not { } viewer)
+        {
+            return;
+        }
+
+        _syncingInlineCommentLayout = true;
+        try
+        {
+            if (vm.Review.HasDraftCommentAnchor &&
+                this.FindControl<Border>("InlineCommentDraft") is { } draft)
+            {
+                if (vm.Review.DraftCommentLine is null)
+                {
+                    PositionFileCommentCard(viewer, draft);
+                    if (vm.Review.ShowMarkdownPreviewPane)
+                        viewer.ClearInlineInset();
+                    else
+                        ApplyFileCommentInset(viewer, draft);
+                }
+                else
+                {
+                    PositionInlineCard(vm, draft, vm.Review.DraftCommentSide, vm.Review.DraftCommentLine.Value, clampReserve: 180);
+                    if (vm.Review.ShowMarkdownPreviewPane)
+                        viewer.ClearInlineInset();
+                    else
+                        ApplyInlineInset(viewer, vm.Review.DraftCommentSide, vm.Review.DraftCommentLine.Value, draft);
+                }
+                return;
+            }
+
+            if (vm.Review.HasExpandedInlineThread &&
+                vm.Review.SelectedThread?.Anchor is { } range &&
+                this.FindControl<Border>("InlineThreadCard") is { } card)
+            {
+                var side = range.End.Side == DiffSide.Old ? "LEFT" : "RIGHT";
+                PositionInlineCard(vm, card, side, range.End.Line, clampReserve: 220);
+                if (vm.Review.ShowMarkdownPreviewPane)
+                    viewer.ClearInlineInset();
+                else
+                    ApplyInlineInset(viewer, side, range.End.Line, card);
+                return;
+            }
+
+            viewer.ClearInlineInset();
+        }
+        finally
+        {
+            _syncingInlineCommentLayout = false;
+        }
+    }
+
+    private void PositionInlineCard(
+        MainWindowViewModel vm,
+        Border card,
+        string? sideName,
+        int line,
+        double clampReserve)
+    {
+        var side = string.Equals(sideName, "LEFT", StringComparison.OrdinalIgnoreCase)
             ? DiffSide.Old
             : DiffSide.New;
-        var line = vm.Review.DraftCommentLine ?? 1;
-
-        double left = 48;
-        double top = 24;
-        double hostHeight = 400;
-        double hostWidth = 800;
-        if (TryGetPrLineAnchorRect(vm, side, line, out var anchor, out hostHeight, out hostWidth))
-        {
-            left = Math.Max(8, anchor.X);
-            top = Math.Max(8, anchor.Y);
-            var maxTop = Math.Max(8, hostHeight - 180);
-            if (top > maxTop)
-                top = maxTop;
-            var maxWidth = Math.Max(280, hostWidth - left - 16);
-            draft.Width = Math.Min(520, maxWidth);
-        }
-
-        Canvas.SetLeft(draft, left);
-        Canvas.SetTop(draft, top);
-    }
-
-    private void PositionInlineThreadCard()
-    {
-        if (DataContext is not MainWindowViewModel vm)
-            return;
-        if (!vm.Review.HasExpandedInlineThread ||
-            vm.Review.SelectedThread?.Anchor is not { } range ||
-            this.FindControl<Border>("InlineThreadCard") is not { } card)
-            return;
-
-        var side = range.End.Side;
-        var line = range.End.Line;
 
         double left = 48;
         double top = 24;
@@ -132,7 +233,7 @@ public partial class MainWindow : Window
         {
             left = Math.Max(8, anchor.X);
             top = Math.Max(8, anchor.Y);
-            var maxTop = Math.Max(8, hostHeight - 220);
+            var maxTop = Math.Max(8, hostHeight - clampReserve);
             if (top > maxTop)
                 top = maxTop;
             var maxWidth = Math.Max(280, hostWidth - left - 16);
@@ -147,7 +248,7 @@ public partial class MainWindow : Window
         MainWindowViewModel vm,
         DiffSide side,
         int line,
-        out Avalonia.Rect anchor,
+        out Rect anchor,
         out double hostHeight,
         out double hostWidth)
     {
@@ -172,6 +273,191 @@ public partial class MainWindow : Window
         }
 
         return false;
+    }
+
+    private static void PositionFileCommentCard(DiffViewer viewer, Border card)
+    {
+        double left = 48;
+        double top = 8;
+        if (viewer.TryGetFileCommentAnchorRect(out var anchor))
+        {
+            left = Math.Max(8, anchor.X);
+            top = anchor.Y;
+            var maxWidth = Math.Max(280, viewer.Bounds.Width - left - 16);
+            card.Width = Math.Min(520, maxWidth);
+        }
+
+        Canvas.SetLeft(card, left);
+        Canvas.SetTop(card, top);
+    }
+
+    private static double MeasureCardHeight(Border card)
+    {
+        var height = Math.Max(0, card.Bounds.Height);
+        if (height <= 0)
+            height = card.DesiredSize.Height;
+        if (height <= 0)
+            height = 160;
+        return height;
+    }
+
+    private static void ApplyInlineInset(DiffViewer viewer, string? sideName, int line, Border card)
+    {
+        var side = string.Equals(sideName, "LEFT", StringComparison.OrdinalIgnoreCase)
+            ? DiffSide.Old
+            : DiffSide.New;
+        if (!viewer.TryGetRowIndex(side, line, out var rowIndex))
+        {
+            viewer.ClearInlineInset();
+            return;
+        }
+
+        viewer.InlineInsetAfterRowIndex = rowIndex;
+        viewer.InlineInsetHeight = MeasureCardHeight(card) + 12;
+    }
+
+    private static void ApplyFileCommentInset(DiffViewer viewer, Border card)
+    {
+        viewer.InlineInsetAfterRowIndex = -1;
+        viewer.InlineInsetHeight = MeasureCardHeight(card) + 12;
+    }
+
+    private void PositionMentionPopup()
+    {
+        if (DataContext is not MainWindowViewModel vm ||
+            this.FindControl<Popup>("CommentMentionPopup") is not { } popup)
+        {
+            return;
+        }
+
+        if (!vm.Review.IsMentionPopupOpen)
+        {
+            popup.IsOpen = false;
+            return;
+        }
+
+        var box = ResolveMentionComposer(vm);
+        if (box is null)
+        {
+            popup.IsOpen = false;
+            return;
+        }
+
+        popup.PlacementTarget = box;
+        popup.Placement = PlacementMode.AnchorAndGravity;
+        popup.PlacementAnchor = PopupAnchor.BottomLeft;
+        popup.PlacementGravity = PopupGravity.Bottom;
+        popup.PlacementRect = GetCaretPlacementRect(box);
+        popup.IsOpen = true;
+    }
+
+    private TextBox? ResolveMentionComposer(MainWindowViewModel vm)
+    {
+        if (_activeMentionComposer is { } active && IsEffectivelyShown(active))
+            return active;
+
+        if (vm.Review.HasDraftCommentAnchor &&
+            this.FindControl<TextBox>("InlineCommentDraftBox") is { } inlineBox &&
+            IsEffectivelyShown(inlineBox))
+            return inlineBox;
+
+        if (vm.Review.IsEditingComment &&
+            this.FindControl<TextBox>("SideThreadEditBox") is { } editBox &&
+            IsEffectivelyShown(editBox))
+            return editBox;
+
+        if (vm.Review.MentionTargetsReply ||
+            vm.Review.HasExpandedInlineThread ||
+            vm.Review.ShowSideThreadPanel)
+        {
+            if (vm.Review.HasExpandedInlineThread &&
+                this.FindControl<TextBox>("InlineThreadReplyBox") is { } inlineReply &&
+                IsEffectivelyShown(inlineReply))
+                return inlineReply;
+            if (vm.Review.ShowSideThreadPanel &&
+                this.FindControl<TextBox>("SideThreadReplyBox") is { } sideReply &&
+                IsEffectivelyShown(sideReply))
+                return sideReply;
+        }
+
+        return null;
+    }
+
+    private static bool IsEffectivelyShown(Control control) =>
+        control.IsVisible && control.IsEffectivelyVisible;
+
+    private static Rect GetCaretPlacementRect(TextBox box)
+    {
+        var caretIndex = Math.Clamp(box.CaretIndex, 0, box.Text?.Length ?? 0);
+        if (box.FindDescendantOfType<TextPresenter>() is { } presenter)
+        {
+            Rect caretLocal;
+            if (presenter.TextLayout is TextLayout layout)
+                caretLocal = layout.HitTestTextPosition(caretIndex);
+            else
+                caretLocal = new Rect(0, 0, 1, Math.Max(16, box.FontSize + 4));
+
+            if (presenter.TranslatePoint(caretLocal.Position, box) is { } topLeft)
+                return new Rect(topLeft, new Size(Math.Max(1, caretLocal.Width), Math.Max(1, caretLocal.Height)));
+        }
+
+        // Fallback: near the top-left of the text box content area.
+        return new Rect(8, 8, 1, Math.Max(16, box.FontSize + 4));
+    }
+
+    private void OnCommentDraftTextChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (sender is not TextBox box || DataContext is not MainWindowViewModel vm)
+            return;
+        _activeMentionComposer = box;
+        var isReply = box.Name is "InlineThreadReplyBox" or "SideThreadReplyBox";
+        vm.Review.HandleComposerTextInput(box.Text ?? "", box.CaretIndex, isReply);
+        Dispatcher.UIThread.Post(PositionMentionPopup, DispatcherPriority.Background);
+    }
+
+    private void OnCommentDraftKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.Review.IsMentionPopupOpen)
+            return;
+
+        switch (e.Key)
+        {
+            case Key.Down:
+                vm.Review.MoveMentionSelection(1);
+                e.Handled = true;
+                break;
+            case Key.Up:
+                vm.Review.MoveMentionSelection(-1);
+                e.Handled = true;
+                break;
+            case Key.Enter:
+            case Key.Tab:
+                vm.Review.AcceptSelectedMention();
+                e.Handled = true;
+                break;
+            case Key.Escape:
+                vm.Review.DismissMentionPopupCommand.Execute(null);
+                e.Handled = true;
+                break;
+        }
+    }
+
+    private void OnMentionCandidatePressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not Control { DataContext: MentionableUser user } ||
+            DataContext is not MainWindowViewModel vm)
+        {
+            return;
+        }
+
+        vm.Review.SelectMentionCommand.Execute(user);
+        e.Handled = true;
+    }
+
+    private void OnMentionPopupClosed(object? sender, EventArgs e)
+    {
+        if (DataContext is MainWindowViewModel { Review.IsMentionPopupOpen: true } vm)
+            vm.Review.DismissMentionPopupCommand.Execute(null);
     }
 
     private void OnFileOrUnplaceableThreadPressed(object? sender, PointerPressedEventArgs e)
@@ -222,15 +508,20 @@ public partial class MainWindow : Window
         switch (e.Key)
         {
             case Key.Escape:
-                if (vm.Review.HasExpandedInlineThread || vm.Review.ShowSideThreadPanel)
+                if (vm.Review.IsMentionPopupOpen)
                 {
                     e.Handled = true;
-                    vm.Review.ClearExpandedThreadCommand.Execute(null);
+                    vm.Review.DismissMentionPopupCommand.Execute(null);
                 }
-                else if (vm.Review.HasDraftCommentAnchor)
+                else if (vm.Review.HasDraftCommentAnchor || vm.Review.IsEditingComment)
                 {
                     e.Handled = true;
                     vm.Review.ClearDraftCommentAnchorCommand.Execute(null);
+                }
+                else if (vm.Review.HasExpandedInlineThread || vm.Review.ShowSideThreadPanel)
+                {
+                    e.Handled = true;
+                    vm.Review.ClearExpandedThreadCommand.Execute(null);
                 }
                 break;
             case Key.J:

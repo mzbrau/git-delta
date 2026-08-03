@@ -37,6 +37,11 @@ public interface IReviewCommentService
         string side,
         CancellationToken ct = default);
 
+    Task<IReadOnlyList<MentionableUser>> GetMentionableUsersAsync(
+        ReviewSession session,
+        string? query,
+        CancellationToken ct = default);
+
     Task ReplyCommentAsync(
         ReviewSession session,
         string threadId,

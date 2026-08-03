@@ -69,6 +69,12 @@ public sealed class DiffViewer : Control
     public static readonly StyledProperty<ICommand?> AddLineCommentCommandProperty =
         AvaloniaProperty.Register<DiffViewer, ICommand?>(nameof(AddLineCommentCommand));
 
+    public static readonly StyledProperty<int> InlineInsetAfterRowIndexProperty =
+        AvaloniaProperty.Register<DiffViewer, int>(nameof(InlineInsetAfterRowIndex), -1);
+
+    public static readonly StyledProperty<double> InlineInsetHeightProperty =
+        AvaloniaProperty.Register<DiffViewer, double>(nameof(InlineInsetHeight));
+
     private const double GutterWidth = 30;
     private const double CommentLaneWidth = 18;
     private const double CodePadding = 8;
@@ -200,6 +206,26 @@ public sealed class DiffViewer : Control
         set => SetValue(AddLineCommentCommandProperty, value);
     }
 
+    /// <summary>
+    /// Row index after which vertical space is reserved for an inline comment card.
+    /// When <see cref="InlineInsetHeight"/> &gt; 0, <c>-1</c> reserves space above the first row (file comment).
+    /// </summary>
+    public int InlineInsetAfterRowIndex
+    {
+        get => GetValue(InlineInsetAfterRowIndexProperty);
+        set => SetValue(InlineInsetAfterRowIndexProperty, value);
+    }
+
+    /// <summary>Height in device-independent pixels reserved after <see cref="InlineInsetAfterRowIndex"/> (or above row 0 when that index is -1).</summary>
+    public double InlineInsetHeight
+    {
+        get => GetValue(InlineInsetHeightProperty);
+        set => SetValue(InlineInsetHeightProperty, value);
+    }
+
+    /// <summary>Raised when the viewport scroll offset changes.</summary>
+    public event Action? ViewportChanged;
+
     public int? SelectedHunkIndex
     {
         get
@@ -216,7 +242,7 @@ public sealed class DiffViewer : Control
             RowsProperty, ViewModeProperty, ShowWhitespaceProperty, RowHeightProperty,
             EmptyMessageProperty, CanStageLinesProperty, CanUnstageLinesProperty, CanDiscardLinesProperty,
             LeftSyntaxTokensProperty, RightSyntaxTokensProperty, AnnotationsProperty, SelectedAnnotationProperty,
-            CanAddLineCommentsProperty);
+            CanAddLineCommentsProperty, InlineInsetAfterRowIndexProperty, InlineInsetHeightProperty);
         FocusableProperty.OverrideDefaultValue<DiffViewer>(true);
     }
 
@@ -261,11 +287,52 @@ public sealed class DiffViewer : Control
                  || change.Property == CanStageLinesProperty
                  || change.Property == CanUnstageLinesProperty
                  || change.Property == CanDiscardLinesProperty
-                 || change.Property == SelectedAnnotationProperty)
+                 || change.Property == SelectedAnnotationProperty
+                 || change.Property == InlineInsetAfterRowIndexProperty
+                 || change.Property == InlineInsetHeightProperty)
         {
+            ClampScroll();
             InvalidateVisual();
         }
     }
+
+    private double EffectiveInsetHeight =>
+        InlineInsetHeight > 0 ? InlineInsetHeight : 0;
+
+    private double TotalContentHeight(int rowCount) =>
+        rowCount * RowHeight + EffectiveInsetHeight;
+
+    private double RowContentTop(int index) =>
+        index * RowHeight + (index > InlineInsetAfterRowIndex ? EffectiveInsetHeight : 0);
+
+    private int RowIndexAtContentY(double contentY)
+    {
+        var rowH = RowHeight;
+        if (rowH <= 0)
+            return 0;
+
+        var insetAfter = InlineInsetAfterRowIndex;
+        var insetH = EffectiveInsetHeight;
+        if (insetH <= 0)
+            return (int)(contentY / rowH);
+
+        // File-level inset: gap occupies content [0, insetH) above the first row.
+        if (insetAfter < 0)
+        {
+            if (contentY < insetH)
+                return 0;
+            return (int)((contentY - insetH) / rowH);
+        }
+
+        var gapStart = (insetAfter + 1) * rowH;
+        if (contentY < gapStart)
+            return Math.Max(0, (int)(contentY / rowH));
+        if (contentY < gapStart + insetH)
+            return insetAfter;
+        return insetAfter + 1 + (int)((contentY - gapStart - insetH) / rowH);
+    }
+
+    private void NotifyViewportChanged() => ViewportChanged?.Invoke();
 
     private void AttachRowsNotify(INotifyCollectionChanged? notify)
     {
@@ -349,8 +416,8 @@ public sealed class DiffViewer : Control
         var contentLeft = MinimapWidth;
         var contentWidth = Math.Max(0, bounds.Width - contentLeft);
         var rowH = RowHeight;
-        var first = Math.Max(0, (int)(_scrollY / rowH));
-        var last = Math.Min(rows.Count - 1, (int)((_scrollY + bounds.Height) / rowH) + 1);
+        var first = Math.Max(0, RowIndexAtContentY(_scrollY));
+        var last = Math.Min(rows.Count - 1, RowIndexAtContentY(_scrollY + bounds.Height) + 1);
         var midX = ViewMode == DiffViewMode.SideBySide
             ? contentLeft + contentWidth / 2
             : contentLeft + contentWidth;
@@ -370,7 +437,7 @@ public sealed class DiffViewer : Control
         for (var i = first; i <= last; i++)
         {
             var row = rows[i];
-            var y = i * rowH - _scrollY;
+            var y = RowContentTop(i) - _scrollY;
             var selected = _selectionStart >= 0
                            && i >= Math.Min(_selectionStart, _selectionEnd)
                            && i <= Math.Max(_selectionStart, _selectionEnd);
@@ -625,6 +692,48 @@ public sealed class DiffViewer : Control
     public bool TryGetLineAnchorRect(DiffSide side, int line, out Rect rect)
     {
         rect = default;
+        if (!TryGetRowIndex(side, line, out var index))
+            return false;
+
+        var contentLeft = MinimapWidth;
+        var contentWidth = Math.Max(0, Bounds.Width - contentLeft);
+        var midX = ViewMode == DiffViewMode.SideBySide
+            ? contentLeft + contentWidth / 2
+            : contentLeft + contentWidth;
+        double x;
+        if (ViewMode == DiffViewMode.SideBySide)
+        {
+            var paneLeft = side == DiffSide.Old ? contentLeft : midX;
+            x = SideBySideCodeX(paneLeft);
+        }
+        else
+        {
+            x = UnifiedCodeX(contentLeft);
+        }
+
+        var y = RowContentTop(index) - _scrollY + RowHeight + 2;
+        var width = Math.Max(240, Bounds.Width - x - 16);
+        rect = new Rect(x, y, width, 0);
+        return true;
+    }
+
+    /// <summary>Viewport rect for a file-level comment card sitting in the top inset gap.</summary>
+    public bool TryGetFileCommentAnchorRect(out Rect rect)
+    {
+        rect = default;
+        var contentLeft = MinimapWidth;
+        var x = ViewMode == DiffViewMode.SideBySide
+            ? SideBySideCodeX(contentLeft)
+            : UnifiedCodeX(contentLeft);
+        var y = -_scrollY + 2;
+        var width = Math.Max(240, Bounds.Width - x - 16);
+        rect = new Rect(x, y, width, 0);
+        return true;
+    }
+
+    public bool TryGetRowIndex(DiffSide side, int line, out int index)
+    {
+        index = -1;
         if (Rows is null || Rows.Count == 0)
             return false;
 
@@ -634,30 +743,17 @@ public sealed class DiffViewer : Control
             int? rowLine = side == DiffSide.Old ? row.OldLineNumber : row.NewLineNumber;
             if (rowLine != line)
                 continue;
-
-            var contentLeft = MinimapWidth;
-            var contentWidth = Math.Max(0, Bounds.Width - contentLeft);
-            var midX = ViewMode == DiffViewMode.SideBySide
-                ? contentLeft + contentWidth / 2
-                : contentLeft + contentWidth;
-            double x;
-            if (ViewMode == DiffViewMode.SideBySide)
-            {
-                var paneLeft = side == DiffSide.Old ? contentLeft : midX;
-                x = SideBySideCodeX(paneLeft);
-            }
-            else
-            {
-                x = UnifiedCodeX(contentLeft);
-            }
-
-            var y = i * RowHeight - _scrollY + RowHeight + 2;
-            var width = Math.Max(240, Bounds.Width - x - 16);
-            rect = new Rect(x, y, width, 0);
+            index = i;
             return true;
         }
 
         return false;
+    }
+
+    public void ClearInlineInset()
+    {
+        InlineInsetAfterRowIndex = -1;
+        InlineInsetHeight = 0;
     }
 
     private (int? StartLine, int Line) ResolveCommentLineRange(DiffSide side, int clickedLine)
@@ -716,8 +812,7 @@ public sealed class DiffViewer : Control
                 context.FillRectangle(removed, markRect);
         }
 
-        var total = Math.Max(1, rows.Count);
-        var contentHeight = total * RowHeight;
+        var contentHeight = Math.Max(1, TotalContentHeight(Math.Max(1, rows.Count)));
         if (contentHeight <= 0) return;
         var viewportRatio = Math.Clamp(bounds.Height / contentHeight, 0, 1);
         var viewportH = Math.Max(8, viewportRatio * bounds.Height);
@@ -976,18 +1071,37 @@ public sealed class DiffViewer : Control
     private void ClampScroll()
     {
         var rows = Rows;
-        if (rows is null) { _scrollY = 0; return; }
-        var max = Math.Max(0, rows.Count * RowHeight - Bounds.Height);
-        _scrollY = Math.Clamp(_scrollY, 0, max);
+        if (rows is null)
+        {
+            if (_scrollY != 0)
+            {
+                _scrollY = 0;
+                NotifyViewportChanged();
+            }
+            return;
+        }
+
+        var max = Math.Max(0, TotalContentHeight(rows.Count) - Bounds.Height);
+        var next = Math.Clamp(_scrollY, 0, max);
+        if (Math.Abs(next - _scrollY) > 0.01)
+        {
+            _scrollY = next;
+            NotifyViewportChanged();
+        }
     }
 
     private void ScrollFromMinimapY(double y)
     {
         var rows = Rows;
         if (rows is null || rows.Count == 0) return;
-        var contentHeight = rows.Count * RowHeight;
+        var contentHeight = TotalContentHeight(rows.Count);
         var ratio = Math.Clamp(y / Math.Max(1, Bounds.Height), 0, 1);
-        _scrollY = Math.Clamp(ratio * Math.Max(0, contentHeight - Bounds.Height), 0, Math.Max(0, contentHeight - Bounds.Height));
+        var next = Math.Clamp(ratio * Math.Max(0, contentHeight - Bounds.Height), 0, Math.Max(0, contentHeight - Bounds.Height));
+        if (Math.Abs(next - _scrollY) > 0.01)
+        {
+            _scrollY = next;
+            NotifyViewportChanged();
+        }
         InvalidateVisual();
     }
 
@@ -995,13 +1109,28 @@ public sealed class DiffViewer : Control
     {
         var rows = Rows;
         if (rows is null) return;
+        var changed = false;
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
-            _scrollX = Math.Max(0, _scrollX - e.Delta.Y * 40);
+        {
+            var nextX = Math.Max(0, _scrollX - e.Delta.Y * 40);
+            if (Math.Abs(nextX - _scrollX) > 0.01)
+            {
+                _scrollX = nextX;
+                changed = true;
+            }
+        }
         else
         {
-            var max = Math.Max(0, rows.Count * RowHeight - Bounds.Height);
-            _scrollY = Math.Clamp(_scrollY - e.Delta.Y * RowHeight * 3, 0, max);
+            var max = Math.Max(0, TotalContentHeight(rows.Count) - Bounds.Height);
+            var nextY = Math.Clamp(_scrollY - e.Delta.Y * RowHeight * 3, 0, max);
+            if (Math.Abs(nextY - _scrollY) > 0.01)
+            {
+                _scrollY = nextY;
+                changed = true;
+            }
         }
+        if (changed)
+            NotifyViewportChanged();
         InvalidateVisual();
         e.Handled = true;
     }
@@ -1072,8 +1201,7 @@ public sealed class DiffViewer : Control
             return;
         }
 
-        var y = pos.Y + _scrollY;
-        var index = (int)(y / RowHeight);
+        var index = RowIndexAtContentY(pos.Y + _scrollY);
         if (Rows is null || index < 0 || index >= Rows.Count) return;
 
         if (Rows[index].Kind == DiffRowKind.Collapsed)
@@ -1119,8 +1247,18 @@ public sealed class DiffViewer : Control
         var midX = ViewMode == DiffViewMode.SideBySide
             ? contentLeft + contentWidth / 2
             : contentLeft + contentWidth;
-        var index = (int)((pos.Y + _scrollY) / RowHeight);
+        var index = RowIndexAtContentY(pos.Y + _scrollY);
         if (index < 0 || index >= Rows.Count)
+        {
+            ClearHoverAffordance();
+            return;
+        }
+
+        // Pointer is in the reserved inset gap — no row affordance.
+        var rowTop = RowContentTop(index) - _scrollY;
+        if (pos.Y > rowTop + RowHeight &&
+            InlineInsetAfterRowIndex == index &&
+            EffectiveInsetHeight > 0)
         {
             ClearHoverAffordance();
             return;
@@ -1172,7 +1310,7 @@ public sealed class DiffViewer : Control
                 var baseX = hasMarker
                     ? laneX + AnnotationDotSize + 4
                     : laneX + (CommentLaneWidth - AddCommentHitSize) / 2;
-                var y = index * RowHeight - _scrollY;
+                var y = RowContentTop(index) - _scrollY;
                 var estimate = new Rect(
                     baseX,
                     y + (RowHeight - AddCommentHitSize) / 2,
@@ -1217,7 +1355,7 @@ public sealed class DiffViewer : Control
 
     private void EnsureSelectionAt(Point pos)
     {
-        var index = (int)((pos.Y + _scrollY) / RowHeight);
+        var index = RowIndexAtContentY(pos.Y + _scrollY);
         if (Rows is null || index < 0 || index >= Rows.Count) return;
         if (_selectionStart < 0
             || index < Math.Min(_selectionStart, _selectionEnd)
@@ -1316,10 +1454,16 @@ public sealed class DiffViewer : Control
 
     private void EnsureVisible(int index)
     {
-        var y = index * RowHeight;
-        if (y < _scrollY) _scrollY = y;
+        var y = RowContentTop(index);
+        var next = _scrollY;
+        if (y < _scrollY) next = y;
         else if (y + RowHeight > _scrollY + Bounds.Height)
-            _scrollY = y + RowHeight - Bounds.Height;
+            next = y + RowHeight - Bounds.Height;
+        if (Math.Abs(next - _scrollY) > 0.01)
+        {
+            _scrollY = next;
+            NotifyViewportChanged();
+        }
     }
 
     public async Task CopySelectionAsPatchAsync()

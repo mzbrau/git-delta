@@ -67,14 +67,21 @@ internal sealed class ReviewMutationExecutor(
             ["pullRequestId"] = entry.PrNodeId,
             ["body"] = payload.Body,
             ["path"] = payload.Path,
-            ["side"] = payload.Side,
         };
         if (!string.IsNullOrEmpty(reviewId))
             input["pullRequestReviewId"] = reviewId;
-        if (payload.Line is not null)
+
+        if (payload.Line is null)
+        {
+            input["subjectType"] = "FILE";
+        }
+        else
+        {
+            input["side"] = payload.Side;
             input["line"] = payload.Line;
-        if (payload.StartLine is not null)
-            input["startLine"] = payload.StartLine;
+            if (payload.StartLine is not null)
+                input["startLine"] = payload.StartLine;
+        }
 
         await gitHubClient.ExecuteAsync(
                 host,
@@ -91,12 +98,25 @@ internal sealed class ReviewMutationExecutor(
         OutboxEntry entry,
         CancellationToken ct)
     {
-        var payload = DeserializeEnvelope<ReplyCommentPayload>(entry.PayloadJson).Data;
+        var envelope = DeserializeEnvelope<ReplyCommentPayload>(entry.PayloadJson);
+        var (owner, name, number) = (envelope.Owner, envelope.Name, envelope.Number);
+        var payload = envelope.Data;
+        var reviewId = await EnsurePendingReviewIdAsync(host, token, owner, name, number, ct)
+            .ConfigureAwait(false);
+
+        var input = new Dictionary<string, object?>
+        {
+            ["pullRequestReviewThreadId"] = payload.ThreadId,
+            ["body"] = payload.Body,
+        };
+        if (!string.IsNullOrEmpty(reviewId))
+            input["pullRequestReviewId"] = reviewId;
+
         await gitHubClient.ExecuteAsync(
                 host,
                 token,
-                EmbeddedQueries.AddPullRequestReviewCommentMutation,
-                new { input = new { pullRequestReviewThreadId = payload.ThreadId, body = payload.Body } },
+                EmbeddedQueries.AddPullRequestReviewThreadReplyMutation,
+                new { input },
                 ct)
             .ConfigureAwait(false);
     }
