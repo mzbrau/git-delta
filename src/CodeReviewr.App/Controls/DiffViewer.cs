@@ -93,6 +93,8 @@ public sealed class DiffViewer : Control
     private const double HunkButtonWidth = 64;
     private const double HunkButtonGap = 6;
     private const double MinimapWidth = 12;
+    private const double HScrollBarHeight = 10;
+    private const double HScrollStep = 40;
     private const double AddCommentHitSize = 14;
     private const double AddCommentHoverScale = 1.2;
     private const double AnnotationDotSize = 8;
@@ -105,6 +107,9 @@ public sealed class DiffViewer : Control
     private double _scrollY;
     private double _scrollX;
     private bool _draggingMinimap;
+    private bool _draggingHScroll;
+    private double? _maxCodeContentWidthCache;
+    private Size _layoutSize;
     private INotifyCollectionChanged? _rowsNotify;
     private INotifyCollectionChanged? _annotationsNotify;
     private readonly List<HunkButtonHit> _hunkButtons = [];
@@ -289,6 +294,8 @@ public sealed class DiffViewer : Control
             _hoverSide = null;
             _hoverAddComment = false;
             _scrollY = 0;
+            _scrollX = 0;
+            _maxCodeContentWidthCache = null;
             _minimapSnapshot = null;
             UpdateEmptyMessage();
             InvalidateVisual();
@@ -306,6 +313,12 @@ public sealed class DiffViewer : Control
             UpdateEmptyMessage();
             InvalidateVisual();
         }
+        else if (change.Property == ShowWhitespaceProperty)
+        {
+            _maxCodeContentWidthCache = null;
+            ClampScroll();
+            InvalidateVisual();
+        }
         else if (change.Property == ViewModeProperty || change.Property == RowHeightProperty
                  || change.Property == CanStageLinesProperty
                  || change.Property == CanUnstageLinesProperty
@@ -314,6 +327,8 @@ public sealed class DiffViewer : Control
                  || change.Property == InlineInsetAfterRowIndexProperty
                  || change.Property == InlineInsetHeightProperty)
         {
+            if (change.Property == ViewModeProperty)
+                _maxCodeContentWidthCache = null;
             ClampScroll();
             InvalidateVisual();
         }
@@ -385,6 +400,7 @@ public sealed class DiffViewer : Control
     private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         _minimapSnapshot = null;
+        _maxCodeContentWidthCache = null;
         UpdateEmptyMessage();
         ClampScroll();
         InvalidateVisual();
@@ -437,6 +453,8 @@ public sealed class DiffViewer : Control
             _emptyMessage.Arrange(default);
         }
 
+        _layoutSize = finalSize;
+        ClampScroll(notify: false);
         return finalSize;
     }
 
@@ -472,9 +490,10 @@ public sealed class DiffViewer : Control
 
         var contentLeft = MinimapWidth;
         var contentWidth = Math.Max(0, bounds.Width - contentLeft);
+        var viewportHeight = ViewportHeight;
         var rowH = RowHeight;
         var first = Math.Max(0, RowIndexAtContentY(_scrollY));
-        var last = Math.Min(rows.Count - 1, RowIndexAtContentY(_scrollY + bounds.Height) + 1);
+        var last = Math.Min(rows.Count - 1, RowIndexAtContentY(_scrollY + viewportHeight) + 1);
         var midX = ViewMode == DiffViewMode.SideBySide
             ? contentLeft + contentWidth / 2
             : contentLeft + contentWidth;
@@ -606,6 +625,8 @@ public sealed class DiffViewer : Control
             DrawAnnotationMarkers(context, row, contentLeft, midX, y, rowH);
             DrawAddCommentAffordance(context, row, i, contentLeft, midX, y, rowH);
         }
+
+        DrawHorizontalScrollbar(context, bounds);
     }
 
     private static double UnifiedCodeX(double contentLeft) =>
@@ -613,6 +634,103 @@ public sealed class DiffViewer : Control
 
     private static double SideBySideCodeX(double paneLeft) =>
         paneLeft + GutterWidth + CommentLaneWidth + CodePadding;
+
+    private double LayoutWidth => _layoutSize.Width > 0 ? _layoutSize.Width : Bounds.Width;
+
+    private double LayoutHeight => _layoutSize.Height > 0 ? _layoutSize.Height : Bounds.Height;
+
+    private double ViewportCodeWidth()
+    {
+        var contentLeft = MinimapWidth;
+        var contentWidth = Math.Max(0, LayoutWidth - contentLeft);
+        if (ViewMode == DiffViewMode.SideBySide)
+        {
+            var paneWidth = contentWidth / 2;
+            return Math.Max(0, paneWidth - (GutterWidth + CommentLaneWidth + CodePadding));
+        }
+
+        return Math.Max(0, LayoutWidth - UnifiedCodeX(contentLeft));
+    }
+
+    private double GetMaxCodeContentWidth()
+    {
+        if (_maxCodeContentWidthCache is { } cached)
+            return cached;
+
+        var rows = Rows;
+        if (rows is null || rows.Count == 0)
+        {
+            _maxCodeContentWidthCache = 0;
+            return 0;
+        }
+
+        double max = 0;
+        if (ViewMode == DiffViewMode.SideBySide)
+        {
+            foreach (var row in rows)
+            {
+                if (row.Kind is DiffRowKind.Collapsed or DiffRowKind.Padding)
+                    continue;
+                if (row.Kind == DiffRowKind.HunkHeader)
+                {
+                    max = Math.Max(max, MeasureWidth(row.LeftText.ToString()));
+                    continue;
+                }
+
+                if (!row.LeftText.IsEmpty)
+                    max = Math.Max(max, MeasureWidth(FormatText(row.LeftText)));
+                if (!row.RightText.IsEmpty)
+                    max = Math.Max(max, MeasureWidth(FormatText(row.RightText)));
+            }
+        }
+        else
+        {
+            foreach (var row in rows)
+            {
+                if (row.Kind is DiffRowKind.Collapsed or DiffRowKind.Padding)
+                    continue;
+                if (row.Kind == DiffRowKind.HunkHeader)
+                {
+                    max = Math.Max(max, MeasureWidth(row.LeftText.ToString()));
+                    continue;
+                }
+
+                var text = row.Kind == DiffRowKind.Removed ? row.LeftText : row.RightText;
+                if (text.IsEmpty) text = row.LeftText.IsEmpty ? row.RightText : row.LeftText;
+                var prefix = row.Kind switch
+                {
+                    DiffRowKind.Added => "+",
+                    DiffRowKind.Removed => "-",
+                    _ => " ",
+                };
+                max = Math.Max(max, MeasureWidth(prefix) + MeasureWidth(FormatText(text)));
+            }
+        }
+
+        _maxCodeContentWidthCache = max;
+        return max;
+    }
+
+    private double MaxScrollX() => Math.Max(0, GetMaxCodeContentWidth() - ViewportCodeWidth());
+
+    private bool NeedsHorizontalScroll => MaxScrollX() > 0.5;
+
+    private double HScrollReserve => NeedsHorizontalScroll ? HScrollBarHeight : 0;
+
+    private double ViewportHeight => Math.Max(0, LayoutHeight - HScrollReserve);
+
+    private Rect HorizontalScrollTrackBounds()
+    {
+        var trackLeft = MinimapWidth;
+        return new Rect(
+            trackLeft,
+            LayoutHeight - HScrollBarHeight,
+            Math.Max(0, LayoutWidth - trackLeft),
+            HScrollBarHeight);
+    }
+
+    private bool IsInHorizontalScrollBar(Point pos) =>
+        NeedsHorizontalScroll && HorizontalScrollTrackBounds().Contains(pos);
 
     private double CommentLaneX(DiffSide side, double contentLeft, double midX) =>
         ViewMode == DiffViewMode.SideBySide
@@ -897,17 +1015,40 @@ public sealed class DiffViewer : Control
 
         var contentHeight = Math.Max(1, TotalContentHeight(Math.Max(1, rows.Count)));
         if (contentHeight <= 0) return;
-        var viewportRatio = Math.Clamp(bounds.Height / contentHeight, 0, 1);
+        var viewportHeight = ViewportHeight;
+        var viewportRatio = Math.Clamp(viewportHeight / contentHeight, 0, 1);
         var viewportH = Math.Max(8, viewportRatio * bounds.Height);
-        var scrollRatio = contentHeight <= bounds.Height
+        var scrollRatio = contentHeight <= viewportHeight
             ? 0
-            : _scrollY / (contentHeight - bounds.Height);
+            : _scrollY / (contentHeight - viewportHeight);
         var viewportY = scrollRatio * (bounds.Height - viewportH);
         context.DrawRectangle(
             Brush("ForgeMinimapViewportBrush", Brushes.Gray),
             new Pen(Brush("ForgeOutlineBrush", Brushes.Gray), 1),
             new Rect(1, viewportY, MinimapWidth - 2, viewportH),
             1, 1);
+    }
+
+    private void DrawHorizontalScrollbar(DrawingContext context, Rect bounds)
+    {
+        var maxX = MaxScrollX();
+        if (maxX <= 0.5)
+            return;
+
+        var track = HorizontalScrollTrackBounds();
+        context.FillRectangle(
+            Brush("ForgeMinimapTrackBrush", Brushes.Transparent),
+            track);
+
+        var maxContent = Math.Max(1, GetMaxCodeContentWidth());
+        var viewport = ViewportCodeWidth();
+        var thumbWidth = Math.Max(HScrollBarHeight, track.Width * (viewport / maxContent));
+        var thumbTravel = Math.Max(0, track.Width - thumbWidth);
+        var thumbX = track.X + (_scrollX / maxX) * thumbTravel;
+        context.FillRectangle(
+            Brush("ForgeMinimapViewportBrush", Brushes.Gray),
+            new Rect(thumbX, track.Y + 1, thumbWidth, Math.Max(1, track.Height - 2)),
+            2);
     }
 
     private MinimapSnapshot EnsureMinimapSnapshot(IReadOnlyList<DiffRow> rows, DiffViewMode mode, int heightPx)
@@ -1193,26 +1334,43 @@ public sealed class DiffViewer : Control
         return fallback;
     }
 
-    private void ClampScroll()
+    private void ClampScroll(bool notify = true)
     {
         var rows = Rows;
         if (rows is null)
         {
+            var cleared = false;
             if (_scrollY != 0)
             {
                 _scrollY = 0;
-                NotifyViewportChanged();
+                cleared = true;
             }
+            if (_scrollX != 0)
+            {
+                _scrollX = 0;
+                cleared = true;
+            }
+            if (cleared && notify)
+                NotifyViewportChanged();
             return;
         }
 
-        var max = Math.Max(0, TotalContentHeight(rows.Count) - Bounds.Height);
-        var next = Math.Clamp(_scrollY, 0, max);
-        if (Math.Abs(next - _scrollY) > 0.01)
+        var maxY = Math.Max(0, TotalContentHeight(rows.Count) - ViewportHeight);
+        var nextY = Math.Clamp(_scrollY, 0, maxY);
+        var nextX = Math.Clamp(_scrollX, 0, MaxScrollX());
+        var changed = false;
+        if (Math.Abs(nextY - _scrollY) > 0.01)
         {
-            _scrollY = next;
-            NotifyViewportChanged();
+            _scrollY = nextY;
+            changed = true;
         }
+        if (Math.Abs(nextX - _scrollX) > 0.01)
+        {
+            _scrollX = nextX;
+            changed = true;
+        }
+        if (changed && notify)
+            NotifyViewportChanged();
     }
 
     private void ScrollFromMinimapY(double y)
@@ -1220,8 +1378,9 @@ public sealed class DiffViewer : Control
         var rows = Rows;
         if (rows is null || rows.Count == 0) return;
         var contentHeight = TotalContentHeight(rows.Count);
-        var ratio = Math.Clamp(y / Math.Max(1, Bounds.Height), 0, 1);
-        var next = Math.Clamp(ratio * Math.Max(0, contentHeight - Bounds.Height), 0, Math.Max(0, contentHeight - Bounds.Height));
+        var viewportHeight = ViewportHeight;
+        var ratio = Math.Clamp(y / Math.Max(1, LayoutHeight), 0, 1);
+        var next = Math.Clamp(ratio * Math.Max(0, contentHeight - viewportHeight), 0, Math.Max(0, contentHeight - viewportHeight));
         if (Math.Abs(next - _scrollY) > 0.01)
         {
             _scrollY = next;
@@ -1230,14 +1389,47 @@ public sealed class DiffViewer : Control
         InvalidateVisual();
     }
 
+    private void ScrollFromHScrollX(double x)
+    {
+        var maxX = MaxScrollX();
+        if (maxX <= 0) return;
+        var track = HorizontalScrollTrackBounds();
+        var ratio = Math.Clamp((x - track.X) / Math.Max(1, track.Width), 0, 1);
+        var next = ratio * maxX;
+        if (Math.Abs(next - _scrollX) > 0.01)
+        {
+            _scrollX = next;
+            NotifyViewportChanged();
+        }
+        InvalidateVisual();
+    }
+
+    private void ScrollHorizontally(double delta)
+    {
+        var next = Math.Clamp(_scrollX + delta, 0, MaxScrollX());
+        if (Math.Abs(next - _scrollX) <= 0.01) return;
+        _scrollX = next;
+        NotifyViewportChanged();
+        InvalidateVisual();
+    }
+
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         var rows = Rows;
         if (rows is null) return;
         var changed = false;
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        if (Math.Abs(e.Delta.X) > 0.01)
         {
-            var nextX = Math.Max(0, _scrollX - e.Delta.Y * 40);
+            var nextX = Math.Clamp(_scrollX - e.Delta.X * HScrollStep, 0, MaxScrollX());
+            if (Math.Abs(nextX - _scrollX) > 0.01)
+            {
+                _scrollX = nextX;
+                changed = true;
+            }
+        }
+        else if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+        {
+            var nextX = Math.Clamp(_scrollX - e.Delta.Y * HScrollStep, 0, MaxScrollX());
             if (Math.Abs(nextX - _scrollX) > 0.01)
             {
                 _scrollX = nextX;
@@ -1246,7 +1438,7 @@ public sealed class DiffViewer : Control
         }
         else
         {
-            var max = Math.Max(0, TotalContentHeight(rows.Count) - Bounds.Height);
+            var max = Math.Max(0, TotalContentHeight(rows.Count) - ViewportHeight);
             var nextY = Math.Clamp(_scrollY - e.Delta.Y * RowHeight * 3, 0, max);
             if (Math.Abs(nextY - _scrollY) > 0.01)
             {
@@ -1270,6 +1462,15 @@ public sealed class DiffViewer : Control
         {
             _draggingMinimap = true;
             ScrollFromMinimapY(pos.Y);
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return;
+        }
+
+        if (IsInHorizontalScrollBar(pos))
+        {
+            _draggingHScroll = true;
+            ScrollFromHScrollX(pos.X);
             e.Pointer.Capture(this);
             e.Handled = true;
             return;
@@ -1357,11 +1558,18 @@ public sealed class DiffViewer : Control
             return;
         }
 
+        if (_draggingHScroll)
+        {
+            ScrollFromHScrollX(e.GetPosition(this).X);
+            e.Handled = true;
+            return;
+        }
+
         if (!CanAddLineComments || Rows is null)
             return;
 
         var pos = e.GetPosition(this);
-        if (pos.X < MinimapWidth)
+        if (pos.X < MinimapWidth || IsInHorizontalScrollBar(pos))
         {
             ClearHoverAffordance();
             return;
@@ -1472,8 +1680,9 @@ public sealed class DiffViewer : Control
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
-        if (!_draggingMinimap) return;
+        if (!_draggingMinimap && !_draggingHScroll) return;
         _draggingMinimap = false;
+        _draggingHScroll = false;
         e.Pointer.Capture(null);
         e.Handled = true;
     }
@@ -1549,6 +1758,11 @@ public sealed class DiffViewer : Control
             _ = CopySelectionAsPatchAsync();
             e.Handled = true;
         }
+        else if (e.Key is Key.Left or Key.Right)
+        {
+            ScrollHorizontally(e.Key == Key.Left ? -HScrollStep : HScrollStep);
+            e.Handled = true;
+        }
         else if (e.Key is Key.Down or Key.Up or Key.PageDown or Key.PageUp or Key.Home or Key.End)
         {
             Navigate(e.Key);
@@ -1566,8 +1780,8 @@ public sealed class DiffViewer : Control
         {
             Key.Down => Math.Min(rows.Count - 1, idx + 1),
             Key.Up => Math.Max(0, idx - 1),
-            Key.PageDown => Math.Min(rows.Count - 1, idx + (int)(Bounds.Height / RowHeight)),
-            Key.PageUp => Math.Max(0, idx - (int)(Bounds.Height / RowHeight)),
+            Key.PageDown => Math.Min(rows.Count - 1, idx + (int)(ViewportHeight / RowHeight)),
+            Key.PageUp => Math.Max(0, idx - (int)(ViewportHeight / RowHeight)),
             Key.Home => 0,
             Key.End => rows.Count - 1,
             _ => idx,
@@ -1581,9 +1795,10 @@ public sealed class DiffViewer : Control
     {
         var y = RowContentTop(index);
         var next = _scrollY;
+        var viewportHeight = ViewportHeight;
         if (y < _scrollY) next = y;
-        else if (y + RowHeight > _scrollY + Bounds.Height)
-            next = y + RowHeight - Bounds.Height;
+        else if (y + RowHeight > _scrollY + viewportHeight)
+            next = y + RowHeight - viewportHeight;
         if (Math.Abs(next - _scrollY) > 0.01)
         {
             _scrollY = next;
