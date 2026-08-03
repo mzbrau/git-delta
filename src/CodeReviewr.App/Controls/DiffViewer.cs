@@ -873,9 +873,11 @@ public sealed class DiffViewer : Control
                 context.FillRectangle(removed, markRect);
         }
 
+        const double commentMarkHeight = 3;
         var primaryComment = Brush("ForgePrimaryBrush", Brushes.SteelBlue);
         var aiComment = Brush("ForgeAiAccentBrush", Brushes.MediumPurple);
         var mutedComment = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
+        var commentBorder = new Pen(Brushes.Black, 1);
         for (var y = 0; y < snapshot.CommentMarks.Length; y++)
         {
             var kind = snapshot.CommentMarks[y];
@@ -886,7 +888,11 @@ public sealed class DiffViewer : Control
                 3 => mutedComment,
                 _ => primaryComment,
             };
-            context.FillRectangle(brush, new Rect(1, y, MinimapWidth - 2, 1));
+            var markY = Math.Clamp(y - 1, 0, Math.Max(0, snapshot.CommentMarks.Length - commentMarkHeight));
+            context.DrawRectangle(
+                brush,
+                commentBorder,
+                new Rect(1, markY, MinimapWidth - 2, commentMarkHeight));
         }
 
         var contentHeight = Math.Max(1, TotalContentHeight(Math.Max(1, rows.Count)));
