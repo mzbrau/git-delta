@@ -83,11 +83,17 @@ public sealed record AppSettings
     /// <summary>Per-review turn budget. Run pauses and asks when reached.</summary>
     public int AiTurnBudget { get; set; } = 25;
 
-    /// <summary>Per-turn timeout in seconds.</summary>
+    /// <summary>
+    /// Idle timeout per turn in seconds. The clock resets whenever the agent streams text
+    /// or starts/finishes a tool; the turn is cancelled only after this long with no activity.
+    /// </summary>
     public int AiTurnTimeoutSeconds { get; set; } = 180;
 
-    /// <summary>Per-run timeout in seconds.</summary>
-    public int AiRunTimeoutSeconds { get; set; } = 1800;
+    /// <summary>
+    /// Optional wall-clock timeout for an entire AI review run, in seconds.
+    /// <c>0</c> means unlimited (turn idle timeout and turn budget still apply).
+    /// </summary>
+    public int AiRunTimeoutSeconds { get; set; } = 0;
 
     /// <summary>User-extensible path denylist patterns (glob-like), added to built-in secret patterns.</summary>
     public List<string> AiPathDenylist { get; set; } = [];

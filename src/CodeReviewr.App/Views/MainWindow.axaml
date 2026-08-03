@@ -2991,12 +2991,12 @@
                           <NumericUpDown Value="{Binding AiTurnBudget}" Minimum="1" Width="120" />
                         </StackPanel>
                         <StackPanel Spacing="4">
-                          <TextBlock Text="Turn timeout (s)" FontSize="12" Opacity="0.7" />
+                          <TextBlock Text="Turn idle timeout (s)" FontSize="12" Opacity="0.7" />
                           <NumericUpDown Value="{Binding AiTurnTimeoutSeconds}" Minimum="1" Width="120" />
                         </StackPanel>
                         <StackPanel Spacing="4">
-                          <TextBlock Text="Run timeout (s)" FontSize="12" Opacity="0.7" />
-                          <NumericUpDown Value="{Binding AiRunTimeoutSeconds}" Minimum="1" Width="120" />
+                          <TextBlock Text="Run timeout (s, 0 = unlimited)" FontSize="12" Opacity="0.7" />
+                          <NumericUpDown Value="{Binding AiRunTimeoutSeconds}" Minimum="0" Width="120" />
                         </StackPanel>
                       </StackPanel>
 
@@ -3104,7 +3104,7 @@
     <!-- AI progress / status overlay (dismissible; does not cancel the background run) -->
     <Border IsVisible="{Binding Review.ShowAiProgressDialog}"
             Background="{DynamicResource ForgeSettingsScrimBrush}" ZIndex="211">
-      <Border Width="440" MaxHeight="420" HorizontalAlignment="Center" VerticalAlignment="Center"
+      <Border Width="720" MaxHeight="640" HorizontalAlignment="Center" VerticalAlignment="Center"
               Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
               BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
               CornerRadius="10" Padding="20">
@@ -3130,24 +3130,29 @@
             <Button Content="Close" Classes="Primary"
                     Command="{Binding Review.DismissAiProgressDialogCommand}" />
           </StackPanel>
-          <StackPanel Spacing="10">
-            <ProgressBar IsIndeterminate="True" Height="4"
+          <DockPanel>
+            <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" Height="4" Margin="0,0,0,10"
                          IsVisible="{Binding Review.IsAiRunActive}" />
-            <SelectableTextBlock Text="{Binding Review.AiProgressText}" FontSize="12"
-                       TextWrapping="Wrap"
+            <SelectableTextBlock DockPanel.Dock="Top" Text="{Binding Review.AiProgressText}" FontSize="12"
+                       TextWrapping="Wrap" Margin="0,0,0,8"
                        Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-            <SelectableTextBlock Text="{Binding Review.AiLastError}" FontSize="12" TextWrapping="Wrap"
+            <SelectableTextBlock DockPanel.Dock="Top" Text="{Binding Review.AiLastError}" FontSize="12"
+                       TextWrapping="Wrap" Margin="0,0,0,8"
                        IsVisible="{Binding Review.AiLastError, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
                        Foreground="{DynamicResource ForgeErrorBrush}" />
             <Border IsVisible="{Binding Review.HasAiDiagnostics}"
                     Background="{DynamicResource ForgeSurfaceContainerBrush}"
-                    CornerRadius="6" Padding="10" Margin="0,4,0,0">
-              <SelectableTextBlock Text="{Binding Review.AiDiagnosticsText}" FontSize="11"
-                         FontFamily="Menlo, Consolas, monospace"
-                         TextWrapping="Wrap"
-                         Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                    CornerRadius="6" Padding="10">
+              <ScrollViewer x:Name="AiProgressScrollViewer"
+                            HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto">
+                <SelectableTextBlock Text="{Binding Review.AiDiagnosticsText}" FontSize="11"
+                           FontFamily="Menlo, Consolas, monospace"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+              </ScrollViewer>
             </Border>
-          </StackPanel>
+          </DockPanel>
         </DockPanel>
       </Border>
     </Border>

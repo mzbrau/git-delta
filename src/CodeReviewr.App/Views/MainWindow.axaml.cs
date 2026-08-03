@@ -30,6 +30,7 @@ public partial class MainWindow : Window
     private bool _gitConsoleSubscribed;
     private bool _aiChatScrollSubscribed;
     private bool _aiChatRowSubscribed;
+    private bool _aiProgressScrollSubscribed;
     private double _aiChatPanelHeight = 240;
     private bool _inlineCommentLayoutHooked;
     private bool _syncingInlineCommentLayout;
@@ -76,6 +77,12 @@ public partial class MainWindow : Window
         {
             vm.Review.AiChatMessages.CollectionChanged += OnAiChatMessagesChanged;
             _aiChatScrollSubscribed = true;
+        }
+
+        if (!_aiProgressScrollSubscribed)
+        {
+            vm.Review.AiActivityLogUpdated += ScrollAiProgressToEnd;
+            _aiProgressScrollSubscribed = true;
         }
 
         if (!_aiChatRowSubscribed)
@@ -667,6 +674,16 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             if (this.FindControl<ScrollViewer>("AiChatScrollViewer") is { } scroll)
+                scroll.Offset = new Avalonia.Vector(scroll.Offset.X, double.MaxValue);
+        }, DispatcherPriority.Background);
+    }
+
+    private void ScrollAiProgressToEnd()
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.Review.ShowAiProgressDialog) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<ScrollViewer>("AiProgressScrollViewer") is { } scroll)
                 scroll.Offset = new Avalonia.Vector(scroll.Offset.X, double.MaxValue);
         }, DispatcherPriority.Background);
     }

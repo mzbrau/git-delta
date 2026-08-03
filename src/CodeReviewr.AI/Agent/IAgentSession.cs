@@ -8,10 +8,14 @@ internal interface IAgentSession : IAsyncDisposable
     /// <summary>
     /// Sends a prompt and awaits completion of that turn (including any tool calls it triggers).
     /// <paramref name="waitTimeout"/> is the SDK wait ceiling (required for Copilot — null means 60s).
+    /// Prefer a large value when an idle watchdog owns cancellation.
     /// </summary>
     Task SendTurnAsync(string prompt, TimeSpan? waitTimeout = null, CancellationToken ct = default);
 
     Task AbortAsync(CancellationToken ct = default);
+
+    /// <summary>Raised when a tool invocation begins (before the handler runs).</summary>
+    event Action<string, string>? ToolActivityStarted;
 
     /// <summary>Raised once per tool invocation, after the tool's handler has produced a result.</summary>
     event Action<AgentToolCall>? ToolCallReceived;

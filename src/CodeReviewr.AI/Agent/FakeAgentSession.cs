@@ -5,7 +5,8 @@ namespace CodeReviewr.AI.Agent;
 internal readonly record struct FakeAgentTurn(
     IReadOnlyList<AgentToolCall> ToolCalls,
     string? AssistantText,
-    Func<CancellationToken, Task>? BeforeCalls);
+    Func<CancellationToken, Task>? BeforeCalls,
+    TimeSpan? DelayEachTool);
 
 /// <summary>Fluent builder for a single <see cref="FakeAgentTurn"/>, passed to <see cref="FakeAgentScript.OnTurn"/>.</summary>
 internal sealed class FakeAgentTurnBuilder
@@ -13,6 +14,7 @@ internal sealed class FakeAgentTurnBuilder
     private readonly List<AgentToolCall> _toolCalls = [];
     private string? _assistantText;
     private Func<CancellationToken, Task>? _beforeCalls;
+    private TimeSpan? _delayEachTool;
 
     /// <summary>Queues a tool call the fake agent "makes" during this turn.</summary>
     public FakeAgentTurnBuilder Call(string toolName, string argumentsJson)
@@ -36,6 +38,16 @@ internal sealed class FakeAgentTurnBuilder
     }
 
     /// <summary>
+    /// Delays after raising tool-start activity and before invoking the tool handler — used to
+    /// verify idle timeout pauses while a tool is in flight.
+    /// </summary>
+    public FakeAgentTurnBuilder DelayEachTool(TimeSpan delay)
+    {
+        _delayEachTool = delay;
+        return this;
+    }
+
+    /// <summary>
     /// Blocks the turn until its cancellation token fires — useful for deterministically testing
     /// mid-run cancellation without relying on real delays.
     /// </summary>
@@ -46,7 +58,7 @@ internal sealed class FakeAgentTurnBuilder
             return Task.Delay(Timeout.InfiniteTimeSpan, ct);
         });
 
-    internal FakeAgentTurn Build() => new(_toolCalls, _assistantText, _beforeCalls);
+    internal FakeAgentTurn Build() => new(_toolCalls, _assistantText, _beforeCalls, _delayEachTool);
 }
 
 /// <summary>
@@ -86,7 +98,7 @@ internal sealed class FakeAgentScript
 
     /// <summary>Dequeues the next scripted turn, or an empty no-op turn once the script is exhausted.</summary>
     internal FakeAgentTurn NextTurn() =>
-        _turns.Count > 0 ? _turns.Dequeue() : new FakeAgentTurn([], null, null);
+        _turns.Count > 0 ? _turns.Dequeue() : new FakeAgentTurn([], null, null, null);
 }
 
 /// <summary>
@@ -102,6 +114,8 @@ internal sealed class FakeAgentSession(
 
     /// <summary>Prompts passed to <see cref="SendTurnAsync"/> (test spy).</summary>
     public List<string> SentPrompts { get; } = [];
+
+    public event Action<string, string>? ToolActivityStarted;
 
     public event Action<AgentToolCall>? ToolCallReceived;
 
@@ -122,6 +136,11 @@ internal sealed class FakeAgentSession(
         foreach (var call in turn.ToolCalls)
         {
             ct.ThrowIfCancellationRequested();
+
+            ToolActivityStarted?.Invoke(call.Name, call.ArgumentsJson);
+
+            if (turn.DelayEachTool is { } delay)
+                await Task.Delay(delay, ct).ConfigureAwait(false);
 
             var tool = options.Tools.FirstOrDefault(t => string.Equals(t.Name, call.Name, StringComparison.Ordinal));
             var resultJson = call.ResultJson;
