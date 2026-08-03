@@ -23,6 +23,8 @@
     <PackageReference Include="MinVer" PrivateAssets="all" />
     <PackageReference Include="Velopack" />
     <PackageReference Include="Markdig" />
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\Fonts\**" />

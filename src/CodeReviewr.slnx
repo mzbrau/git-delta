@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="CodeReviewr.App/CodeReviewr.App.csproj" />
+    <Project Path="CodeReviewr.AppHost/CodeReviewr.AppHost.csproj" />
     <Project Path="CodeReviewr.Core/CodeReviewr.Core.csproj" />
     <Project Path="CodeReviewr.Diff/CodeReviewr.Diff.csproj" />
     <Project Path="CodeReviewr.Git/CodeReviewr.Git.csproj" />

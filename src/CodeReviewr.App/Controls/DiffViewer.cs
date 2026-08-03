@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Text;
 using System.Windows.Input;
 using Avalonia;
@@ -11,6 +12,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using CodeReviewr.App.Diagnostics;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Diff;
@@ -109,6 +111,10 @@ public sealed class DiffViewer : Control
     private bool _draggingMinimap;
     private bool _draggingHScroll;
     private double? _maxCodeContentWidthCache;
+    private bool _rowsInvalidatePosted;
+    private int _paintEpoch;
+    private readonly Dictionary<string, double> _measureWidthCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<LinePaintKey, LinePaintCache> _linePaintCache = new();
     private Size _layoutSize;
     private INotifyCollectionChanged? _rowsNotify;
     private INotifyCollectionChanged? _annotationsNotify;
@@ -118,6 +124,18 @@ public sealed class DiffViewer : Control
     private MinimapSnapshot? _minimapSnapshot;
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
+
+    private readonly record struct LinePaintKey(int RowIndex, byte Side, int Epoch);
+
+    private sealed class LinePaintCache(
+        string text,
+        IReadOnlyList<(FormattedText Ft, double Width)> segments,
+        double totalWidth)
+    {
+        public string Text { get; } = text;
+        public IReadOnlyList<(FormattedText Ft, double Width)> Segments { get; } = segments;
+        public double TotalWidth { get; } = totalWidth;
+    }
 
     /// <summary>Subsampled minimap marks — one entry per vertical pixel, rebuilt when rows/mode/height/annotations change.</summary>
     private sealed class MinimapSnapshot(
@@ -280,7 +298,11 @@ public sealed class DiffViewer : Control
         base.OnDetachedFromVisualTree(e);
     }
 
-    private void OnActualThemeVariantChanged(object? sender, EventArgs e) => InvalidateVisual();
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e)
+    {
+        ClearPaintCache();
+        InvalidateVisual();
+    }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
@@ -297,6 +319,7 @@ public sealed class DiffViewer : Control
             _scrollX = 0;
             _maxCodeContentWidthCache = null;
             _minimapSnapshot = null;
+            ClearPaintCache();
             UpdateEmptyMessage();
             InvalidateVisual();
             InvalidateMeasure();
@@ -313,9 +336,12 @@ public sealed class DiffViewer : Control
             UpdateEmptyMessage();
             InvalidateVisual();
         }
-        else if (change.Property == ShowWhitespaceProperty)
+        else if (change.Property == ShowWhitespaceProperty
+                 || change.Property == LeftSyntaxTokensProperty
+                 || change.Property == RightSyntaxTokensProperty)
         {
             _maxCodeContentWidthCache = null;
+            ClearPaintCache();
             ClampScroll();
             InvalidateVisual();
         }
@@ -328,7 +354,10 @@ public sealed class DiffViewer : Control
                  || change.Property == InlineInsetHeightProperty)
         {
             if (change.Property == ViewModeProperty)
+            {
                 _maxCodeContentWidthCache = null;
+                ClearPaintCache();
+            }
             ClampScroll();
             InvalidateVisual();
         }
@@ -399,8 +428,30 @@ public sealed class DiffViewer : Control
 
     private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        // Bulk DiffRows.Reset raises a single Reset; coalesce any residual Add storms
+        // into one invalidate so measure/paint aren't thrashed per row.
+        if (e.Action != NotifyCollectionChangedAction.Reset && _rowsInvalidatePosted)
+            return;
+
+        if (e.Action != NotifyCollectionChangedAction.Reset)
+        {
+            _rowsInvalidatePosted = true;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                _rowsInvalidatePosted = false;
+                InvalidateRowsState();
+            }, Avalonia.Threading.DispatcherPriority.Render);
+            return;
+        }
+
+        InvalidateRowsState();
+    }
+
+    private void InvalidateRowsState()
+    {
         _minimapSnapshot = null;
         _maxCodeContentWidthCache = null;
+        ClearPaintCache();
         UpdateEmptyMessage();
         ClampScroll();
         InvalidateVisual();
@@ -476,6 +527,7 @@ public sealed class DiffViewer : Control
 
     public override void Render(DrawingContext context)
     {
+        var renderSw = Stopwatch.StartNew();
         _hunkButtons.Clear();
         _annotationHits.Clear();
         _addCommentHits.Clear();
@@ -494,6 +546,7 @@ public sealed class DiffViewer : Control
         var rowH = RowHeight;
         var first = Math.Max(0, RowIndexAtContentY(_scrollY));
         var last = Math.Min(rows.Count - 1, RowIndexAtContentY(_scrollY + viewportHeight) + 1);
+        var visibleCount = last - first + 1;
         var midX = ViewMode == DiffViewMode.SideBySide
             ? contentLeft + contentWidth / 2
             : contentLeft + contentWidth;
@@ -557,8 +610,9 @@ public sealed class DiffViewer : Control
                     else if (!row.LeftText.IsEmpty)
                     {
                         var x = SideBySideCodeX(contentLeft) - _scrollX;
-                        DrawIntraLineHighlights(context, FormatText(row.LeftText), row.LeftIntraLine, x, y, rowH, removedAccent);
-                        DrawSyntaxOrPlainText(context, FormatText(row.LeftText), x, y,
+                        var leftFormatted = FormatText(row.LeftText);
+                        DrawIntraLineHighlights(context, leftFormatted, row.LeftIntraLine, x, y, rowH, removedAccent);
+                        DrawSyntaxOrPlainText(context, i, side: 0, leftFormatted, x, y,
                             TextBrush(leftKind, contextText), LeftSyntaxTokens, row.OldLineNumber);
                     }
                 }
@@ -569,8 +623,9 @@ public sealed class DiffViewer : Control
                     if (row.Kind is not DiffRowKind.HunkHeader and not DiffRowKind.Collapsed && !row.RightText.IsEmpty)
                     {
                         var x = SideBySideCodeX(midX) - _scrollX;
-                        DrawIntraLineHighlights(context, FormatText(row.RightText), row.RightIntraLine, x, y, rowH, addedAccent);
-                        DrawSyntaxOrPlainText(context, FormatText(row.RightText), x, y,
+                        var rightFormatted = FormatText(row.RightText);
+                        DrawIntraLineHighlights(context, rightFormatted, row.RightIntraLine, x, y, rowH, addedAccent);
+                        DrawSyntaxOrPlainText(context, i, side: 1, rightFormatted, x, y,
                             TextBrush(rightKind, contextText), RightSyntaxTokens, row.NewLineNumber);
                     }
                 }
@@ -618,7 +673,7 @@ public sealed class DiffViewer : Control
                     lineNo = row.NewLineNumber ?? row.OldLineNumber;
                 }
 
-                DrawSyntaxOrPlainText(context, formatted, x + prefixWidth, y,
+                DrawSyntaxOrPlainText(context, i, side: 2, formatted, x + prefixWidth, y,
                     TextBrush(row.Kind, contextText), tokens, lineNo);
             }
 
@@ -627,6 +682,7 @@ public sealed class DiffViewer : Control
         }
 
         DrawHorizontalScrollbar(context, bounds);
+        OpenTelemetryBootstrap.RecordDiffRender(renderSw.Elapsed.TotalMilliseconds, visibleCount);
     }
 
     private static double UnifiedCodeX(double contentLeft) =>
@@ -1175,6 +1231,13 @@ public sealed class DiffViewer : Control
             rect.Y + (rect.Height - ft.Height) / 2));
     }
 
+    private void ClearPaintCache()
+    {
+        _paintEpoch++;
+        _measureWidthCache.Clear();
+        _linePaintCache.Clear();
+    }
+
     private string FormatText(ReadOnlyMemory<char> text)
     {
         var s = text.ToString();
@@ -1186,40 +1249,39 @@ public sealed class DiffViewer : Control
     {
         if (line is null) return;
         var brush = Brush("ForgeDiffGutterTextBrush", Brushes.Gray);
-        var ft = new FormattedText(
-            line.Value.ToString(),
-            System.Globalization.CultureInfo.CurrentCulture,
-            FlowDirection.LeftToRight,
-            _typeface,
-            12,
-            brush);
+        var ft = CreateFormattedText(line.Value.ToString(), 12, brush);
         ctx.DrawText(ft, new Point(x + GutterWidth - ft.Width - 4, y + (RowHeight - ft.Height) / 2));
     }
 
-    private void DrawText(DrawingContext ctx, string text, double x, double y, IBrush brush)
+    /// <summary>Draws <paramref name="text"/> and returns its advance width (same FormattedText).</summary>
+    private double DrawText(DrawingContext ctx, string text, double x, double y, IBrush brush)
     {
-        var ft = new FormattedText(
-            text,
-            System.Globalization.CultureInfo.CurrentCulture,
-            FlowDirection.LeftToRight,
-            _typeface,
-            12,
-            brush);
+        if (string.IsNullOrEmpty(text)) return 0;
+        var ft = CreateFormattedText(text, 12, brush);
         ctx.DrawText(ft, new Point(x, y + (RowHeight - ft.Height) / 2));
+        return ft.WidthIncludingTrailingWhitespace;
     }
 
     private double MeasureWidth(string text)
     {
         if (string.IsNullOrEmpty(text)) return 0;
-        var ft = new FormattedText(
+        if (_measureWidthCache.TryGetValue(text, out var cached))
+            return cached;
+
+        var ft = CreateFormattedText(text, 12, Brushes.Transparent);
+        var width = ft.WidthIncludingTrailingWhitespace;
+        _measureWidthCache[text] = width;
+        return width;
+    }
+
+    private FormattedText CreateFormattedText(string text, double fontSize, IBrush brush) =>
+        new(
             text,
             System.Globalization.CultureInfo.CurrentCulture,
             FlowDirection.LeftToRight,
             _typeface,
-            12,
-            Brushes.Transparent);
-        return ft.WidthIncludingTrailingWhitespace;
-    }
+            fontSize,
+            brush);
 
     private void DrawIntraLineHighlights(
         DrawingContext ctx,
@@ -1255,6 +1317,8 @@ public sealed class DiffViewer : Control
 
     private void DrawSyntaxOrPlainText(
         DrawingContext ctx,
+        int rowIndex,
+        byte side,
         string text,
         double x,
         double y,
@@ -1265,46 +1329,82 @@ public sealed class DiffViewer : Control
         if (string.IsNullOrEmpty(text))
             return;
 
+        var cache = GetOrCreateLinePaint(rowIndex, side, text, fallback, tokens, oneBasedLine);
+        var drawX = x;
+        foreach (var (ft, width) in cache.Segments)
+        {
+            ctx.DrawText(ft, new Point(drawX, y + (RowHeight - ft.Height) / 2));
+            drawX += width;
+        }
+    }
+
+    private LinePaintCache GetOrCreateLinePaint(
+        int rowIndex,
+        byte side,
+        string text,
+        IBrush fallback,
+        FileSyntaxTokens? tokens,
+        int? oneBasedLine)
+    {
+        var key = new LinePaintKey(rowIndex, side, _paintEpoch);
+        if (_linePaintCache.TryGetValue(key, out var cached) && cached.Text == text)
+            return cached;
+
+        var segments = new List<(FormattedText Ft, double Width)>();
         if (tokens is null || oneBasedLine is null)
         {
-            DrawText(ctx, text, x, y, fallback);
-            return;
+            var ft = CreateFormattedText(text, 12, fallback);
+            segments.Add((ft, ft.WidthIncludingTrailingWhitespace));
         }
-
-        var spans = tokens.ForLine(oneBasedLine.Value);
-        if (spans.Count == 0)
+        else
         {
-            DrawText(ctx, text, x, y, fallback);
-            return;
-        }
-
-        // Paint each character once: gaps use fallback, tokens use scope color.
-        var drawX = x;
-        var pos = 0;
-        foreach (var span in spans)
-        {
-            if (span.Length <= 0 || span.Start < 0 || span.Start >= text.Length)
-                continue;
-            var start = Math.Max(span.Start, pos);
-            var len = Math.Min(span.Length - (start - span.Start), text.Length - start);
-            if (len <= 0) continue;
-
-            if (pos < start)
+            var spans = tokens.ForLine(oneBasedLine.Value);
+            if (spans.Count == 0)
             {
-                var gap = text[pos..start];
-                DrawText(ctx, gap, drawX, y, fallback);
-                drawX += MeasureWidth(gap);
+                var ft = CreateFormattedText(text, 12, fallback);
+                segments.Add((ft, ft.WidthIncludingTrailingWhitespace));
             }
+            else
+            {
+                var pos = 0;
+                foreach (var span in spans)
+                {
+                    if (span.Length <= 0 || span.Start < 0 || span.Start >= text.Length)
+                        continue;
+                    var start = Math.Max(span.Start, pos);
+                    var len = Math.Min(span.Length - (start - span.Start), text.Length - start);
+                    if (len <= 0) continue;
 
-            var mid = text.Substring(start, len);
-            var color = SyntaxScopePalette.BrushForScope(span.Scope, ActualThemeVariant) ?? fallback;
-            DrawText(ctx, mid, drawX, y, color);
-            drawX += MeasureWidth(mid);
-            pos = start + len;
+                    if (pos < start)
+                    {
+                        var gap = text[pos..start];
+                        var gapFt = CreateFormattedText(gap, 12, fallback);
+                        segments.Add((gapFt, gapFt.WidthIncludingTrailingWhitespace));
+                    }
+
+                    var mid = text.Substring(start, len);
+                    var color = SyntaxScopePalette.BrushForScope(span.Scope, ActualThemeVariant) ?? fallback;
+                    var midFt = CreateFormattedText(mid, 12, color);
+                    segments.Add((midFt, midFt.WidthIncludingTrailingWhitespace));
+                    pos = start + len;
+                }
+
+                if (pos < text.Length)
+                {
+                    var rest = text[pos..];
+                    var restFt = CreateFormattedText(rest, 12, fallback);
+                    segments.Add((restFt, restFt.WidthIncludingTrailingWhitespace));
+                }
+            }
         }
 
-        if (pos < text.Length)
-            DrawText(ctx, text[pos..], drawX, y, fallback);
+        double total = 0;
+        foreach (var (_, w) in segments)
+            total += w;
+
+        cached = new LinePaintCache(text, segments, total);
+        _linePaintCache[key] = cached;
+        return cached;
     }
 
     private IBrush RowBrush(DiffRowKind kind, bool selected) =>
