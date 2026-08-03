@@ -1,3 +1,6 @@
+using System.Text;
+using System.Text.RegularExpressions;
+
 namespace CodeReviewr.AI.Agent;
 
 /// <summary>
@@ -91,15 +94,36 @@ internal sealed class AgentPermissionPolicy
         if (pattern.Length == 0)
             return false;
 
-        if (pattern.Length > 1 && pattern[0] == '*' && pattern[^1] == '*')
-            return value.Contains(pattern[1..^1], StringComparison.OrdinalIgnoreCase);
+        var regex = GlobToRegex(pattern);
+        return regex.IsMatch(value);
+    }
 
-        if (pattern[0] == '*')
-            return value.EndsWith(pattern[1..], StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Converts a glob-like pattern to a regex. <c>**</c> matches across path segments;
+    /// <c>*</c> matches within a single segment (<c>[^/]*</c>).
+    /// </summary>
+    private static Regex GlobToRegex(string pattern)
+    {
+        var sb = new StringBuilder("^");
+        for (var i = 0; i < pattern.Length; i++)
+        {
+            if (pattern[i] == '*' && i + 1 < pattern.Length && pattern[i + 1] == '*')
+            {
+                sb.Append(".*");
+                i++;
+                continue;
+            }
 
-        if (pattern[^1] == '*')
-            return value.StartsWith(pattern[..^1], StringComparison.OrdinalIgnoreCase);
+            if (pattern[i] == '*')
+            {
+                sb.Append("[^/]*");
+                continue;
+            }
 
-        return string.Equals(value, pattern, StringComparison.OrdinalIgnoreCase);
+            sb.Append(Regex.Escape(pattern[i].ToString()));
+        }
+
+        sb.Append('$');
+        return new Regex(sb.ToString(), RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 }
