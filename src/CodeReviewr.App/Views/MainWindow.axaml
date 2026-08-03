@@ -1376,6 +1376,12 @@
             <DockPanel>
               <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                 <Button Classes="ReviewAction"
+                        Command="{Binding Review.BeginFileCommentCommand}"
+                        IsEnabled="{Binding Review.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}"
+                        ToolTip.Tip="Add a file comment">
+                  <icons:MaterialIcon Kind="CommentPlusOutline" Width="18" Height="18" />
+                </Button>
+                <Button Classes="ReviewAction"
                         Command="{Binding Review.UnmarkSelectedViewedCommand}"
                         IsEnabled="{Binding Review.SelectedFile.IsViewed}"
                         ToolTip.Tip="Mark as not viewed">
@@ -1634,27 +1640,23 @@
               </StackPanel>
             </ScrollViewer>
             <DockPanel IsVisible="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
-              <Border DockPanel.Dock="Bottom" Padding="12,8"
-                      Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
-                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
-                      IsVisible="{Binding Review.HasDraftCommentAnchor, Converter={x:Static conv:ForgeConverters.InvertBool}}">
-                <StackPanel Spacing="6">
-                  <TextBlock Text="Draft comment" FontSize="11" FontWeight="SemiBold"
-                             VerticalAlignment="Center" />
-                  <DockPanel>
-                    <Button DockPanel.Dock="Right" Classes="Primary" Content="Add"
-                            Command="{Binding Review.AddCommentCommand}" Margin="8,0,0,0" />
-                    <TextBox x:Name="PrCommentDraftBox" Text="{Binding Review.NewCommentBody}" AcceptsReturn="True" MinHeight="40" />
-                  </DockPanel>
-                </StackPanel>
-              </Border>
               <Border DockPanel.Dock="Bottom" MaxHeight="180" Padding="8"
                       Background="{DynamicResource ForgeSurfaceContainerBrush}"
                       BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
                       IsVisible="{Binding Review.FileLevelThreads.Count, Converter={x:Static conv:ForgeConverters.IsPositive}}">
                 <DockPanel>
-                  <TextBlock DockPanel.Dock="Top" Text="File comments" FontWeight="SemiBold" Margin="0,0,0,4" />
-                  <ScrollViewer>
+                  <Button DockPanel.Dock="Top" Classes="Ghost" HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Left" Padding="0,0,0,4"
+                          Command="{Binding Review.ToggleFileCommentsSectionCommand}">
+                    <DockPanel>
+                      <icons:MaterialIcon DockPanel.Dock="Right" Width="16" Height="16"
+                                          Kind="{Binding Review.FileCommentsSectionChevron}"
+                                          Opacity="0.7" />
+                      <TextBlock Text="{Binding Review.FileCommentsSectionHeader}" FontWeight="SemiBold"
+                                 VerticalAlignment="Center" />
+                    </DockPanel>
+                  </Button>
+                  <ScrollViewer IsVisible="{Binding Review.IsFileCommentsSectionExpanded}">
                     <ItemsControl ItemsSource="{Binding Review.FileLevelThreads}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="review:ReviewThread">
@@ -1683,8 +1685,18 @@
                       BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
                       IsVisible="{Binding Review.UnplaceableThreads.Count, Converter={x:Static conv:ForgeConverters.IsPositive}}">
                 <DockPanel>
-                  <TextBlock DockPanel.Dock="Top" Text="Unplaceable comments" FontWeight="SemiBold" Margin="0,0,0,4" />
-                  <ScrollViewer>
+                  <Button DockPanel.Dock="Top" Classes="Ghost" HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Left" Padding="0,0,0,4"
+                          Command="{Binding Review.ToggleUnplaceableSectionCommand}">
+                    <DockPanel>
+                      <icons:MaterialIcon DockPanel.Dock="Right" Width="16" Height="16"
+                                          Kind="{Binding Review.UnplaceableSectionChevron}"
+                                          Opacity="0.7" />
+                      <TextBlock Text="{Binding Review.UnplaceableSectionHeader}" FontWeight="SemiBold"
+                                 VerticalAlignment="Center" />
+                    </DockPanel>
+                  </Button>
+                  <ScrollViewer IsVisible="{Binding Review.IsUnplaceableSectionExpanded}">
                     <ItemsControl ItemsSource="{Binding Review.UnplaceableThreads}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="review:ReviewThread">
@@ -1721,16 +1733,58 @@
                             Command="{Binding Review.ClearExpandedThreadCommand}" />
                     <TextBlock Text="Thread" FontWeight="SemiBold" VerticalAlignment="Center" />
                   </DockPanel>
+                  <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0"
+                              IsVisible="{Binding Review.IsEditingComment}">
+                    <TextBox x:Name="SideThreadEditBox"
+                             Text="{Binding Review.NewCommentBody}"
+                             AcceptsReturn="True"
+                             MinHeight="40"
+                             PlaceholderText="{Binding Review.DraftPlaceholder}"
+                             TextChanged="OnCommentDraftTextChanged"
+                             KeyDown="OnCommentDraftKeyDown" />
+                    <DockPanel>
+                      <Button DockPanel.Dock="Right" Classes="Primary"
+                              Content="{Binding Review.DraftPrimaryActionLabel}"
+                              Command="{Binding Review.AddCommentCommand}" />
+                      <Button Classes="Ghost" Content="Cancel" FontSize="11"
+                              Command="{Binding Review.ClearDraftCommentAnchorCommand}" />
+                    </DockPanel>
+                  </StackPanel>
+                  <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0"
+                              IsVisible="{Binding Review.CanReplyToSelectedThread}">
+                    <TextBox x:Name="SideThreadReplyBox"
+                             Text="{Binding Review.ReplyBody}"
+                             AcceptsReturn="True"
+                             MinHeight="40"
+                             PlaceholderText="Reply…"
+                             TextChanged="OnCommentDraftTextChanged"
+                             KeyDown="OnCommentDraftKeyDown" />
+                    <Button Classes="Primary" Content="Reply" HorizontalAlignment="Right"
+                            Command="{Binding Review.ReplyToThreadCommand}" />
+                  </StackPanel>
                   <ScrollViewer>
                     <ItemsControl ItemsSource="{Binding Review.SelectedThread.Comments}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="review:ReviewComment">
                           <StackPanel Spacing="4" Margin="0,0,0,8">
-                            <TextBlock FontSize="11" Opacity="0.7">
-                              <Run Text="{Binding AuthorLogin, Mode=OneWay}" FontWeight="SemiBold" />
-                              <Run Text=" · " />
-                              <Run Text="{Binding CreatedAt, Mode=OneWay}" />
-                            </TextBlock>
+                            <DockPanel>
+                              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4"
+                                          IsVisible="{Binding ViewerDidAuthor}">
+                                <Button Classes="Ghost" Content="Edit" FontSize="10" Padding="4,0"
+                                        IsVisible="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.CanMutateSelectedThreadComments}"
+                                        Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.BeginEditCommentCommand}"
+                                        CommandParameter="{Binding}" />
+                                <Button Classes="Ghost" Content="Delete" FontSize="10" Padding="4,0"
+                                        IsVisible="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.CanMutateSelectedThreadComments}"
+                                        Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.DeleteCommentCommand}"
+                                        CommandParameter="{Binding}" />
+                              </StackPanel>
+                              <TextBlock FontSize="11" Opacity="0.7">
+                                <Run Text="{Binding AuthorLogin, Mode=OneWay}" FontWeight="SemiBold" />
+                                <Run Text=" · " />
+                                <Run Text="{Binding CreatedAt, Mode=OneWay}" />
+                              </TextBlock>
+                            </DockPanel>
                             <controls:MarkdownView Markdown="{Binding Body}" />
                           </StackPanel>
                         </DataTemplate>
@@ -1739,7 +1793,7 @@
                   </ScrollViewer>
                 </DockPanel>
               </Border>
-              <Panel>
+              <Panel ClipToBounds="True">
                 <controls:DiffViewer x:Name="PrDiffViewer"
                                      Rows="{Binding Review.DiffRows}"
                                      ViewMode="{Binding Review.ViewMode}"
@@ -1784,10 +1838,16 @@
                                Text="{Binding Review.NewCommentBody}"
                                AcceptsReturn="True"
                                MinHeight="72"
-                               PlaceholderText="Add a comment…" />
+                               PlaceholderText="{Binding Review.DraftPlaceholder}"
+                               TextChanged="OnCommentDraftTextChanged"
+                               KeyDown="OnCommentDraftKeyDown" />
                       <DockPanel>
-                        <Button DockPanel.Dock="Right" Classes="Primary" Content="Add comment"
-                                Command="{Binding Review.AddCommentCommand}" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                          <Button Classes="Ghost" Content="Add a suggestion" FontSize="11"
+                                  Command="{Binding Review.InsertSuggestionCommand}" />
+                          <Button Classes="Primary" Content="{Binding Review.DraftPrimaryActionLabel}"
+                                  Command="{Binding Review.AddCommentCommand}" />
+                        </StackPanel>
                         <TextBlock />
                       </DockPanel>
                     </StackPanel>
@@ -1796,7 +1856,6 @@
                 <Canvas IsVisible="{Binding Review.HasExpandedInlineThread}">
                   <Border x:Name="InlineThreadCard"
                           Width="520" MaxWidth="640"
-                          MaxHeight="280"
                           Padding="12"
                           Background="{DynamicResource ForgeSurfaceContainerHighestBrush}"
                           BorderBrush="{DynamicResource ForgePrimaryBrush}"
@@ -1805,8 +1864,12 @@
                           BoxShadow="0 4 16 0 #40000000">
                     <DockPanel>
                       <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-                        <Button DockPanel.Dock="Right" Classes="Ghost" Content="Close" FontSize="11"
-                                Command="{Binding Review.ClearExpandedThreadCommand}" Margin="8,0,0,0" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                          <Button Classes="Ghost" Content="Open in sidebar" FontSize="11"
+                                  Command="{Binding Review.OpenSelectedThreadInSidebarCommand}" />
+                          <Button Classes="Ghost" Content="Close" FontSize="11"
+                                  Command="{Binding Review.ClearExpandedThreadCommand}" />
+                        </StackPanel>
                         <StackPanel Spacing="2" VerticalAlignment="Center">
                           <TextBlock Text="Thread" FontSize="11" FontWeight="SemiBold"
                                      Foreground="{DynamicResource ForgePrimaryBrush}" />
@@ -1814,16 +1877,41 @@
                                      IsVisible="{Binding Review.IsSelectedThreadPendingSync}" />
                         </StackPanel>
                       </DockPanel>
+                      <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0"
+                                  IsVisible="{Binding Review.CanReplyToSelectedThread}">
+                        <TextBox x:Name="InlineThreadReplyBox"
+                                 Text="{Binding Review.ReplyBody}"
+                                 AcceptsReturn="True"
+                                 MinHeight="48"
+                                 PlaceholderText="Reply…"
+                                 TextChanged="OnCommentDraftTextChanged"
+                                 KeyDown="OnCommentDraftKeyDown" />
+                        <Button Classes="Primary" Content="Reply" HorizontalAlignment="Right"
+                                Command="{Binding Review.ReplyToThreadCommand}" />
+                      </StackPanel>
                       <ScrollViewer MaxHeight="220">
                         <ItemsControl ItemsSource="{Binding Review.SelectedThread.Comments}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="review:ReviewComment">
                               <StackPanel Spacing="4" Margin="0,0,0,10">
-                                <TextBlock FontSize="11" Opacity="0.7">
-                                  <Run Text="{Binding AuthorLogin, Mode=OneWay}" FontWeight="SemiBold" />
-                                  <Run Text=" · " />
-                                  <Run Text="{Binding CreatedAt, Mode=OneWay}" />
-                                </TextBlock>
+                                <DockPanel>
+                                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4"
+                                              IsVisible="{Binding ViewerDidAuthor}">
+                                    <Button Classes="Ghost" Content="Edit" FontSize="10" Padding="4,0"
+                                            IsVisible="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.CanMutateSelectedThreadComments}"
+                                            Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.BeginEditCommentCommand}"
+                                            CommandParameter="{Binding}" />
+                                    <Button Classes="Ghost" Content="Delete" FontSize="10" Padding="4,0"
+                                            IsVisible="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.CanMutateSelectedThreadComments}"
+                                            Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.DeleteCommentCommand}"
+                                            CommandParameter="{Binding}" />
+                                  </StackPanel>
+                                  <TextBlock FontSize="11" Opacity="0.7">
+                                    <Run Text="{Binding AuthorLogin, Mode=OneWay}" FontWeight="SemiBold" />
+                                    <Run Text=" · " />
+                                    <Run Text="{Binding CreatedAt, Mode=OneWay}" />
+                                  </TextBlock>
+                                </DockPanel>
                                 <controls:MarkdownView Markdown="{Binding Body}" />
                               </StackPanel>
                             </DataTemplate>
@@ -1833,6 +1921,33 @@
                     </DockPanel>
                   </Border>
                 </Canvas>
+                <Popup x:Name="CommentMentionPopup"
+                       IsLightDismissEnabled="True"
+                       Placement="AnchorAndGravity"
+                       Closed="OnMentionPopupClosed">
+                  <Border Background="{DynamicResource ForgeSurfaceContainerHighestBrush}"
+                          BorderBrush="{DynamicResource ForgeOutlineVariantBrush}"
+                          BorderThickness="1"
+                          CornerRadius="6"
+                          Padding="4"
+                          MinWidth="220"
+                          MaxHeight="200"
+                          BoxShadow="0 4 12 0 #40000000">
+                    <ListBox ItemsSource="{Binding Review.MentionCandidates}"
+                             SelectedIndex="{Binding Review.SelectedMentionIndex}"
+                             MaxHeight="192">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="gh:MentionableUser">
+                          <Border Padding="8,6" PointerPressed="OnMentionCandidatePressed">
+                            <TextBlock FontSize="12">
+                              <Run Text="@" /><Run Text="{Binding Login}" />
+                            </TextBlock>
+                          </Border>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </Border>
+                </Popup>
               </Panel>
             </DockPanel>
             <Border Background="{DynamicResource ForgeSettingsScrimBrush}"

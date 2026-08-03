@@ -8,10 +8,12 @@ internal static class EmbeddedQueries
     private static readonly Lazy<string> InboxSearch = new(() => Load("InboxSearch.graphql"));
     private static readonly Lazy<string> PullRequestDetail = new(() => Load("PullRequestDetail.graphql"));
     private static readonly Lazy<string> PullRequestThreads = new(() => Load("PullRequestThreads.graphql"));
+    private static readonly Lazy<string> MentionableUsers = new(() => Load("MentionableUsers.graphql"));
     private static readonly Lazy<string> CapabilityProbe = new(() => Load("CapabilityProbe.graphql"));
     private static readonly Lazy<string> PendingReview = new(() => Load("PendingReviewQuery.graphql"));
     private static readonly Lazy<string> AddPullRequestReviewThread = new(() => Load("AddPullRequestReviewThread.graphql"));
     private static readonly Lazy<string> AddPullRequestReviewComment = new(() => Load("AddPullRequestReviewComment.graphql"));
+    private static readonly Lazy<string> AddPullRequestReviewThreadReply = new(() => Load("AddPullRequestReviewThreadReply.graphql"));
     private static readonly Lazy<string> AddPullRequestReview = new(() => Load("AddPullRequestReview.graphql"));
     private static readonly Lazy<string> UpdatePullRequestReviewComment = new(() => Load("UpdatePullRequestReviewComment.graphql"));
     private static readonly Lazy<string> DeletePullRequestReviewComment = new(() => Load("DeletePullRequestReviewComment.graphql"));
@@ -25,10 +27,12 @@ internal static class EmbeddedQueries
     public static string InboxSearchQuery => InboxSearch.Value;
     public static string PullRequestDetailQuery => PullRequestDetail.Value;
     public static string PullRequestThreadsQuery => PullRequestThreads.Value;
+    public static string MentionableUsersQuery => MentionableUsers.Value;
     public static string CapabilityProbeQuery => CapabilityProbe.Value;
     public static string PendingReviewQuery => PendingReview.Value;
     public static string AddPullRequestReviewThreadMutation => AddPullRequestReviewThread.Value;
     public static string AddPullRequestReviewCommentMutation => AddPullRequestReviewComment.Value;
+    public static string AddPullRequestReviewThreadReplyMutation => AddPullRequestReviewThreadReply.Value;
     public static string AddPullRequestReviewMutation => AddPullRequestReview.Value;
     public static string UpdatePullRequestReviewCommentMutation => UpdatePullRequestReviewComment.Value;
     public static string DeletePullRequestReviewCommentMutation => DeletePullRequestReviewComment.Value;

@@ -1,0 +1,7 @@
+mutation AddPullRequestReviewThreadReply($input: AddPullRequestReviewThreadReplyInput!) {
+  addPullRequestReviewThreadReply(input: $input) {
+    comment {
+      id
+    }
+  }
+}

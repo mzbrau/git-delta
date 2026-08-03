@@ -70,6 +70,32 @@ internal sealed class ReviewCommentService(
             .ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<MentionableUser>> GetMentionableUsersAsync(
+        ReviewSession session,
+        string? query,
+        CancellationToken ct = default)
+    {
+        var summary = session.Detail.Summary;
+        var token = await GetTokenAsync(summary.Host, summary.AccountLogin, ct).ConfigureAwait(false);
+        var variables = new
+        {
+            owner = summary.Owner,
+            name = summary.Name,
+            query = string.IsNullOrWhiteSpace(query) ? null : query,
+            first = 20,
+        };
+
+        var (data, _) = await gitHubClient.ExecuteAsync(
+                GitHubClient.NormalizeHost(summary.Host),
+                token,
+                EmbeddedQueries.MentionableUsersQuery,
+                variables,
+                ct)
+            .ConfigureAwait(false);
+
+        return MentionableUsersParser.Parse(data);
+    }
+
     public async Task ReplyCommentAsync(
         ReviewSession session,
         string threadId,

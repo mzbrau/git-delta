@@ -1,0 +1,10 @@
+query MentionableUsers($owner: String!, $name: String!, $query: String, $first: Int!) {
+  repository(owner: $owner, name: $name) {
+    mentionableUsers(query: $query, first: $first) {
+      nodes {
+        login
+        avatarUrl
+      }
+    }
+  }
+}

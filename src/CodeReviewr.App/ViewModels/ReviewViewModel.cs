@@ -90,6 +90,7 @@ public partial class ReviewViewModel : ObservableObject
     public ObservableCollection<ReviewThread> FileLevelThreads { get; } = [];
     public ObservableCollection<IDiffAnnotation> DiffAnnotations { get; } = [];
     public ObservableCollection<ReviewerStatusItem> Reviewers { get; } = [];
+    public ObservableCollection<MentionableUser> MentionCandidates { get; } = [];
 
     [ObservableProperty] private PullRequestSummary? _selectedPullRequest;
     [ObservableProperty] private FileItemViewModel? _selectedFile;
@@ -146,21 +147,40 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private string? _draftCommentSide;
     [ObservableProperty] private bool _hasDraftCommentAnchor;
     [ObservableProperty] private string _draftCommentTargetLabel = "";
+    [ObservableProperty] private bool _isEditingComment;
+    [ObservableProperty] private string? _editingCommentId;
+    [ObservableProperty] private string _replyBody = "";
+    [ObservableProperty] private bool _isMentionPopupOpen;
+    [ObservableProperty] private int _selectedMentionIndex;
+    [ObservableProperty] private bool _mentionTargetsReply;
+    [ObservableProperty] private bool _isUnplaceableSectionExpanded;
+    [ObservableProperty] private bool _isFileCommentsSectionExpanded;
+    [ObservableProperty] private bool _forceSideThreadPanel;
+
+    private int _mentionTokenStart = -1;
+    private CancellationTokenSource? _mentionCts;
+    private string? _mentionCacheKey;
+    private IReadOnlyList<MentionableUser> _mentionCache = [];
+    private ReviewThread? _threadBeforeEdit;
 
     public event Action? FocusCommentDraftRequested;
     public event Action? FocusFileFilterRequested;
     public event Action? ExpandedThreadChanged;
+    public event Action? MentionPopupChanged;
 
     /// <summary>True when a placeable thread is selected and should render as an inline card under the line.</summary>
     public bool HasExpandedInlineThread =>
         SelectedThread is { Anchor: not null, IsFileLevel: false, IsUnplaceable: false } &&
-        !HasDraftCommentAnchor;
+        !HasDraftCommentAnchor &&
+        !ForceSideThreadPanel;
 
-    /// <summary>Side panel only for file-level / unplaceable threads (placeable ones use the inline card).</summary>
+    /// <summary>
+    /// Side panel for file-level / unplaceable threads, or when the user explicitly opens a placeable thread in the sidebar.
+    /// </summary>
     public bool ShowSideThreadPanel =>
         SelectedThread is { } t &&
-        (t.IsFileLevel || t.IsUnplaceable || t.Anchor is null) &&
-        !HasDraftCommentAnchor;
+        !HasDraftCommentAnchor &&
+        (ForceSideThreadPanel || t.IsFileLevel || t.IsUnplaceable || t.Anchor is null);
 
     public bool HasFileFilter => !string.IsNullOrWhiteSpace(FileFilter);
     public bool HasActivePrFilters =>
@@ -173,6 +193,27 @@ public partial class ReviewViewModel : ObservableObject
     public bool IsUnifiedView => ViewMode == DiffViewMode.Unified;
     public bool IsSideBySideView => ViewMode == DiffViewMode.SideBySide;
     public bool IsSelectedThreadPendingSync => SelectedThread?.IsPendingSync == true;
+    public bool CanMutateSelectedThreadComments =>
+        SelectedThread is { IsPendingSync: false };
+    public bool CanReplyToSelectedThread => CanMutateSelectedThreadComments && !IsEditingComment;
+    public string DraftPrimaryActionLabel => IsEditingComment ? "Update comment" : "Add comment";
+    public string DraftPlaceholder => IsEditingComment ? "Update comment…" : "Add a comment…";
+    public string UnplaceableSectionHeader =>
+        UnplaceableThreads.Count == 1
+            ? "Unplaceable comments (1)"
+            : $"Unplaceable comments ({UnplaceableThreads.Count})";
+    public Material.Icons.MaterialIconKind UnplaceableSectionChevron =>
+        IsUnplaceableSectionExpanded
+            ? Material.Icons.MaterialIconKind.ChevronDown
+            : Material.Icons.MaterialIconKind.ChevronRight;
+    public string FileCommentsSectionHeader =>
+        FileLevelThreads.Count == 1
+            ? "File comments (1)"
+            : $"File comments ({FileLevelThreads.Count})";
+    public Material.Icons.MaterialIconKind FileCommentsSectionChevron =>
+        IsFileCommentsSectionExpanded
+            ? Material.Icons.MaterialIconKind.ChevronDown
+            : Material.Icons.MaterialIconKind.ChevronRight;
     public Material.Icons.MaterialIconKind PullRequestLayoutIcon =>
         PullRequestFileListLayout == FileListLayoutMode.Tree
             ? Material.Icons.MaterialIconKind.FileTree
@@ -310,6 +351,9 @@ public partial class ReviewViewModel : ObservableObject
     partial void OnSelectedFileChanged(FileItemViewModel? value)
     {
         ClearDraftCommentAnchor();
+        IsUnplaceableSectionExpanded = false;
+        IsFileCommentsSectionExpanded = false;
+        ForceSideThreadPanel = false;
         if (value is not null)
             IsConversationSelected = false;
         SyncSelectedPrFileEntry();
@@ -421,14 +465,21 @@ public partial class ReviewViewModel : ObservableObject
 
     partial void OnSelectedAnnotationChanged(IDiffAnnotation? value)
     {
+        // Diff marker clicks should use the inline card, not a previously forced sidebar.
+        if (value is not null)
+            ForceSideThreadPanel = false;
         SelectedThread = value is ReviewThreadAnnotation annotation ? annotation.Thread : null;
     }
 
     partial void OnSelectedThreadChanged(ReviewThread? value)
     {
+        if (!IsEditingComment)
+            ReplyBody = "";
         OnPropertyChanged(nameof(HasExpandedInlineThread));
         OnPropertyChanged(nameof(ShowSideThreadPanel));
         OnPropertyChanged(nameof(IsSelectedThreadPendingSync));
+        OnPropertyChanged(nameof(CanMutateSelectedThreadComments));
+        OnPropertyChanged(nameof(CanReplyToSelectedThread));
         ExpandedThreadChanged?.Invoke();
     }
 
@@ -438,6 +489,28 @@ public partial class ReviewViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowSideThreadPanel));
         ExpandedThreadChanged?.Invoke();
     }
+
+    partial void OnForceSideThreadPanelChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasExpandedInlineThread));
+        OnPropertyChanged(nameof(ShowSideThreadPanel));
+        ExpandedThreadChanged?.Invoke();
+    }
+
+    partial void OnIsEditingCommentChanged(bool value)
+    {
+        OnPropertyChanged(nameof(DraftPrimaryActionLabel));
+        OnPropertyChanged(nameof(DraftPlaceholder));
+        OnPropertyChanged(nameof(CanReplyToSelectedThread));
+    }
+
+    partial void OnIsUnplaceableSectionExpandedChanged(bool value) =>
+        OnPropertyChanged(nameof(UnplaceableSectionChevron));
+
+    partial void OnIsFileCommentsSectionExpandedChanged(bool value) =>
+        OnPropertyChanged(nameof(FileCommentsSectionChevron));
+
+    partial void OnIsMentionPopupOpenChanged(bool value) => MentionPopupChanged?.Invoke();
 
     partial void OnIsOfflineChanged(bool value) { }
 
@@ -561,9 +634,21 @@ public partial class ReviewViewModel : ObservableObject
 
             if (selectedPath is not null)
             {
-                SelectedFile = FilteredPrFiles.FirstOrDefault(f =>
+                var restored = FilteredPrFiles.FirstOrDefault(f =>
                                    string.Equals(f.Path.Value, selectedPath, StringComparison.Ordinal))
                                ?? FilteredPrFiles.FirstOrDefault();
+                var sameRef = ReferenceEquals(SelectedFile, restored);
+                SelectedFile = restored;
+
+                // Same FileItemViewModel reference skips OnSelectedFileChanged. If a prior
+                // load was cancelled, retry so we don't stay on "Loading pull request…".
+                if (sameRef &&
+                    restored is not null &&
+                    DiffRows.Count == 0 &&
+                    !IsLoadingDiff)
+                {
+                    _ = LoadDiffForSelectionAsync(restored);
+                }
             }
 
             UpdateProgressSummary();
@@ -819,6 +904,18 @@ public partial class ReviewViewModel : ObservableObject
     {
         SelectedThread = null;
         SelectedAnnotation = null;
+        ForceSideThreadPanel = false;
+        ReplyBody = "";
+        DismissMentionPopup();
+    }
+
+    [RelayCommand]
+    private void OpenSelectedThreadInSidebar()
+    {
+        if (SelectedThread is null)
+            return;
+
+        ForceSideThreadPanel = true;
     }
 
     [RelayCommand]
@@ -827,9 +924,13 @@ public partial class ReviewViewModel : ObservableObject
         if (request is null || SelectedFile is null)
             return;
 
+        ClearEditState(restoreThread: false);
         // Collapse any expanded thread so draft and thread cards don't stack.
         SelectedThread = null;
         SelectedAnnotation = null;
+        ForceSideThreadPanel = false;
+        ReplyBody = "";
+        MentionTargetsReply = false;
 
         DraftCommentSide = request.Side == DiffSide.Old ? "LEFT" : "RIGHT";
         DraftCommentLine = request.Line;
@@ -844,23 +945,217 @@ public partial class ReviewViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private void BeginFileComment()
+    {
+        if (SelectedFile is null)
+            return;
+
+        ClearEditState(restoreThread: false);
+        SelectedThread = null;
+        SelectedAnnotation = null;
+        ForceSideThreadPanel = false;
+        ReplyBody = "";
+        MentionTargetsReply = false;
+
+        DraftCommentSide = null;
+        DraftCommentLine = null;
+        DraftCommentStartLine = null;
+        HasDraftCommentAnchor = true;
+        DraftCommentTargetLabel = "Commenting on file";
+        RemoveProvisionalDraftAnnotations();
+        FocusCommentDraftRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    private void ToggleUnplaceableSection() =>
+        IsUnplaceableSectionExpanded = !IsUnplaceableSectionExpanded;
+
+    [RelayCommand]
+    private void ToggleFileCommentsSection() =>
+        IsFileCommentsSectionExpanded = !IsFileCommentsSectionExpanded;
+
+    [RelayCommand]
     private void ClearDraftCommentAnchor()
     {
-        if (!HasDraftCommentAnchor && DraftCommentLine is null)
-            return;
+        var restore = _threadBeforeEdit;
+        ClearEditState(restoreThread: false);
 
         DraftCommentLine = null;
         DraftCommentStartLine = null;
         DraftCommentSide = null;
         HasDraftCommentAnchor = false;
         DraftCommentTargetLabel = "";
+        NewCommentBody = "";
+        MentionTargetsReply = false;
         RemoveProvisionalDraftAnnotations();
+        DismissMentionPopup();
+
+        if (restore is not null)
+        {
+            SelectedThread = restore;
+            SelectedAnnotation = DiffAnnotations.OfType<ReviewThreadAnnotation>()
+                .FirstOrDefault(a => a.Thread.NodeId == restore.NodeId);
+        }
+    }
+
+    [RelayCommand]
+    private void InsertSuggestion()
+    {
+        var lines = ResolveDraftLineTexts();
+        if (lines.Count == 0)
+        {
+            _notifications.Info("No line content available for a suggestion.");
+            return;
+        }
+
+        var block = "```suggestion\n" + string.Join('\n', lines) + "\n```";
+        NewCommentBody = string.IsNullOrWhiteSpace(NewCommentBody)
+            ? block
+            : NewCommentBody.TrimEnd() + "\n\n" + block;
+        FocusCommentDraftRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    private void BeginEditComment(ReviewComment? comment)
+    {
+        if (comment is null ||
+            SelectedThread is not { } thread ||
+            thread.IsPendingSync ||
+            !comment.ViewerDidAuthor)
+        {
+            return;
+        }
+
+        _threadBeforeEdit = thread;
+        EditingCommentId = comment.NodeId;
+        IsEditingComment = true;
+        NewCommentBody = comment.Body;
+        ReplyBody = "";
+        DismissMentionPopup();
+
+        if (thread.Anchor is { } anchor && !thread.IsFileLevel && !thread.IsUnplaceable)
+        {
+            DraftCommentSide = anchor.End.Side == DiffSide.Old ? "LEFT" : "RIGHT";
+            DraftCommentLine = anchor.End.Line;
+            DraftCommentStartLine = anchor.Start.Line != anchor.End.Line ? anchor.Start.Line : null;
+            HasDraftCommentAnchor = true;
+            DraftCommentTargetLabel = "Editing comment";
+            ApplyProvisionalDraftAnnotation();
+        }
+        else if (thread.IsFileLevel)
+        {
+            DraftCommentLine = null;
+            DraftCommentStartLine = null;
+            DraftCommentSide = null;
+            HasDraftCommentAnchor = true;
+            DraftCommentTargetLabel = "Editing comment";
+            RemoveProvisionalDraftAnnotations();
+        }
+        else
+        {
+            DraftCommentLine = null;
+            DraftCommentStartLine = null;
+            DraftCommentSide = null;
+            HasDraftCommentAnchor = false;
+            DraftCommentTargetLabel = "Editing comment";
+            RemoveProvisionalDraftAnnotations();
+        }
+
+        FocusCommentDraftRequested?.Invoke();
+    }
+
+    [RelayCommand]
+    private async Task DeleteCommentAsync(ReviewComment? comment)
+    {
+        if (_session is null ||
+            comment is null ||
+            SelectedThread is not { } thread ||
+            thread.IsPendingSync ||
+            !comment.ViewerDidAuthor)
+        {
+            return;
+        }
+
+        var confirmed = await _confirm.ConfirmAsync(
+                "Delete comment?",
+                "This will permanently delete your comment from the pull request.",
+                "Delete")
+            .ConfigureAwait(false);
+        if (!confirmed)
+            return;
+
+        ApplyOptimisticDeleteComment(thread.NodeId, comment.NodeId);
+
+        try
+        {
+            await _comments.DeleteCommentAsync(_session, comment.NodeId).ConfigureAwait(false);
+            IsOffline = _outbox.IsOffline;
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to queue delete: {ex.Message}");
+        }
+        finally
+        {
+            await RefreshThreadsAsync().ConfigureAwait(false);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ReplyToThreadAsync()
+    {
+        if (_session is null ||
+            SelectedThread is not { IsPendingSync: false } thread ||
+            string.IsNullOrWhiteSpace(ReplyBody))
+        {
+            return;
+        }
+
+        var body = ReplyBody.Trim();
+        var clientId = Guid.NewGuid().ToString("N");
+        ApplyOptimisticReply(thread.NodeId, body, clientId);
+        ReplyBody = "";
+        DismissMentionPopup();
+
+        try
+        {
+            await _comments.ReplyCommentAsync(_session, thread.NodeId, body).ConfigureAwait(false);
+            IsOffline = _outbox.IsOffline;
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to queue reply: {ex.Message}");
+        }
+        finally
+        {
+            var keepId = thread.NodeId;
+            await RefreshThreadsAsync().ConfigureAwait(false);
+            var refreshed = _allThreads.FirstOrDefault(t => t.NodeId == keepId);
+            if (refreshed is not null)
+            {
+                await InvokeOnUiAsync(() =>
+                {
+                    SelectedThread = refreshed;
+                    SelectedAnnotation = DiffAnnotations.OfType<ReviewThreadAnnotation>()
+                        .FirstOrDefault(a => a.Thread.NodeId == keepId);
+                }).ConfigureAwait(false);
+            }
+        }
     }
 
     [RelayCommand]
     private async Task AddCommentAsync()
     {
-        if (_session is null || SelectedFile is null || string.IsNullOrWhiteSpace(NewCommentBody))
+        if (_session is null || string.IsNullOrWhiteSpace(NewCommentBody))
+            return;
+
+        if (IsEditingComment)
+        {
+            await SaveEditedCommentAsync().ConfigureAwait(false);
+            return;
+        }
+
+        if (SelectedFile is null)
             return;
 
         var body = NewCommentBody.Trim();
@@ -876,6 +1171,7 @@ public partial class ReviewViewModel : ObservableObject
         DraftCommentSide = null;
         HasDraftCommentAnchor = false;
         DraftCommentTargetLabel = "";
+        DismissMentionPopup();
 
         try
         {
@@ -901,6 +1197,362 @@ public partial class ReviewViewModel : ObservableObject
         }
     }
 
+    private async Task SaveEditedCommentAsync()
+    {
+        if (_session is null ||
+            EditingCommentId is null ||
+            string.IsNullOrWhiteSpace(NewCommentBody))
+        {
+            return;
+        }
+
+        var commentId = EditingCommentId;
+        var body = NewCommentBody.Trim();
+        var restore = _threadBeforeEdit;
+        ApplyOptimisticEditComment(commentId, body);
+        ClearEditState(restoreThread: false);
+        NewCommentBody = "";
+        DraftCommentLine = null;
+        DraftCommentStartLine = null;
+        DraftCommentSide = null;
+        HasDraftCommentAnchor = false;
+        DraftCommentTargetLabel = "";
+        RemoveProvisionalDraftAnnotations();
+        DismissMentionPopup();
+
+        try
+        {
+            await _comments.EditCommentAsync(_session, commentId, body).ConfigureAwait(false);
+            IsOffline = _outbox.IsOffline;
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to queue edit: {ex.Message}");
+        }
+        finally
+        {
+            await RefreshThreadsAsync().ConfigureAwait(false);
+            if (restore is not null)
+            {
+                var refreshed = _allThreads.FirstOrDefault(t => t.NodeId == restore.NodeId);
+                if (refreshed is not null)
+                {
+                    await InvokeOnUiAsync(() =>
+                    {
+                        SelectedThread = refreshed;
+                        SelectedAnnotation = DiffAnnotations.OfType<ReviewThreadAnnotation>()
+                            .FirstOrDefault(a => a.Thread.NodeId == restore.NodeId);
+                    }).ConfigureAwait(false);
+                }
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void SelectMention(MentionableUser? user)
+    {
+        if (user is null || _mentionTokenStart < 0)
+            return;
+
+        var isReply = MentionTargetsReply;
+        var text = isReply ? ReplyBody : NewCommentBody;
+        if (_mentionTokenStart > text.Length)
+        {
+            DismissMentionPopup();
+            return;
+        }
+
+        var end = _mentionTokenStart + 1;
+        while (end < text.Length && !char.IsWhiteSpace(text[end]) && text[end] != '\n' && text[end] != '\r')
+            end++;
+
+        var insertion = "@" + user.Login + " ";
+        var updated = text[.._mentionTokenStart] + insertion + text[end..];
+        if (isReply)
+            ReplyBody = updated;
+        else
+            NewCommentBody = updated;
+
+        DismissMentionPopup();
+        FocusCommentDraftRequested?.Invoke();
+    }
+
+    public void HandleComposerTextInput(string text, int caretIndex, bool isReply)
+    {
+        if (!TryGetActiveMention(text, caretIndex, out var start, out var query))
+        {
+            DismissMentionPopup();
+            return;
+        }
+
+        _mentionTokenStart = start;
+        MentionTargetsReply = isReply;
+        _ = QueryMentionsAsync(query);
+    }
+
+    public void MoveMentionSelection(int delta)
+    {
+        if (!IsMentionPopupOpen || MentionCandidates.Count == 0)
+            return;
+        SelectedMentionIndex = Math.Clamp(SelectedMentionIndex + delta, 0, MentionCandidates.Count - 1);
+    }
+
+    public void AcceptSelectedMention()
+    {
+        if (!IsMentionPopupOpen || MentionCandidates.Count == 0)
+            return;
+        var index = Math.Clamp(SelectedMentionIndex, 0, MentionCandidates.Count - 1);
+        SelectMention(MentionCandidates[index]);
+    }
+
+    private async Task QueryMentionsAsync(string query)
+    {
+        if (_session is null)
+            return;
+
+        _mentionCts?.Cancel();
+        _mentionCts = new CancellationTokenSource();
+        var ct = _mentionCts.Token;
+        try
+        {
+            await Task.Delay(200, ct).ConfigureAwait(false);
+            var cacheKey = $"{_session.Detail.Summary.NodeId}|{query}";
+            IReadOnlyList<MentionableUser> users;
+            if (string.Equals(cacheKey, _mentionCacheKey, StringComparison.Ordinal))
+            {
+                users = _mentionCache;
+            }
+            else
+            {
+                users = await _comments.GetMentionableUsersAsync(_session, query, ct).ConfigureAwait(false);
+                _mentionCacheKey = cacheKey;
+                _mentionCache = users;
+            }
+
+            await InvokeOnUiAsync(() =>
+            {
+                MentionCandidates.Clear();
+                foreach (var user in users)
+                    MentionCandidates.Add(user);
+                SelectedMentionIndex = 0;
+                IsMentionPopupOpen = MentionCandidates.Count > 0;
+            }).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // superseded
+        }
+        catch (Exception ex)
+        {
+            await InvokeOnUiAsync(() =>
+            {
+                DismissMentionPopup();
+                _notifications.Error($"Could not load mentions: {ex.Message}");
+            }).ConfigureAwait(false);
+        }
+    }
+
+    [RelayCommand]
+    private void DismissMentionPopup()
+    {
+        _mentionCts?.Cancel();
+        _mentionTokenStart = -1;
+        MentionTargetsReply = false;
+        if (MentionCandidates.Count > 0)
+            MentionCandidates.Clear();
+        if (IsMentionPopupOpen)
+            IsMentionPopupOpen = false;
+        SelectedMentionIndex = 0;
+    }
+
+    private static bool TryGetActiveMention(string text, int caretIndex, out int start, out string query)
+    {
+        start = -1;
+        query = "";
+        if (string.IsNullOrEmpty(text) || caretIndex < 0 || caretIndex > text.Length)
+            return false;
+
+        var i = caretIndex - 1;
+        while (i >= 0 && !char.IsWhiteSpace(text[i]) && text[i] != '\n' && text[i] != '\r')
+            i--;
+        var tokenStart = i + 1;
+        if (tokenStart >= text.Length || text[tokenStart] != '@')
+            return false;
+        if (tokenStart > 0 && !char.IsWhiteSpace(text[tokenStart - 1]) && text[tokenStart - 1] is not ('\n' or '\r'))
+            return false;
+
+        start = tokenStart;
+        query = text[(tokenStart + 1)..caretIndex];
+        return true;
+    }
+
+    private IReadOnlyList<string> ResolveDraftLineTexts()
+    {
+        if (DraftCommentLine is not int endLine)
+            return [];
+
+        var startLine = DraftCommentStartLine ?? endLine;
+        var from = Math.Min(startLine, endLine);
+        var to = Math.Max(startLine, endLine);
+        var leftSide = string.Equals(DraftCommentSide, "LEFT", StringComparison.OrdinalIgnoreCase);
+        var result = new List<string>();
+
+        foreach (var row in DiffRows)
+        {
+            var line = leftSide ? row.OldLineNumber : row.NewLineNumber;
+            if (line is null || line < from || line > to)
+                continue;
+            var text = leftSide
+                ? (row.LeftText.IsEmpty ? row.RightText : row.LeftText)
+                : (row.RightText.IsEmpty ? row.LeftText : row.RightText);
+            result.Add(text.ToString());
+        }
+
+        return result;
+    }
+
+    private void ClearEditState(bool restoreThread)
+    {
+        var restore = _threadBeforeEdit;
+        _threadBeforeEdit = null;
+        IsEditingComment = false;
+        EditingCommentId = null;
+        if (restoreThread && restore is not null)
+        {
+            SelectedThread = restore;
+            SelectedAnnotation = DiffAnnotations.OfType<ReviewThreadAnnotation>()
+                .FirstOrDefault(a => a.Thread.NodeId == restore.NodeId);
+        }
+    }
+
+    private void ApplyOptimisticEditComment(string commentId, string body)
+    {
+        _allThreads = _allThreads.Select(t =>
+        {
+            var comments = t.Comments.Select(c =>
+                    c.NodeId == commentId
+                        ? c with { Body = body }
+                        : c)
+                .ToList();
+            return comments.SequenceEqual(t.Comments) ? t : t with { Comments = comments };
+        }).ToList();
+
+        InvokeOnUiAsync(() =>
+        {
+            if (SelectedThread is { } selected)
+            {
+                var updated = _allThreads.FirstOrDefault(t => t.NodeId == selected.NodeId);
+                if (updated is not null)
+                    SelectedThread = updated;
+            }
+
+            UpdateThreadAnnotationsFromAll();
+            UpdateProgressSummary();
+        }).GetAwaiter().GetResult();
+    }
+
+    private void ApplyOptimisticDeleteComment(string threadId, string commentId)
+    {
+        var next = new List<ReviewThread>();
+        foreach (var thread in _allThreads)
+        {
+            if (thread.NodeId != threadId)
+            {
+                next.Add(thread);
+                continue;
+            }
+
+            var comments = thread.Comments.Where(c => c.NodeId != commentId).ToList();
+            if (comments.Count > 0)
+                next.Add(thread with { Comments = comments });
+        }
+
+        _allThreads = next;
+        InvokeOnUiAsync(() =>
+        {
+            if (SelectedThread?.NodeId == threadId)
+            {
+                var updated = _allThreads.FirstOrDefault(t => t.NodeId == threadId);
+                SelectedThread = updated;
+                SelectedAnnotation = updated is null
+                    ? null
+                    : DiffAnnotations.OfType<ReviewThreadAnnotation>()
+                        .FirstOrDefault(a => a.Thread.NodeId == threadId);
+            }
+
+            RebuildThreadListUi();
+            UpdateThreadAnnotationsFromAll();
+            UpdateProgressSummary();
+        }).GetAwaiter().GetResult();
+    }
+
+    private void ApplyOptimisticReply(string threadId, string body, string clientId)
+    {
+        var comment = new ReviewComment(
+            clientId,
+            body,
+            AuthorLogin: null,
+            ViewerDidAuthor: true,
+            CreatedAt: DateTimeOffset.UtcNow,
+            Url: null);
+
+        _allThreads = _allThreads.Select(t =>
+            t.NodeId == threadId
+                ? t with { Comments = t.Comments.Append(comment).ToList() }
+                : t).ToList();
+
+        InvokeOnUiAsync(() =>
+        {
+            var updated = _allThreads.FirstOrDefault(t => t.NodeId == threadId);
+            if (updated is not null)
+                SelectedThread = updated;
+            RebuildThreadListUi();
+            UpdateThreadAnnotationsFromAll();
+            UpdateProgressSummary();
+        }).GetAwaiter().GetResult();
+    }
+
+    private void UpdateThreadAnnotationsFromAll()
+    {
+        RemoveProvisionalDraftAnnotations();
+        for (var i = DiffAnnotations.Count - 1; i >= 0; i--)
+        {
+            if (DiffAnnotations[i] is ReviewThreadAnnotation)
+                DiffAnnotations.RemoveAt(i);
+        }
+
+        foreach (var thread in _allThreads)
+        {
+            if (thread.Anchor is null || thread.IsFileLevel || thread.IsUnplaceable)
+                continue;
+            if (SelectedFile is null ||
+                !string.Equals(thread.Path, SelectedFile.Path.Value, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            DiffAnnotations.Add(new ReviewThreadAnnotation(thread));
+        }
+
+        UpdateFileThreadFlags();
+    }
+
+    private void RebuildThreadListUi()
+    {
+        Threads.Clear();
+        foreach (var thread in _allThreads)
+        {
+            Threads.Add(new ReviewThreadViewModel(
+                thread.NodeId,
+                thread.Path,
+                thread.IsResolved,
+                thread.Comments.Select(c => c.Body).ToList())
+            {
+                IsPending = thread.IsPendingSync,
+            });
+        }
+    }
+
     private void ApplyOptimisticPendingComment(
         string body,
         string clientId,
@@ -922,6 +1574,7 @@ public partial class ReviewViewModel : ObservableObject
             anchor = new AnnotationRange(start, end);
         }
 
+        var isFileLevel = line is null;
         var comment = new ReviewComment(
             clientId,
             body,
@@ -939,6 +1592,8 @@ public partial class ReviewViewModel : ObservableObject
             Comments: [comment],
             Side: diffSide,
             Anchor: anchor,
+            SubjectType: isFileLevel ? ReviewThreadSubjectType.File : ReviewThreadSubjectType.Line,
+            IsFileLevel: isFileLevel,
             IsPendingSync: true);
 
         _allThreads = _allThreads.Append(thread).ToList();
@@ -952,9 +1607,35 @@ public partial class ReviewViewModel : ObservableObject
             RemoveProvisionalDraftAnnotations();
             if (anchor is not null)
                 DiffAnnotations.Add(new ReviewThreadAnnotation(thread));
+            else if (isFileLevel)
+                RebuildFileLevelThreadsFromAll();
             UpdateFileThreadFlags();
             UpdateProgressSummary();
         }).GetAwaiter().GetResult();
+    }
+
+    private void RebuildFileLevelThreadsFromAll()
+    {
+        var path = SelectedFile?.Path.Value;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        FileLevelThreads.Clear();
+        foreach (var thread in _allThreads)
+        {
+            if (!thread.IsFileLevel)
+                continue;
+            if (path is not null &&
+                !string.Equals(thread.Path, path, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!seen.Add(thread.NodeId))
+                continue;
+
+            FileLevelThreads.Add(thread);
+        }
+
+        OnPropertyChanged(nameof(FileCommentsSectionHeader));
     }
 
     private void ApplyProvisionalDraftAnnotation()
@@ -1197,6 +1878,11 @@ public partial class ReviewViewModel : ObservableObject
             UnplaceableThreads.Clear();
             FileLevelThreads.Clear();
             DiffAnnotations.Clear();
+            IsUnplaceableSectionExpanded = false;
+            IsFileCommentsSectionExpanded = false;
+            ForceSideThreadPanel = false;
+            OnPropertyChanged(nameof(UnplaceableSectionHeader));
+            OnPropertyChanged(nameof(FileCommentsSectionHeader));
             PullRequestTitle = $"#{summary.Number} {summary.Title}";
             PullRequestSubtitle = summary.NameWithOwner;
         }).ConfigureAwait(false);
@@ -1249,13 +1935,28 @@ public partial class ReviewViewModel : ObservableObject
             if (ct.IsCancellationRequested)
                 return;
 
+            FileItemViewModel? initialFile = null;
             await InvokeOnUiAsync(() =>
             {
                 if (FilteredPrFiles.Count > 0)
-                    SelectedFile = FilteredPrFiles[0];
+                {
+                    initialFile = FilteredPrFiles[0];
+                    SelectedFile = initialFile;
+                }
                 else
+                {
                     DiffEmptyMessage = "Select a file to view its diff";
+                }
             }).ConfigureAwait(false);
+
+            // Ensure the first file's diff is awaited even if OnSelectedFileChanged's
+            // fire-and-forget load was cancelled by a concurrent filter/selection churn.
+            if (initialFile is not null &&
+                ReferenceEquals(SelectedFile, initialFile) &&
+                DiffRows.Count == 0)
+            {
+                await LoadDiffForSelectionAsync(initialFile).ConfigureAwait(false);
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -1360,11 +2061,12 @@ public partial class ReviewViewModel : ObservableObject
 
     private async Task LoadDiffForSelectionAsync(FileItemViewModel? file)
     {
+        var cts = new CancellationTokenSource();
         _diffCts?.Cancel();
-        _diffCts = new CancellationTokenSource();
+        _diffCts = cts;
         _markdownCts?.Cancel();
         _markdownCts = null;
-        var ct = _diffCts.Token;
+        var ct = cts.Token;
 
         if (file is null || _session is null)
         {
@@ -1386,14 +2088,23 @@ public partial class ReviewViewModel : ObservableObject
                 .GetDiffAsync(_session, file.Path, options, ct)
                 .ConfigureAwait(false);
 
+            ct.ThrowIfCancellationRequested();
+
             await InvokeOnUiAsync(() =>
             {
+                // A newer selection may have started while we awaited the diff.
+                if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                    return;
+
                 _currentDiff = ApplyIntraLine(diff);
                 UpdateDiffStats(_currentDiff);
                 ProjectRows(_currentDiff);
                 DiffEmptyMessage = DiffRows.Count == 0 ? "No differences" : "";
                 NotifyMarkdownPreviewStateChanged();
             });
+
+            if (!ReferenceEquals(_diffCts, cts) || ct.IsCancellationRequested)
+                return;
 
             await LoadSyntaxTokensAsync(file, _currentDiff!, ct).ConfigureAwait(false);
             await UpdateThreadAnnotationsAsync(file, diff, ct).ConfigureAwait(false);
@@ -1404,11 +2115,19 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            // A newer load or a filter rebuild owns the UI; do not overwrite DiffEmptyMessage
-            // with "Select a file…" when the same file is still selected.
+            // Superseded loads must not touch the UI. If this load still owns the slot and
+            // rows were never projected, retry so we don't stay on "Loading pull request…".
+            if (ReferenceEquals(_diffCts, cts) &&
+                ReferenceEquals(SelectedFile, file) &&
+                DiffRows.Count == 0)
+            {
+                _ = LoadDiffForSelectionAsync(file);
+            }
         }
         catch (DiffTooLargeException ex)
         {
+            if (!ReferenceEquals(_diffCts, cts))
+                return;
             DiffRows.Clear();
             LeftSyntaxTokens = null;
             RightSyntaxTokens = null;
@@ -1417,6 +2136,8 @@ public partial class ReviewViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            if (!ReferenceEquals(_diffCts, cts))
+                return;
             DiffRows.Clear();
             LeftSyntaxTokens = null;
             RightSyntaxTokens = null;
@@ -1425,8 +2146,13 @@ public partial class ReviewViewModel : ObservableObject
         }
         finally
         {
-            IsLoadingDiff = false;
-            OnPropertyChanged(nameof(DiffFooterText));
+            // Only the current load may clear the spinner; a superseded load's finally must
+            // not hide loading for the newer request.
+            if (ReferenceEquals(_diffCts, cts))
+            {
+                IsLoadingDiff = false;
+                OnPropertyChanged(nameof(DiffFooterText));
+            }
         }
     }
 
@@ -1538,6 +2264,8 @@ public partial class ReviewViewModel : ObservableObject
     private static bool MatchesOptimisticStub(ReviewThread remote, ReviewThread stub)
     {
         if (!string.Equals(remote.Path, stub.Path, StringComparison.Ordinal))
+            return false;
+        if (remote.IsFileLevel != stub.IsFileLevel)
             return false;
         if (remote.Line != stub.Line)
             return false;
@@ -1818,12 +2546,24 @@ public partial class ReviewViewModel : ObservableObject
             foreach (var thread in placeable)
                 DiffAnnotations.Add(new ReviewThreadAnnotation(thread));
 
+            var seenUnplaceable = new HashSet<string>(StringComparer.Ordinal);
             foreach (var thread in unplaceable)
+            {
+                if (!seenUnplaceable.Add(thread.NodeId))
+                    continue;
                 UnplaceableThreads.Add(thread);
+            }
 
+            var seenFileLevel = new HashSet<string>(StringComparer.Ordinal);
             foreach (var thread in fileLevel)
+            {
+                if (!seenFileLevel.Add(thread.NodeId))
+                    continue;
                 FileLevelThreads.Add(thread);
+            }
 
+            OnPropertyChanged(nameof(UnplaceableSectionHeader));
+            OnPropertyChanged(nameof(FileCommentsSectionHeader));
             FileThreadSummary = string.Empty;
 
             file.UnresolvedThreadCount = CountUnresolvedThreads(file.Path.Value);

@@ -350,6 +350,117 @@ public sealed class ReviewViewModelTests
     }
 
     [Test]
+    public async Task CancelledDiffLoad_ThenFilterRebuild_DoesNotLeaveLoadingPlaceholder()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var path = FilePath.From("src/a.cs");
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(path, ChangeKind.Modified)]);
+
+        var hunk = new DiffHunk(
+            OldStart: 1,
+            OldCount: 1,
+            NewStart: 1,
+            NewCount: 1,
+            Header: "@@ -1,1 +1,1 @@",
+            Lines:
+            [
+                new DiffLine(DiffLineKind.Removed, 1, null, "old\n".AsMemory()),
+                new DiffLine(DiffLineKind.Added, null, 1, "new\n".AsMemory()),
+            ]);
+        var fileDiff = new FileDiff(
+            new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+            path,
+            path,
+            ChangeKind.Modified,
+            ContentId.Empty,
+            ContentId.Empty,
+            IsBinary: false,
+            Hunks: [hunk],
+            RawPatch: "");
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(
+                session,
+                path,
+                Arg.Any<DiffOptions>(),
+                Arg.Any<CancellationToken>())
+            .Returns(async ci =>
+            {
+                var ct = ci.ArgAt<CancellationToken>(3);
+                await gate.Task.WaitAsync(ct);
+                return fileDiff;
+            });
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+        comments.ResolveAnchorsAsync(
+                session,
+                Arg.Any<IReadOnlyList<ReviewThread>>(),
+                path,
+                Arg.Any<FileDiff>(),
+                Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+
+        var vm = CreateViewModel(
+            pullRequests,
+            settings,
+            reviewService: reviewService,
+            comments: comments,
+            outbox: outbox,
+            durable: durable);
+
+        var openTask = vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && vm.IsLoadingDiff);
+
+        // Simulate selection churn cancelling the in-flight load while leaving the same file selected.
+        var selected = vm.SelectedFile!;
+        vm.SelectedFile = null;
+        vm.SelectedFile = selected;
+        Assert.That(vm.DiffEmptyMessage, Is.EqualTo("Loading pull request…").Or.EqualTo("Select a file to view its diff"));
+
+        gate.SetResult();
+        await openTask;
+        await WaitUntilAsync(() => vm.DiffRows.Count > 0 && vm.DiffEmptyMessage == "");
+
+        Assert.That(vm.SelectedFile, Is.Not.Null);
+        Assert.That(vm.DiffEmptyMessage, Is.Not.EqualTo("Loading pull request…"));
+        Assert.That(vm.DiffRows.Count, Is.GreaterThan(0));
+        Assert.That(vm.IsLoadingDiff, Is.False);
+    }
+
+    [Test]
     public async Task SelectFile_Marks_Viewed_When_LocalCache_Has_Matching_Head()
     {
         var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
@@ -834,6 +945,378 @@ public sealed class ReviewViewModelTests
         Assert.That(vm.SelectedThread, Is.Not.Null);
         Assert.That(vm.IsSelectedThreadPendingSync, Is.True);
         Assert.That(vm.HasExpandedInlineThread, Is.True);
+    }
+
+    [Test]
+    public async Task InsertSuggestion_AppendsSuggestionFenceWithLineText()
+    {
+        var (vm, _, _) = await CreateOpenDiffSessionAsync();
+
+        vm.BeginLineCommentCommand.Execute(new LineCommentRequest(DiffSide.New, 1, null));
+        vm.InsertSuggestionCommand.Execute(null);
+
+        Assert.That(vm.NewCommentBody, Does.Contain("```suggestion"));
+        Assert.That(vm.NewCommentBody, Does.Contain("new"));
+        Assert.That(vm.NewCommentBody.TrimEnd().EndsWith("```", StringComparison.Ordinal), Is.True);
+    }
+
+    [Test]
+    public async Task BeginEditComment_PrefillsBody_AndSaveCallsEdit()
+    {
+        var comment = new ReviewComment(
+            "RC_own",
+            "original body",
+            "dev",
+            ViewerDidAuthor: true,
+            DateTimeOffset.UtcNow,
+            Url: null);
+        var content = ContentId.FromSha(new string('c', 40));
+        var thread = new ReviewThread(
+            "RT_1",
+            "src/a.cs",
+            Line: 1,
+            StartLine: null,
+            IsResolved: false,
+            IsOutdated: false,
+            Comments: [comment],
+            Side: DiffSide.New,
+            Anchor: new AnnotationRange(
+                new DiffAnchor(DiffSide.New, content, 1),
+                new DiffAnchor(DiffSide.New, content, 1)),
+            IsPendingSync: false);
+
+        var (vm, comments, session) = await CreateOpenDiffSessionAsync(initialThreads: [thread]);
+        await WaitUntilAsync(() => vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Any());
+
+        vm.SelectedAnnotation = vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Single();
+        Assert.That(vm.CanMutateSelectedThreadComments, Is.True);
+
+        vm.BeginEditCommentCommand.Execute(comment);
+        Assert.That(vm.IsEditingComment, Is.True);
+        Assert.That(vm.NewCommentBody, Is.EqualTo("original body"));
+        Assert.That(vm.DraftPrimaryActionLabel, Is.EqualTo("Update comment"));
+        Assert.That(vm.HasDraftCommentAnchor, Is.True);
+
+        vm.NewCommentBody = "updated body";
+        await vm.AddCommentCommand.ExecuteAsync(null);
+
+        await comments.Received(1).EditCommentAsync(
+            session,
+            "RC_own",
+            "updated body",
+            Arg.Any<CancellationToken>());
+        Assert.That(vm.IsEditingComment, Is.False);
+    }
+
+    [Test]
+    public async Task DeleteComment_ConfirmsAndQueuesDelete()
+    {
+        var comment = new ReviewComment(
+            "RC_own",
+            "to delete",
+            "dev",
+            ViewerDidAuthor: true,
+            DateTimeOffset.UtcNow,
+            Url: null);
+        var content = ContentId.FromSha(new string('c', 40));
+        var thread = new ReviewThread(
+            "RT_1",
+            "src/a.cs",
+            Line: 1,
+            StartLine: null,
+            IsResolved: false,
+            IsOutdated: false,
+            Comments: [comment],
+            Side: DiffSide.New,
+            Anchor: new AnnotationRange(
+                new DiffAnchor(DiffSide.New, content, 1),
+                new DiffAnchor(DiffSide.New, content, 1)),
+            IsPendingSync: false);
+
+        var (vm, comments, session) = await CreateOpenDiffSessionAsync(initialThreads: [thread]);
+        await WaitUntilAsync(() => vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Any());
+
+        vm.SelectedAnnotation = vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Single();
+        await vm.DeleteCommentCommand.ExecuteAsync(comment);
+
+        await comments.Received(1).DeleteCommentAsync(
+            session,
+            "RC_own",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task ReplyToThread_QueuesReply()
+    {
+        var comment = new ReviewComment(
+            "RC_other",
+            "hello",
+            "alice",
+            ViewerDidAuthor: false,
+            DateTimeOffset.UtcNow,
+            Url: null);
+        var content = ContentId.FromSha(new string('c', 40));
+        var thread = new ReviewThread(
+            "RT_1",
+            "src/a.cs",
+            Line: 1,
+            StartLine: null,
+            IsResolved: false,
+            IsOutdated: false,
+            Comments: [comment],
+            Side: DiffSide.New,
+            Anchor: new AnnotationRange(
+                new DiffAnchor(DiffSide.New, content, 1),
+                new DiffAnchor(DiffSide.New, content, 1)),
+            IsPendingSync: false);
+
+        var (vm, comments, session) = await CreateOpenDiffSessionAsync(initialThreads: [thread]);
+        await WaitUntilAsync(() => vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Any());
+
+        vm.SelectedAnnotation = vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Single();
+        vm.ReplyBody = "a reply";
+        await vm.ReplyToThreadCommand.ExecuteAsync(null);
+
+        await comments.Received(1).ReplyCommentAsync(
+            session,
+            "RT_1",
+            "a reply",
+            Arg.Any<CancellationToken>());
+    }
+
+    [Test]
+    public async Task BeginEditComment_IgnoredForPendingSyncThread()
+    {
+        var (vm, _, _) = await CreateOpenDiffSessionAsync();
+        vm.BeginLineCommentCommand.Execute(new LineCommentRequest(DiffSide.New, 1, null));
+        vm.NewCommentBody = "pending";
+        await vm.AddCommentCommand.ExecuteAsync(null);
+        await WaitUntilAsync(() => vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Any());
+
+        var annotation = vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Single();
+        vm.SelectedAnnotation = annotation;
+        var pendingComment = annotation.Thread.Comments[0];
+
+        vm.BeginEditCommentCommand.Execute(pendingComment);
+        Assert.That(vm.IsEditingComment, Is.False);
+        Assert.That(vm.CanMutateSelectedThreadComments, Is.False);
+    }
+
+    [Test]
+    public async Task BeginFileComment_OpensDraftWithoutLine()
+    {
+        var (vm, _, _) = await CreateOpenDiffSessionAsync();
+
+        Assert.That(vm.IsUnplaceableSectionExpanded, Is.False);
+
+        vm.BeginFileCommentCommand.Execute(null);
+
+        Assert.That(vm.HasDraftCommentAnchor, Is.True);
+        Assert.That(vm.DraftCommentLine, Is.Null);
+        Assert.That(vm.DraftCommentStartLine, Is.Null);
+        Assert.That(vm.DraftCommentSide, Is.Null);
+        Assert.That(vm.DraftCommentTargetLabel, Is.EqualTo("Commenting on file"));
+    }
+
+    [Test]
+    public async Task AddFileComment_QueuesNullLineAndBucketsFileLevel()
+    {
+        var (vm, comments, session) = await CreateOpenDiffSessionAsync();
+
+        vm.BeginFileCommentCommand.Execute(null);
+        vm.NewCommentBody = "file-level note";
+        await vm.AddCommentCommand.ExecuteAsync(null);
+
+        await comments.Received(1).AddPendingCommentAsync(
+            session,
+            "file-level note",
+            Arg.Any<FilePath>(),
+            null,
+            null,
+            Arg.Any<string>(),
+            Arg.Any<CancellationToken>());
+        Assert.That(vm.HasDraftCommentAnchor, Is.False);
+        Assert.That(
+            vm.FileLevelThreads.Count(t => t.IsFileLevel && t.Comments.Any(c => c.Body == "file-level note")),
+            Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task AddFileComment_RefreshWithRemoteTwin_DoesNotDuplicate()
+    {
+        var (vm, comments, session) = await CreateOpenDiffSessionAsync();
+        var remote = new ReviewThread(
+            "TH_FILE_1",
+            "src/a.cs",
+            Line: null,
+            StartLine: null,
+            IsResolved: false,
+            IsOutdated: false,
+            Comments:
+            [
+                new ReviewComment(
+                    "C_FILE_1",
+                    "file-level note",
+                    AuthorLogin: "octocat",
+                    ViewerDidAuthor: true,
+                    CreatedAt: DateTimeOffset.UtcNow,
+                    Url: null),
+            ],
+            SubjectType: ReviewThreadSubjectType.File,
+            IsFileLevel: true);
+
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>())
+            .Returns(_ => new List<ReviewThread> { remote });
+
+        vm.BeginFileCommentCommand.Execute(null);
+        vm.NewCommentBody = "file-level note";
+        await vm.AddCommentCommand.ExecuteAsync(null);
+
+        await WaitUntilAsync(() =>
+            vm.FileLevelThreads.Count == 1 &&
+            vm.FileLevelThreads.Any(t => t.NodeId == "TH_FILE_1"));
+
+        Assert.That(vm.FileLevelThreads.Count, Is.EqualTo(1));
+        Assert.That(vm.FileLevelThreads[0].IsPendingSync, Is.False);
+    }
+
+    [Test]
+    public async Task ToggleFileCommentsSection_ExpandsAndCollapses()
+    {
+        var (vm, _, _) = await CreateOpenDiffSessionAsync();
+        Assert.That(vm.IsFileCommentsSectionExpanded, Is.False);
+        vm.ToggleFileCommentsSectionCommand.Execute(null);
+        Assert.That(vm.IsFileCommentsSectionExpanded, Is.True);
+        vm.ToggleFileCommentsSectionCommand.Execute(null);
+        Assert.That(vm.IsFileCommentsSectionExpanded, Is.False);
+    }
+
+    [Test]
+    public async Task OpenSelectedThreadInSidebar_SwitchesPresentation()
+    {
+        var (vm, _, _) = await CreateOpenDiffSessionAsync();
+        vm.BeginLineCommentCommand.Execute(new LineCommentRequest(DiffSide.New, 1, null));
+        vm.NewCommentBody = "line note";
+        await vm.AddCommentCommand.ExecuteAsync(null);
+        await WaitUntilAsync(() => vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Any());
+
+        vm.SelectedAnnotation = vm.DiffAnnotations.OfType<ReviewThreadAnnotation>().Single();
+        Assert.That(vm.HasExpandedInlineThread, Is.True);
+        Assert.That(vm.ShowSideThreadPanel, Is.False);
+
+        vm.OpenSelectedThreadInSidebarCommand.Execute(null);
+
+        Assert.That(vm.ForceSideThreadPanel, Is.True);
+        Assert.That(vm.HasExpandedInlineThread, Is.False);
+        Assert.That(vm.ShowSideThreadPanel, Is.True);
+        Assert.That(vm.SelectedThread, Is.Not.Null);
+    }
+
+    [Test]
+    public async Task BeginFileComment_ClearsMentionTargetsReply()
+    {
+        var (vm, _, _) = await CreateOpenDiffSessionAsync();
+        vm.MentionTargetsReply = true;
+        vm.BeginFileCommentCommand.Execute(null);
+        Assert.That(vm.MentionTargetsReply, Is.False);
+    }
+
+    [Test]
+    public async Task ToggleUnplaceableSection_ExpandsAndCollapses()
+    {
+        var (vm, _, _) = await CreateOpenDiffSessionAsync();
+        Assert.That(vm.IsUnplaceableSectionExpanded, Is.False);
+        vm.ToggleUnplaceableSectionCommand.Execute(null);
+        Assert.That(vm.IsUnplaceableSectionExpanded, Is.True);
+        vm.ToggleUnplaceableSectionCommand.Execute(null);
+        Assert.That(vm.IsUnplaceableSectionExpanded, Is.False);
+    }
+
+    private static async Task<(ReviewViewModel Vm, IReviewCommentService Comments, ReviewSession Session)>
+        CreateOpenDiffSessionAsync(IReadOnlyList<ReviewThread>? initialThreads = null)
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var path = FilePath.From("src/a.cs");
+        var content = ContentId.FromSha(new string('c', 40));
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            [(path, ChangeKind.Modified)]);
+
+        var hunk = new DiffHunk(
+            OldStart: 1, OldCount: 1, NewStart: 1, NewCount: 1,
+            Header: "@@ -1,1 +1,1 @@",
+            Lines:
+            [
+                new DiffLine(DiffLineKind.Removed, 1, null, "old\n".AsMemory()),
+                new DiffLine(DiffLineKind.Added, null, 1, "new\n".AsMemory()),
+            ]);
+        var fileDiff = new FileDiff(
+            new DiffScope.Revisions(CommitId.FromSha(sha), CommitId.FromSha(sha)),
+            path, path, ChangeKind.Modified,
+            content, content, false, [hunk], "");
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+                Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+        reviewService.GetDiffAsync(session, path, Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+            .Returns(fileDiff);
+
+        var threads = initialThreads ?? [];
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns(_ => threads);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+        comments.ResolveAnchorsAsync(
+                session,
+                Arg.Any<IReadOnlyList<ReviewThread>>(),
+                path,
+                Arg.Any<FileDiff>(),
+                Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var incoming = ci.ArgAt<IReadOnlyList<ReviewThread>>(1);
+                return incoming
+                    .Where(t => string.Equals(t.Path, path.Value, StringComparison.Ordinal))
+                    .Select(t =>
+                    {
+                        if (t.IsFileLevel || t.IsUnplaceable || t.Anchor is not null || t.Line is null)
+                            return t;
+                        return t with
+                        {
+                            Side = DiffSide.New,
+                            Anchor = new AnnotationRange(
+                                new DiffAnchor(DiffSide.New, content, t.Line.Value),
+                                new DiffAnchor(DiffSide.New, content, t.Line.Value)),
+                        };
+                    })
+                    .ToList();
+            });
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { PullRequestFileListLayout = FileListLayoutMode.Flat });
+
+        var vm = CreateViewModel(pullRequests, settings, reviewService, comments, outbox, durable);
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+        await WaitUntilAsync(() => vm.SelectedFile is not null && !vm.IsLoadingDiff);
+        return (vm, comments, session);
     }
 
     private static async Task<(ReviewViewModel Vm, IReviewCommentService Comments, ReviewSession Session)>

@@ -298,6 +298,110 @@ public sealed class ReviewOutboxTests
     }
 
     [Test]
+    public async Task ReplyComment_UsesThreadReplyMutation()
+    {
+        string? requestBody = null;
+        var services = BuildServices(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            using var doc = JsonDocument.Parse(body);
+            var query = doc.RootElement.GetProperty("query").GetString() ?? "";
+            if (query.Contains("addPullRequestReviewThreadReply", StringComparison.Ordinal))
+                requestBody = body;
+            return MutationSuccess(query);
+        });
+        await using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IDurableUserStore>().EnsureSchema();
+
+        var executor = provider.GetRequiredService<ReviewMutationExecutor>();
+        var entry = new OutboxEntry(
+            Guid.NewGuid().ToString("N"),
+            "github.com",
+            "dev",
+            "PR_NODE",
+            OutboxKind.ReplyComment,
+            JsonSerializer.Serialize(new OutboxPayloadEnvelope<ReplyCommentPayload>(
+                "acme",
+                "demo",
+                1,
+                new ReplyCommentPayload(Guid.NewGuid().ToString("N"), "TH_1", "thanks")), ReviewJson.Options),
+            DateTimeOffset.UtcNow,
+            0,
+            null,
+            OutboxState.Pending);
+
+        await executor.ExecuteOutboxEntryAsync(entry, CancellationToken.None);
+
+        Assert.That(requestBody, Is.Not.Null);
+        using var parsed = JsonDocument.Parse(requestBody!);
+        Assert.That(
+            parsed.RootElement.GetProperty("query").GetString(),
+            Does.Contain("addPullRequestReviewThreadReply"));
+        var input = parsed.RootElement.GetProperty("variables").GetProperty("input");
+        Assert.That(input.GetProperty("pullRequestReviewThreadId").GetString(), Is.EqualTo("TH_1"));
+        Assert.That(input.GetProperty("body").GetString(), Is.EqualTo("thanks"));
+        Assert.That(input.GetProperty("pullRequestReviewId").GetString(), Is.EqualTo("RV_1"));
+        Assert.That(input.TryGetProperty("inReplyTo", out _), Is.False);
+    }
+
+    [Test]
+    public async Task AddComment_FileLevel_SendsSubjectTypeFileAndOmitsLine()
+    {
+        string? requestBody = null;
+        var services = BuildServices(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            using var doc = JsonDocument.Parse(body);
+            var query = doc.RootElement.GetProperty("query").GetString() ?? "";
+            if (query.Contains("addPullRequestReviewThread", StringComparison.Ordinal) &&
+                !query.Contains("addPullRequestReviewThreadReply", StringComparison.Ordinal))
+            {
+                requestBody = body;
+            }
+
+            return MutationSuccess(query);
+        });
+        await using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<IDurableUserStore>().EnsureSchema();
+
+        var executor = provider.GetRequiredService<ReviewMutationExecutor>();
+        var entry = new OutboxEntry(
+            Guid.NewGuid().ToString("N"),
+            "github.com",
+            "dev",
+            "PR_NODE",
+            OutboxKind.AddComment,
+            JsonSerializer.Serialize(new OutboxPayloadEnvelope<AddCommentPayload>(
+                "acme",
+                "demo",
+                1,
+                new AddCommentPayload(
+                    Guid.NewGuid().ToString("N"),
+                    "src/a.cs",
+                    Line: null,
+                    StartLine: null,
+                    Side: "RIGHT",
+                    Body: "file note",
+                    HeadSha: "deadbeef")), ReviewJson.Options),
+            DateTimeOffset.UtcNow,
+            0,
+            null,
+            OutboxState.Pending);
+
+        await executor.ExecuteOutboxEntryAsync(entry, CancellationToken.None);
+
+        Assert.That(requestBody, Is.Not.Null);
+        using var parsed = JsonDocument.Parse(requestBody!);
+        var input = parsed.RootElement.GetProperty("variables").GetProperty("input");
+        Assert.That(input.GetProperty("subjectType").GetString(), Is.EqualTo("FILE"));
+        Assert.That(input.GetProperty("path").GetString(), Is.EqualTo("src/a.cs"));
+        Assert.That(input.GetProperty("body").GetString(), Is.EqualTo("file note"));
+        Assert.That(input.TryGetProperty("line", out _), Is.False);
+        Assert.That(input.TryGetProperty("side", out _), Is.False);
+        Assert.That(input.TryGetProperty("startLine", out _), Is.False);
+    }
+
+    [Test]
     public async Task EnqueueAsync_PermanentGraphQlFailure_ThrowsAndMarksFailed()
     {
         var services = BuildServices(_ => JsonOk("""
