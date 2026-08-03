@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
+using CodeReviewr.App.Diagnostics;
 using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.App.Views;
@@ -15,6 +16,7 @@ namespace CodeReviewr.App;
 public partial class App : Application
 {
     public static IServiceProvider Services { get; private set; } = null!;
+    private static IDisposable? _otel;
 
     public override void Initialize()
     {
@@ -23,6 +25,7 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
+        _otel = OpenTelemetryBootstrap.StartIfConfigured();
         Services = ServiceConfiguration.Build();
 
         var settings = Services.GetRequiredService<ISettingsStore>();
@@ -59,6 +62,12 @@ public partial class App : Application
 
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            desktop.Exit += (_, _) =>
+            {
+                _otel?.Dispose();
+                _otel = null;
+            };
+
             if (gitError is not null)
             {
                 desktop.MainWindow = new GitMissingWindow(gitError);

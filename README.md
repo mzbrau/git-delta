@@ -37,6 +37,16 @@ dotnet test src/CodeReviewr.slnx
 dotnet run --project src/CodeReviewr.App
 ```
 
+### Observability (Aspire)
+
+For local traces and metrics (diff load/present/project, paint duration), run the Aspire AppHost — it starts the desktop app and the Aspire dashboard:
+
+```bash
+dotnet run --project src/CodeReviewr.AppHost
+```
+
+OpenTelemetry export is enabled only when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (Aspire injects this). Normal `dotnet run --project src/CodeReviewr.App` does not require Aspire.
+
 ### Solution layout
 
 | Project | Role |
@@ -48,6 +58,7 @@ dotnet run --project src/CodeReviewr.App
 | `CodeReviewr.Persistence` | OS token stores, SQLite durable user data / outbox / cache |
 | `CodeReviewr.Review` | PR session orchestration, comments, `IReviewTree` |
 | `CodeReviewr.App` | Avalonia UI, custom diff control, DI composition root |
+| `CodeReviewr.AppHost` | Dev-only Aspire host for reviewing OTLP traces/metrics |
 
 Phase 3 AI reads revision-pinned trees via `IReviewTree` and overlays results through `IDiffAnnotationSource` / `IAIReviewService` — never mutating cached `FileDiff`s.
 

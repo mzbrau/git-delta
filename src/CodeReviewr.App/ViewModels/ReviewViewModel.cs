@@ -3,11 +3,13 @@ using System.Diagnostics;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CodeReviewr.App.Collections;
 using CodeReviewr.App.Controls;
 using CodeReviewr.App.Services;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
 using CodeReviewr.Core.AI;
+using CodeReviewr.Core.Diagnostics;
 using CodeReviewr.Core.Diff;
 using CodeReviewr.Diff;
 using CodeReviewr.GitHub;
@@ -96,7 +98,7 @@ public partial class ReviewViewModel : ObservableObject
     public ObservableCollection<FileItemViewModel> PrFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> FilteredPrFiles { get; } = [];
     public ObservableCollection<FileListEntry> PrFileEntries { get; } = [];
-    public ObservableCollection<DiffRow> DiffRows { get; } = [];
+    public ResettableObservableCollection<DiffRow> DiffRows { get; } = new();
     public ObservableCollection<ReviewThreadViewModel> Threads { get; } = [];
     public ObservableCollection<ReviewThread> UnplaceableThreads { get; } = [];
     public ObservableCollection<ReviewThread> FileLevelThreads { get; } = [];
@@ -3055,10 +3057,38 @@ public partial class ReviewViewModel : ObservableObject
         await InvokeOnUiAsync(() => IsLoadingDiff = true);
         try
         {
+            using var loadActivity = CodeReviewrActivity.Source.StartActivity("diff.load");
+            loadActivity?.SetTag("diff.path", file.Path.Value);
+            loadActivity?.SetTag("diff.view_mode", ViewMode.ToString());
+
             var options = BuildDiffOptions();
             var diff = await _reviewService
                 .GetDiffAsync(_session, file.Path, options, ct)
                 .ConfigureAwait(false);
+
+            ct.ThrowIfCancellationRequested();
+
+            // Enrich + project off the UI thread; only marshals a single DiffRows.Reset.
+            var viewMode = ViewMode;
+            var showFullFile = ShowFullFile;
+            IReadOnlyList<DiffRow> rows;
+            FileDiff enriched;
+            using (var presentActivity = CodeReviewrActivity.Source.StartActivity("diff.present"))
+            using (var projectActivity = CodeReviewrActivity.Source.StartActivity("diff.project"))
+            {
+                var presentSw = Stopwatch.StartNew();
+                var projectSw = Stopwatch.StartNew();
+                (enriched, rows) = await Task.Run(() =>
+                {
+                    var withIntra = EnsureIntraLine(diff);
+                    var projected = BuildProjectedRows(withIntra, viewMode, showFullFile);
+                    return (withIntra, projected);
+                }, ct).ConfigureAwait(false);
+                CodeReviewrMeters.DiffProjectMs.Record(projectSw.Elapsed.TotalMilliseconds);
+                projectActivity?.SetTag("diff.row_count", rows.Count);
+                presentActivity?.SetTag("diff.row_count", rows.Count);
+                CodeReviewrMeters.DiffPresentMs.Record(presentSw.Elapsed.TotalMilliseconds);
+            }
 
             ct.ThrowIfCancellationRequested();
 
@@ -3068,12 +3098,16 @@ public partial class ReviewViewModel : ObservableObject
                 if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
                     return;
 
-                _currentDiff = ApplyIntraLine(diff);
+                _currentDiff = enriched;
                 UpdateDiffStats(_currentDiff);
-                ProjectRows(_currentDiff);
+                DiffRows.Reset(rows);
                 DiffEmptyMessage = DiffRows.Count == 0 ? "No differences" : "";
+                // Content is on screen; clear spinner before syntax/annotations finish.
+                IsLoadingDiff = false;
                 NotifyMarkdownPreviewStateChanged();
             });
+
+            loadActivity?.SetTag("diff.row_count", rows.Count);
 
             if (!ReferenceEquals(_diffCts, cts) || ct.IsCancellationRequested)
                 return;
@@ -3375,6 +3409,9 @@ public partial class ReviewViewModel : ObservableObject
 
     private async Task LoadSyntaxTokensAsync(FileItemViewModel file, FileDiff diff, CancellationToken ct)
     {
+        using var activity = CodeReviewrActivity.Source.StartActivity("diff.syntax");
+        activity?.SetTag("diff.path", file.Path.Value);
+
         if (_syntaxTokens is null || _session is null)
         {
             await InvokeOnUiAsync(() =>
@@ -3451,41 +3488,44 @@ public partial class ReviewViewModel : ObservableObject
         return baseOptions;
     }
 
-    private FileDiff ApplyIntraLine(FileDiff diff)
+    private FileDiff EnsureIntraLine(FileDiff diff)
     {
-        var hunks = new List<DiffHunk>(diff.Hunks.Count);
-        foreach (var h in diff.Hunks)
-        {
-            var lines = h.Lines.ToList();
-            for (var i = 0; i < lines.Count; i++)
-            {
-                if (lines[i].Kind != DiffLineKind.Removed) continue;
-                var j = i + 1;
-                while (j < lines.Count && lines[j].Kind == DiffLineKind.Removed) j++;
-                if (j < lines.Count && lines[j].Kind == DiffLineKind.Added)
-                {
-                    var (oldSpans, newSpans) = _intraLine.Diff(lines[i].Text.Span, lines[j].Text.Span);
-                    lines[i] = lines[i] with { IntraLine = oldSpans };
-                    lines[j] = lines[j] with { IntraLine = newSpans };
-                }
-            }
+        if (HasAnyIntraLineSpans(diff))
+            return diff;
+        return IntraLineEnricher.Enrich(diff, _intraLine);
+    }
 
-            hunks.Add(h with { Lines = lines });
+    private static bool HasAnyIntraLineSpans(FileDiff diff)
+    {
+        foreach (var hunk in diff.Hunks)
+        {
+            foreach (var line in hunk.Lines)
+            {
+                if (line.IntraLine is not null)
+                    return true;
+            }
         }
 
-        return diff with { Hunks = hunks };
+        return false;
+    }
+
+    private IReadOnlyList<DiffRow> BuildProjectedRows(
+        FileDiff diff,
+        DiffViewMode viewMode,
+        bool showFullFile)
+    {
+        const int collapseThreshold = 8;
+        var threshold = showFullFile ? 0 : collapseThreshold;
+        ISet<(int HunkIndex, int LineIndexInHunk)> expanded = new HashSet<(int, int)>();
+        return viewMode == DiffViewMode.SideBySide
+            ? SideBySideRowProjector.Project(diff, threshold, _intraLine, expanded)
+            : UnifiedRowProjector.Project(diff, threshold, _intraLine, expanded);
     }
 
     private void ProjectRows(FileDiff diff)
     {
-        DiffRows.Clear();
-        const int collapseThreshold = 8;
-        var threshold = ShowFullFile ? 0 : collapseThreshold;
-        IReadOnlyList<DiffRow> rows = ViewMode == DiffViewMode.SideBySide
-            ? SideBySideRowProjector.Project(diff, threshold, _intraLine, new HashSet<(int, int)>())
-            : UnifiedRowProjector.Project(diff, threshold, _intraLine, new HashSet<(int, int)>());
-        foreach (var row in rows)
-            DiffRows.Add(row);
+        var rows = BuildProjectedRows(diff, ViewMode, ShowFullFile);
+        DiffRows.Reset(rows);
     }
 
     private void UpdateDiffStats(FileDiff? diff)

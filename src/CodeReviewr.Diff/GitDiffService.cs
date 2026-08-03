@@ -36,6 +36,10 @@ public sealed class GitDiffService : IGitDiffService
         DiffOptions options,
         CancellationToken ct = default)
     {
+        using var activity = CodeReviewrActivity.Source.StartActivity("git.diff");
+        activity?.SetTag("diff.path", path.Value);
+        activity?.SetTag("diff.scope", scope.ToString());
+
         var stopwatch = Stopwatch.StartNew();
         try
         {
@@ -44,8 +48,12 @@ public sealed class GitDiffService : IGitDiffService
 
             var key = new FileDiffKey(parsed.OldContent, parsed.NewContent, options);
             if (_cache.TryGet(key, out var cached) && cached is not null)
+            {
+                activity?.SetTag("diff.cache_hit", true);
                 return cached;
+            }
 
+            activity?.SetTag("diff.cache_hit", false);
             var enriched = _intraLineDiffer is null ? parsed : IntraLineEnricher.Enrich(parsed, _intraLineDiffer);
             _cache.Set(key, enriched);
             return enriched;

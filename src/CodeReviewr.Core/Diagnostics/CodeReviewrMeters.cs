@@ -17,6 +17,15 @@ public static class CodeReviewrMeters
     public static readonly Histogram<double> DiffGenerationMs =
         Meter.CreateHistogram<double>("diff.generation.duration_ms", "ms", "Diff generation duration");
 
+    public static readonly Histogram<double> DiffPresentMs =
+        Meter.CreateHistogram<double>("diff.present.duration_ms", "ms", "Diff present (enrich + project + bind) duration");
+
+    public static readonly Histogram<double> DiffProjectMs =
+        Meter.CreateHistogram<double>("diff.project.duration_ms", "ms", "Diff row projection duration");
+
+    public static readonly Histogram<double> DiffRenderMs =
+        Meter.CreateHistogram<double>("diff.render.duration_ms", "ms", "DiffViewer paint duration");
+
     public static readonly Histogram<double> StageMs =
         Meter.CreateHistogram<double>("stage.duration_ms", "ms", "Stage operation duration");
 
