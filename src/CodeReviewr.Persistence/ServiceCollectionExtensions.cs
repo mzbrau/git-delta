@@ -14,6 +14,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IOutboxStore>(sp => sp.GetRequiredService<IDurableUserStore>());
         services.AddSingleton<ILocalNotesStore>(sp => sp.GetRequiredService<IDurableUserStore>());
         services.AddSingleton<ILocalViewedStore>(sp => sp.GetRequiredService<IDurableUserStore>());
+        services.AddSingleton<IAiResultStore, SqliteAiResultStore>();
         return services;
     }
 }

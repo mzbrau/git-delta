@@ -4,7 +4,7 @@ namespace CodeReviewr.Persistence;
 
 public sealed class SqliteDurableUserStore : IDurableUserStore
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     private readonly string _connectionString;
     private SqliteConnection? _connection;
@@ -45,6 +45,12 @@ public sealed class SqliteDurableUserStore : IDurableUserStore
         {
             ApplyMigrationV2(connection);
             SchemaVersion = 2;
+        }
+
+        if (SchemaVersion < 3)
+        {
+            ApplyMigrationV3(connection);
+            SchemaVersion = 3;
         }
     }
 
@@ -383,6 +389,84 @@ public sealed class SqliteDurableUserStore : IDurableUserStore
                 PRIMARY KEY (pr_node_id, path)
             );
             INSERT INTO schema_migrations (version) VALUES (2);
+            """;
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void ApplyMigrationV3(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS ai_runs (
+                id TEXT NOT NULL PRIMARY KEY,
+                pr_node_id TEXT NOT NULL,
+                head_sha TEXT NOT NULL,
+                merge_base_sha TEXT NOT NULL,
+                copilot_session_id TEXT,
+                state TEXT NOT NULL,
+                turns_used INTEGER NOT NULL DEFAULT 0,
+                ad_hoc_instructions TEXT,
+                cache_key TEXT NOT NULL,
+                error_message TEXT,
+                started_utc TEXT NOT NULL,
+                finished_utc TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_runs_pr_node_id ON ai_runs(pr_node_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_runs_cache_key ON ai_runs(cache_key);
+
+            CREATE TABLE IF NOT EXISTS ai_pr_results (
+                run_id TEXT NOT NULL PRIMARY KEY,
+                pr_node_id TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                updated_utc TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_pr_results_cache_key ON ai_pr_results(cache_key);
+            CREATE INDEX IF NOT EXISTS idx_ai_pr_results_pr_node_id ON ai_pr_results(pr_node_id);
+
+            CREATE TABLE IF NOT EXISTS ai_file_results (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                pr_node_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                classification TEXT,
+                priority_stars INTEGER NOT NULL DEFAULT 0,
+                guidance TEXT,
+                summary_json TEXT,
+                updated_utc TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_file_results_cache_key ON ai_file_results(cache_key);
+            CREATE INDEX IF NOT EXISTS idx_ai_file_results_run_id ON ai_file_results(run_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_file_results_pr_node_id ON ai_file_results(pr_node_id);
+
+            CREATE TABLE IF NOT EXISTS ai_annotations (
+                id TEXT NOT NULL PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                pr_node_id TEXT NOT NULL,
+                path TEXT NOT NULL,
+                blob_oid TEXT NOT NULL,
+                start_line INTEGER NOT NULL,
+                end_line INTEGER NOT NULL,
+                side TEXT NOT NULL,
+                severity TEXT NOT NULL,
+                body TEXT NOT NULL,
+                read_state TEXT NOT NULL,
+                updated_utc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_annotations_pr_node_id ON ai_annotations(pr_node_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_annotations_run_id ON ai_annotations(run_id);
+
+            CREATE TABLE IF NOT EXISTS ai_chat_messages (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                pr_node_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp_utc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_pr_node_id ON ai_chat_messages(pr_node_id);
+
+            INSERT INTO schema_migrations (version) VALUES (3);
             """;
         cmd.ExecuteNonQuery();
     }

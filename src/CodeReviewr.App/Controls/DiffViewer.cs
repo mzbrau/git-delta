@@ -8,6 +8,7 @@ using Avalonia.Controls;
 using Avalonia.Data;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
 using CodeReviewr.App.ViewModels;
@@ -20,9 +21,20 @@ namespace CodeReviewr.App.Controls;
 /// <summary>Purpose-built virtualized diff control. Fixed row height; paints O(viewport).</summary>
 public sealed class DiffViewer : Control
 {
+    private readonly SelectableTextBlock _emptyMessage;
+
     public DiffViewer()
     {
         ClipToBounds = true;
+        _emptyMessage = new SelectableTextBlock
+        {
+            Margin = new Thickness(MinimapWidth + 16, 16, 16, 16),
+            TextWrapping = TextWrapping.Wrap,
+            IsVisible = false,
+        };
+        LogicalChildren.Add(_emptyMessage);
+        VisualChildren.Add(_emptyMessage);
+        UpdateEmptyMessage();
     }
 
     public static readonly StyledProperty<IReadOnlyList<DiffRow>?> RowsProperty =
@@ -102,18 +114,23 @@ public sealed class DiffViewer : Control
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
 
-    /// <summary>Subsampled minimap marks — one entry per vertical pixel, rebuilt when rows/mode/height change.</summary>
+    /// <summary>Subsampled minimap marks — one entry per vertical pixel, rebuilt when rows/mode/height/annotations change.</summary>
     private sealed class MinimapSnapshot(
         object rowsIdentity,
+        object annotationsIdentity,
         DiffViewMode mode,
         int heightPx,
-        byte[] marks)
+        byte[] marks,
+        byte[] commentMarks)
     {
         public object RowsIdentity { get; } = rowsIdentity;
+        public object AnnotationsIdentity { get; } = annotationsIdentity;
         public DiffViewMode Mode { get; } = mode;
         public int HeightPx { get; } = heightPx;
         /// <summary>0=none, 1=added, 2=removed, 3=both (side-by-side).</summary>
         public byte[] Marks { get; } = marks;
+        /// <summary>0=none, 1=primary thread/pending, 2=AI, 3=muted (outdated/dismissed).</summary>
+        public byte[] CommentMarks { get; } = commentMarks;
     }
 
     private enum HunkButtonAction { Stage, Unstage, Discard }
@@ -273,6 +290,7 @@ public sealed class DiffViewer : Control
             _hoverAddComment = false;
             _scrollY = 0;
             _minimapSnapshot = null;
+            UpdateEmptyMessage();
             InvalidateVisual();
             InvalidateMeasure();
         }
@@ -280,10 +298,15 @@ public sealed class DiffViewer : Control
         {
             DetachAnnotationsNotify();
             AttachAnnotationsNotify(change.NewValue as INotifyCollectionChanged);
+            _minimapSnapshot = null;
+            InvalidateVisual();
+        }
+        else if (change.Property == EmptyMessageProperty)
+        {
+            UpdateEmptyMessage();
             InvalidateVisual();
         }
         else if (change.Property == ViewModeProperty || change.Property == RowHeightProperty
-                 || change.Property == EmptyMessageProperty
                  || change.Property == CanStageLinesProperty
                  || change.Property == CanUnstageLinesProperty
                  || change.Property == CanDiscardLinesProperty
@@ -293,6 +316,17 @@ public sealed class DiffViewer : Control
         {
             ClampScroll();
             InvalidateVisual();
+        }
+    }
+
+    private void UpdateEmptyMessage()
+    {
+        var empty = Rows is null || Rows.Count == 0;
+        _emptyMessage.IsVisible = empty;
+        if (empty)
+        {
+            _emptyMessage.Text = EmptyMessage;
+            _emptyMessage.Foreground = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
         }
     }
 
@@ -351,6 +385,7 @@ public sealed class DiffViewer : Control
     private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         _minimapSnapshot = null;
+        UpdateEmptyMessage();
         ClampScroll();
         InvalidateVisual();
         InvalidateMeasure();
@@ -370,14 +405,39 @@ public sealed class DiffViewer : Control
         _annotationsNotify = null;
     }
 
-    private void OnAnnotationsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+    private void OnAnnotationsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        _minimapSnapshot = null;
         InvalidateVisual();
+    }
 
     protected override Size MeasureOverride(Size availableSize)
     {
         var width = double.IsInfinity(availableSize.Width) ? 0 : availableSize.Width;
         var height = double.IsInfinity(availableSize.Height) ? 0 : availableSize.Height;
+        if (_emptyMessage.IsVisible)
+            _emptyMessage.Measure(new Size(Math.Max(0, width - MinimapWidth - 32), height));
         return new Size(width, height);
+    }
+
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        if (_emptyMessage.IsVisible)
+        {
+            var margin = _emptyMessage.Margin;
+            var rect = new Rect(
+                margin.Left,
+                margin.Top,
+                Math.Max(0, finalSize.Width - margin.Left - margin.Right),
+                Math.Max(0, finalSize.Height - margin.Top - margin.Bottom));
+            _emptyMessage.Arrange(rect);
+        }
+        else
+        {
+            _emptyMessage.Arrange(default);
+        }
+
+        return finalSize;
     }
 
     public IReadOnlyList<LineSelection> GetSelectedLineSelections()
@@ -408,10 +468,7 @@ public sealed class DiffViewer : Control
         context.FillRectangle(bg, new Rect(bounds.Size));
 
         if (rows is null || rows.Count == 0)
-        {
-            DrawText(context, EmptyMessage, MinimapWidth + 16, 16, Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray));
             return;
-        }
 
         var contentLeft = MinimapWidth;
         var contentWidth = Math.Max(0, bounds.Width - contentLeft);
@@ -577,6 +634,8 @@ public sealed class DiffViewer : Control
         var markerBrush = Brush("ForgePrimaryBrush", Brushes.SteelBlue);
         var outdatedBrush = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
         var selectedBrush = Brush("ForgeSecondaryBrush", Brushes.Orange);
+        var aiBrush = Brush("ForgeAiAccentBrush", Brushes.MediumPurple);
+        var aiDismissedBrush = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
 
         foreach (var annotation in annotations)
         {
@@ -592,7 +651,9 @@ public sealed class DiffViewer : Control
             var isOutdated = annotation is ReviewThreadAnnotation { IsOutdated: true };
             var fill = SelectedAnnotation == annotation
                 ? selectedBrush
-                : isOutdated ? outdatedBrush : markerBrush;
+                : annotation is AiLineAnnotation ai
+                    ? (ai.IsDismissed ? aiDismissedBrush : aiBrush)
+                    : isOutdated ? outdatedBrush : markerBrush;
 
             var dot = new Rect(
                 laneX + 2,
@@ -812,6 +873,22 @@ public sealed class DiffViewer : Control
                 context.FillRectangle(removed, markRect);
         }
 
+        var primaryComment = Brush("ForgePrimaryBrush", Brushes.SteelBlue);
+        var aiComment = Brush("ForgeAiAccentBrush", Brushes.MediumPurple);
+        var mutedComment = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
+        for (var y = 0; y < snapshot.CommentMarks.Length; y++)
+        {
+            var kind = snapshot.CommentMarks[y];
+            if (kind == 0) continue;
+            var brush = kind switch
+            {
+                2 => aiComment,
+                3 => mutedComment,
+                _ => primaryComment,
+            };
+            context.FillRectangle(brush, new Rect(1, y, MinimapWidth - 2, 1));
+        }
+
         var contentHeight = Math.Max(1, TotalContentHeight(Math.Max(1, rows.Count)));
         if (contentHeight <= 0) return;
         var viewportRatio = Math.Clamp(bounds.Height / contentHeight, 0, 1);
@@ -829,15 +906,19 @@ public sealed class DiffViewer : Control
 
     private MinimapSnapshot EnsureMinimapSnapshot(IReadOnlyList<DiffRow> rows, DiffViewMode mode, int heightPx)
     {
+        var annotations = Annotations;
+        var annotationsIdentity = annotations as object ?? Array.Empty<IDiffAnnotation>();
         if (_minimapSnapshot is { } cached
             && ReferenceEquals(cached.RowsIdentity, rows)
             && cached.Mode == mode
-            && cached.HeightPx == heightPx)
+            && cached.HeightPx == heightPx
+            && ReferenceEquals(cached.AnnotationsIdentity, annotationsIdentity))
         {
             return cached;
         }
 
         var marks = new byte[heightPx];
+        var commentMarks = new byte[heightPx];
         var total = Math.Max(1, rows.Count);
         for (var y = 0; y < heightPx; y++)
         {
@@ -860,7 +941,45 @@ public sealed class DiffViewer : Control
                 marks[y] = 2;
         }
 
-        _minimapSnapshot = new MinimapSnapshot(rows, mode, heightPx, marks);
+        if (annotations is { Count: > 0 })
+        {
+            var oldLineToRow = new Dictionary<int, int>();
+            var newLineToRow = new Dictionary<int, int>();
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var row = rows[i];
+                if (row.OldLineNumber is { } oldLine)
+                    oldLineToRow.TryAdd(oldLine, i);
+                if (row.NewLineNumber is { } newLine)
+                    newLineToRow.TryAdd(newLine, i);
+            }
+
+            foreach (var annotation in annotations)
+            {
+                var range = annotation.Range;
+                var side = range.Start.Side;
+                var markerLine = range.End.Line;
+                var rowIndex = side == DiffSide.Old
+                    ? oldLineToRow.GetValueOrDefault(markerLine, -1)
+                    : newLineToRow.GetValueOrDefault(markerLine, -1);
+                if (rowIndex < 0)
+                    continue;
+
+                var y = Math.Min(heightPx - 1, (int)((long)rowIndex * heightPx / total));
+                byte kind = annotation switch
+                {
+                    AiLineAnnotation { IsDismissed: true } => 3,
+                    AiLineAnnotation => 2,
+                    ReviewThreadAnnotation { IsOutdated: true } => 3,
+                    _ => 1,
+                };
+                // Prefer active AI / primary over muted when multiple map to the same pixel.
+                if (commentMarks[y] == 0 || kind < commentMarks[y])
+                    commentMarks[y] = kind;
+            }
+        }
+
+        _minimapSnapshot = new MinimapSnapshot(rows, annotationsIdentity, mode, heightPx, marks, commentMarks);
         return _minimapSnapshot;
     }
 

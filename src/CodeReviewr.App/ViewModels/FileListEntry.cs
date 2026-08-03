@@ -64,6 +64,12 @@ public static class FileListLayoutHelper
             return;
         }
 
+        if (mode == FileListLayoutMode.AiSuggested)
+        {
+            RebuildAiSuggested(target, files, flatUsesFullPath, expandState);
+            return;
+        }
+
         var byPath = files.ToDictionary(f => f.Path.Value, StringComparer.Ordinal);
         var roots = FileTreeBuilder.Build(byPath.Keys);
         var flat = new List<(FileTreeNode Node, int Depth)>();
@@ -83,6 +89,48 @@ public static class FileListLayoutHelper
             {
                 target.Add(new FileListEntry(depth, file.Name, file));
             }
+        }
+    }
+
+    /// <summary>Folder key for the collapsible "Skip" group at the bottom of the AI-suggested layout.</summary>
+    public const string AiSkipFolderKey = "__ai_skip__";
+
+    private static void RebuildAiSuggested(
+        ObservableCollection<FileListEntry> target,
+        IReadOnlyList<FileItemViewModel> files,
+        bool flatUsesFullPath,
+        IDictionary<string, bool> expandState)
+    {
+        var ordered = files
+            .OrderByDescending(f => f.AiPriorityStars)
+            .ThenBy(f => f.Path.Value, StringComparer.Ordinal)
+            .ToList();
+
+        var normal = ordered.Where(f => !f.IsAiSkip).ToList();
+        var skip = ordered.Where(f => f.IsAiSkip).ToList();
+
+        foreach (var file in normal)
+        {
+            var label = flatUsesFullPath ? file.Path.Value : file.Name;
+            target.Add(new FileListEntry(0, label, file));
+        }
+
+        if (skip.Count == 0)
+            return;
+
+        // Skip group defaults to collapsed (unlike tree folders, which default expanded).
+        if (!expandState.ContainsKey(AiSkipFolderKey))
+            expandState[AiSkipFolderKey] = false;
+        var expanded = IsExpanded(expandState, AiSkipFolderKey);
+
+        target.Add(new FileListEntry(0, $"Skip ({skip.Count})", AiSkipFolderKey, expanded));
+        if (!expanded)
+            return;
+
+        foreach (var file in skip)
+        {
+            var label = flatUsesFullPath ? file.Path.Value : file.Name;
+            target.Add(new FileListEntry(1, label, file));
         }
     }
 

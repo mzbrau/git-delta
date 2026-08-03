@@ -35,7 +35,7 @@ internal static class MarkdownRenderer
                 Background = Brush("ForgeOutlineVariantBrush", Brushes.Gray),
             },
             LeafBlock { Inline: not null } leaf => CreateInlines(leaf.Inline, TextWrapping.Wrap),
-            _ => new TextBlock(),
+            _ => new SelectableTextBlock(),
         };
 
     private static Control CreateList(ListBlock list)
@@ -48,7 +48,7 @@ internal static class MarkdownRenderer
                 continue;
 
             var prefix = list.IsOrdered ? $"{index++}. " : "• ";
-            var marker = new TextBlock
+            var marker = new SelectableTextBlock
             {
                 Text = prefix,
                 FontWeight = FontWeight.SemiBold,
@@ -80,7 +80,7 @@ internal static class MarkdownRenderer
                 panel.Children.Add(CreateInlines(paragraph.Inline, TextWrapping.Wrap));
                 break;
             case FencedCodeBlock code:
-                panel.Children.Add(new TextBlock
+                panel.Children.Add(new SelectableTextBlock
                 {
                     Text = code.Lines.ToString(),
                     FontFamily = MonoFont(),
@@ -111,7 +111,7 @@ internal static class MarkdownRenderer
             Background = Brush("ForgeSurfaceContainerHighBrush", Brushes.DimGray),
             Padding = new Thickness(8),
             CornerRadius = new CornerRadius(4),
-            Child = new TextBlock
+            Child = new SelectableTextBlock
             {
                 Text = code.Lines.ToString(),
                 FontFamily = MonoFont(),
@@ -119,12 +119,13 @@ internal static class MarkdownRenderer
             },
         };
 
-    private static TextBlock CreateInlines(MdInline? inline, TextWrapping wrapping, double fontSize = 13)
+    private static SelectableTextBlock CreateInlines(MdInline? inline, TextWrapping wrapping, double fontSize = 13)
     {
-        var textBlock = new TextBlock
+        var textBlock = new SelectableTextBlock
         {
             TextWrapping = wrapping,
             FontSize = fontSize,
+            LineHeight = fontSize * 1.45,
             Foreground = Brush("ForgeOnSurfaceBrush", Brushes.White),
         };
 

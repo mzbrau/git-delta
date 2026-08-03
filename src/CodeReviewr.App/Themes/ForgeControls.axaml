@@ -33,6 +33,10 @@
     <Setter Property="FontWeight" Value="Bold" />
   </Style>
 
+  <Style Selector="TextBlock.PrFileLabel.AiSkip">
+    <Setter Property="Opacity" Value="0.55" />
+  </Style>
+
   <Style Selector="Button.Ghost">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="Transparent" />

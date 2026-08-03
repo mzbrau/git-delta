@@ -9,7 +9,7 @@ public sealed class MarkdownView : UserControl
     public static readonly StyledProperty<string?> MarkdownProperty =
         AvaloniaProperty.Register<MarkdownView, string?>(nameof(Markdown));
 
-    private readonly StackPanel _root = new() { Spacing = 6 };
+    private readonly StackPanel _root = new() { Spacing = 10 };
 
     public MarkdownView()
     {

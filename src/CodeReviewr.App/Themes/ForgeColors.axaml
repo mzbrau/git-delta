@@ -51,6 +51,7 @@
       <Color x:Key="ForgeSettingsScrimColor">#990e0e0e</Color>
       <Color x:Key="ForgeMinimapTrackColor">#1A9ba1a6</Color>
       <Color x:Key="ForgeMinimapViewportColor">#669ba1a6</Color>
+      <Color x:Key="ForgeAiAccentColor">#5eead4</Color>
 
       <SolidColorBrush x:Key="ForgeBackgroundBrush" Color="{StaticResource ForgeBackgroundColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceContainerLowestBrush" Color="{StaticResource ForgeSurfaceContainerLowestColor}" />
@@ -92,6 +93,8 @@
       <SolidColorBrush x:Key="ForgeStatusDeletedBadgeBgBrush" Color="#1Affb4ab" />
       <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1A4ade80" />
       <SolidColorBrush x:Key="ForgeStatusUntrackedBadgeBgBrush" Color="#2d2d2d" />
+      <SolidColorBrush x:Key="ForgeAiAccentBrush" Color="{StaticResource ForgeAiAccentColor}" />
+      <SolidColorBrush x:Key="ForgeAiAccentBadgeBgBrush" Color="#1A5eead4" />
     </ResourceDictionary>
 
     <!-- Light (Obsidian cool gray + violet) -->
@@ -143,6 +146,7 @@
       <Color x:Key="ForgeSettingsScrimColor">#66191c1e</Color>
       <Color x:Key="ForgeMinimapTrackColor">#1A958e9a</Color>
       <Color x:Key="ForgeMinimapViewportColor">#66958e9a</Color>
+      <Color x:Key="ForgeAiAccentColor">#0d9488</Color>
 
       <SolidColorBrush x:Key="ForgeBackgroundBrush" Color="{StaticResource ForgeBackgroundColor}" />
       <SolidColorBrush x:Key="ForgeSurfaceContainerLowestBrush" Color="{StaticResource ForgeSurfaceContainerLowestColor}" />
@@ -184,6 +188,8 @@
       <SolidColorBrush x:Key="ForgeStatusDeletedBadgeBgBrush" Color="#1Aba1a1a" />
       <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1A22863a" />
       <SolidColorBrush x:Key="ForgeStatusUntrackedBadgeBgBrush" Color="#eceef0" />
+      <SolidColorBrush x:Key="ForgeAiAccentBrush" Color="{StaticResource ForgeAiAccentColor}" />
+      <SolidColorBrush x:Key="ForgeAiAccentBadgeBgBrush" Color="#1A0d9488" />
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
 </ResourceDictionary>

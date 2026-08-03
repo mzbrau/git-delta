@@ -1,0 +1,7 @@
+- Prioritize correctness, security, and maintainability over style.
+- Flag missing or inadequate tests for behavioural changes.
+- Treat any change to authentication, authorization, secrets, or data handling as at least Medium risk.
+- Call out breaking API changes explicitly.
+- Do not raise risk for purely cosmetic formatting or whitespace-only changes.
+- Prefer specific, actionable guidance over generic praise or criticism.
+- Prefer short headings and bullet points over dense paragraphs for summaries, guidance, annotation bodies, and file-summary fields — they are easier to read and digest.

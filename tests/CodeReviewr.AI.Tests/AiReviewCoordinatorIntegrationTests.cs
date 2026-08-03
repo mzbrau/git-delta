@@ -1,0 +1,413 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using CodeReviewr.AI.Agent;
+using CodeReviewr.Core;
+using CodeReviewr.Core.Abstractions;
+using CodeReviewr.Core.AI;
+using CodeReviewr.Core.Settings;
+using CodeReviewr.Git;
+using CodeReviewr.Persistence;
+using CodeReviewr.Review;
+using CodeReviewr.TestSupport;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using NUnit.Framework;
+
+namespace CodeReviewr.AI.Tests;
+
+/// <summary>
+/// End-to-end tests for <see cref="AiReviewCoordinator"/> wired through the real DI graph
+/// (<c>AddCodeReviewrAIWithFakeAgent</c>) with a <see cref="FakeAgentClient"/> standing in for the
+/// GitHub Copilot CLI, so persistence, caching, cancellation, and the custom-tool contract are all
+/// exercised without a live agent process.
+/// </summary>
+public sealed class AiReviewCoordinatorIntegrationTests
+{
+    private const string RepositoryKey = "owner/repo";
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() },
+    };
+
+    [Test]
+    public async Task StartReviewAsync_SubmitsTriage_PersistsRunPrAndFileResults()
+    {
+        await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.ForPrTriage(
+            ToJson(BuildTriage("Looks safe overall.", AiRiskLevel.Low, "src/App.cs"))));
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
+
+        var snapshot = await harness.Service.StartReviewAsync(request);
+
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Complete));
+        Assert.That(snapshot.Triage, Is.Not.Null);
+        Assert.That(snapshot.Triage!.Summary, Is.EqualTo("Looks safe overall."));
+        Assert.That(snapshot.Triage.Measured, Is.EqualTo(new AiMeasuredFacts(1, 5, 1)));
+
+        var run = await harness.Store.GetRunAsync(snapshot.RunId);
+        Assert.That(run, Is.Not.Null);
+        Assert.That(run!.State, Is.EqualTo(AiRunState.Complete));
+
+        var prResult = await harness.Store.GetPrResultForRunAsync(snapshot.RunId);
+        Assert.That(prResult, Is.Not.Null);
+        Assert.That(prResult!.PayloadJson, Does.Contain("Looks safe overall."));
+
+        var fileResults = await harness.Store.ListFileResultsForRunAsync(snapshot.RunId);
+        Assert.That(fileResults, Has.Count.EqualTo(1));
+        Assert.That(fileResults[0].Path, Is.EqualTo("src/App.cs"));
+    }
+
+    [Test]
+    public async Task GetCachedRunAsync_ReturnsCompletedTriage_WithoutCreatingAnyAgentSession()
+    {
+        var sessionCreations = 0;
+        await using var harness = await Harness.CreateAsync(_ =>
+        {
+            sessionCreations++;
+            return FakeAgentScript.ForPrTriage(ToJson(BuildTriage("First look.", AiRiskLevel.Medium, "src/App.cs")));
+        });
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 2, 0)]);
+        await harness.Service.StartReviewAsync(request);
+        Assert.That(sessionCreations, Is.EqualTo(1));
+
+        var cached = await harness.Service.GetCachedRunAsync("PR_1");
+
+        Assert.That(cached, Is.Not.Null);
+        Assert.That(cached!.Triage!.Summary, Is.EqualTo("First look."));
+        Assert.That(sessionCreations, Is.EqualTo(1), "GetCachedRunAsync must never touch the agent.");
+    }
+
+    [Test]
+    public async Task StartReviewAsync_SecondCallWithUnchangedRequest_ReturnsCachedResult_WithoutNewAgentSession()
+    {
+        var sessionCreations = 0;
+        await using var harness = await Harness.CreateAsync(_ =>
+        {
+            sessionCreations++;
+            return FakeAgentScript.ForPrTriage(ToJson(BuildTriage("Cached triage.", AiRiskLevel.Low, "src/App.cs")));
+        });
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 1, 0)]);
+
+        var first = await harness.Service.StartReviewAsync(request);
+        var second = await harness.Service.StartReviewAsync(request);
+
+        Assert.That(sessionCreations, Is.EqualTo(1));
+        Assert.That(second.RunId, Is.EqualTo(first.RunId));
+        Assert.That(second.State, Is.EqualTo(AiRunState.Complete));
+        Assert.That(second.Triage!.Summary, Is.EqualTo("Cached triage."));
+    }
+
+    [Test]
+    public async Task StartReviewAsync_ChangedHeadSha_MissesCacheAndRunsFreshTriage()
+    {
+        var scripts = new Queue<FakeAgentScript>(
+        [
+            FakeAgentScript.ForPrTriage(ToJson(BuildTriage("First pass.", AiRiskLevel.Low, "src/App.cs"))),
+            FakeAgentScript.ForPrTriage(ToJson(BuildTriage("Second pass.", AiRiskLevel.High, "src/App.cs"))),
+        ]);
+        await using var harness = await Harness.CreateAsync(_ => scripts.Dequeue(), addSecondCommit: true);
+
+        var sha1 = harness.Repo.RunGit("rev-parse", "HEAD~1").Trim();
+        var sha2 = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+
+        var request1 = harness.BuildRequest("PR_1", sha1, sha1, [ChangedFile("src/App.cs", 1, 0)]);
+        var snapshot1 = await harness.Service.StartReviewAsync(request1);
+
+        var request2 = request1 with { HeadSha = sha2, MergeBaseSha = sha1 };
+        var snapshot2 = await harness.Service.StartReviewAsync(request2);
+
+        Assert.That(snapshot1.Triage!.Summary, Is.EqualTo("First pass."));
+        Assert.That(snapshot2.Triage!.Summary, Is.EqualTo("Second pass."));
+        Assert.That(snapshot2.RunId, Is.Not.EqualTo(snapshot1.RunId));
+    }
+
+    [Test]
+    public async Task CancelAsync_WhileTriageInFlight_ProducesIncompleteRun()
+    {
+        var reachedAgent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var script = new FakeAgentScript().OnTurn(t => t.BlockUntilCancelled(() => reachedAgent.TrySetResult()));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_CANCEL", head, head, [ChangedFile("src/App.cs", 1, 0)]);
+
+        var runTask = harness.Service.StartReviewAsync(request);
+        await reachedAgent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await harness.Service.CancelAsync(RepositoryKey);
+        var snapshot = await runTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Incomplete));
+        Assert.That(snapshot.ErrorMessage, Is.EqualTo("The review was cancelled."));
+
+        var run = await harness.Store.GetRunAsync(snapshot.RunId);
+        Assert.That(run!.State, Is.EqualTo(AiRunState.Incomplete));
+        Assert.That(run.ErrorMessage, Is.EqualTo("The review was cancelled."));
+    }
+
+    [Test]
+    public async Task StartReviewAsync_SdkTimeoutException_ProducesIncompleteWithTurnTimeoutMessage()
+    {
+        var script = new FakeAgentScript().OnTurn(t => t.BeforeCalls(_ =>
+            throw new TimeoutException("SendAndWaitAsync timed out after 00:01:00")));
+        await using var harness = await Harness.CreateAsync(
+            _ => script,
+            configureSettings: s => s.AiTurnTimeoutSeconds = 120);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_TIMEOUT", head, head, [ChangedFile("src/App.cs", 1, 0)]);
+
+        var snapshot = await harness.Service.StartReviewAsync(request);
+
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Incomplete));
+        Assert.That(snapshot.ErrorMessage, Does.Contain("timed out after 120s"));
+        Assert.That(snapshot.ErrorMessage, Does.Contain("turn timeout"));
+    }
+
+    [Test]
+    public async Task StartReviewAsync_OperationCanceledWithoutUserCancel_ProducesTimeoutMessage()
+    {
+        var script = new FakeAgentScript().OnTurn(t => t.BeforeCalls(_ =>
+            throw new OperationCanceledException()));
+        await using var harness = await Harness.CreateAsync(
+            _ => script,
+            configureSettings: s => s.AiRunTimeoutSeconds = 90);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_RUN_TIMEOUT", head, head, [ChangedFile("src/App.cs", 1, 0)]);
+
+        var snapshot = await harness.Service.StartReviewAsync(request);
+
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Incomplete));
+        Assert.That(snapshot.ErrorMessage, Does.Contain("timed out after 90s"));
+        Assert.That(snapshot.ErrorMessage, Does.Contain("run timeout"));
+        Assert.That(snapshot.ErrorMessage, Does.Not.Contain("cancelled"));
+    }
+
+    [Test]
+    public async Task RequestFileDepthAsync_SubmitsFileSummaryAndAnnotation_PersistsBoth()
+    {
+        const string annotationJson = """
+            {
+              "path": "src/App.cs",
+              "blobOid": "after-oid-1",
+              "startLine": 3,
+              "endLine": 3,
+              "side": "New",
+              "severity": "Warning",
+              "body": "Consider handling the null case here."
+            }
+            """;
+        var fileSummary = new AiFileSummaryResult(
+            "src/App.cs", "Entry point of the app.", "Added a null guard.", "Check the guard clause logic.");
+
+        var script = new FakeAgentScript()
+            .OnTurn(t => t.Call("submit_pr_triage", ToJson(BuildTriage("Looks fine.", AiRiskLevel.Low, "src/App.cs"))))
+            .OnTurn(t => t.Call("submit_file_summary", ToJson(fileSummary)).Call("add_annotation", annotationJson));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1, "after-oid-1")]);
+        await harness.Service.StartReviewAsync(request);
+
+        await harness.Service.RequestFileDepthAsync(new AiFileDepthRequest("PR_1", "src/App.cs", "before-oid", "after-oid-1"));
+
+        var summary = await harness.Service.GetFileSummaryAsync("PR_1", "src/App.cs");
+        Assert.That(summary, Is.Not.Null);
+        Assert.That(summary!.Purpose, Is.EqualTo("Entry point of the app."));
+
+        var annotations = await harness.Service.GetFileAnnotationsAsync("PR_1", "src/App.cs");
+        Assert.That(annotations, Has.Count.EqualTo(1));
+        Assert.That(annotations[0].Body, Is.EqualTo("Consider handling the null case here."));
+        Assert.That(annotations[0].Severity, Is.EqualTo(AiAnnotationSeverity.Warning));
+    }
+
+    [Test]
+    public async Task AskAsync_ReturnsScriptedAssistantAnswer()
+    {
+        var script = new FakeAgentScript()
+            .OnTurn(t => t.Call("submit_pr_triage", ToJson(BuildTriage("Looks fine.", AiRiskLevel.Low, "src/App.cs"))))
+            .OnTurn(t => t.Text("This adds a null check before dereferencing the argument."));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
+        await harness.Service.StartReviewAsync(request);
+
+        var answer = await harness.Service.AskAsync(new AiQuestionRequest("PR_1", "src/App.cs", "Why was this changed?"));
+
+        Assert.That(answer, Is.EqualTo("This adds a null check before dereferencing the argument."));
+    }
+
+    [Test]
+    public async Task ChatAsync_ReturnsScriptedAnswer_AndPersistsBothMessages()
+    {
+        var script = new FakeAgentScript()
+            .OnTurn(t => t.Call("submit_pr_triage", ToJson(BuildTriage("Looks fine.", AiRiskLevel.Low, "src/App.cs"))))
+            .OnTurn(t => t.Text("Because it fixes a crash reported in issue #42."));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
+        await harness.Service.StartReviewAsync(request);
+
+        var answer = await harness.Service.ChatAsync(new AiQuestionRequest("PR_1", null, "Why was this changed?"));
+
+        Assert.That(answer, Is.EqualTo("Because it fixes a crash reported in issue #42."));
+
+        var history = await harness.Service.GetChatHistoryAsync("PR_1");
+        Assert.That(history, Has.Count.EqualTo(2));
+        Assert.That(history[0].Role, Is.EqualTo("user"));
+        Assert.That(history[1].Role, Is.EqualTo("assistant"));
+        Assert.That(history[1].Content, Is.EqualTo("Because it fixes a crash reported in issue #42."));
+    }
+
+    [Test]
+    public async Task ClearAiDataAsync_EmptiesTheDurableStore()
+    {
+        await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.ForPrTriage(
+            ToJson(BuildTriage("Looks fine.", AiRiskLevel.Low, "src/App.cs"))));
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
+        var snapshot = await harness.Service.StartReviewAsync(request);
+        Assert.That(await harness.Store.GetRunAsync(snapshot.RunId), Is.Not.Null);
+
+        await harness.Service.ClearAiDataAsync();
+
+        Assert.That(await harness.Store.GetRunAsync(snapshot.RunId), Is.Null);
+        Assert.That(await harness.Service.GetCachedRunAsync("PR_1"), Is.Null);
+    }
+
+    private static AiChangedFileFact ChangedFile(string path, int added, int removed, string? afterOid = "after-oid") =>
+        new(path, "Modified", "before-oid", afterOid, added, removed);
+
+    private static AiPrTriageResult BuildTriage(string summary, AiRiskLevel risk, string path) => new(
+        Summary: summary,
+        Risk: risk,
+        Justifications: [],
+        SuggestedOrder: [path],
+        Files: [new AiFileTriage(path, AiFileClassification.Normal, PriorityStars: 3, Guidance: "Check the null handling.")],
+        Measured: new AiMeasuredFacts(0, 0, 0));
+
+    private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
+
+    /// <summary>Wires the real AI DI graph with a temp repo, a scratch durable.db, and a scripted <see cref="FakeAgentClient"/>.</summary>
+    private sealed class Harness : IAsyncDisposable
+    {
+        private readonly ServiceProvider _provider;
+        private readonly string _tempRoot;
+
+        public required RepositoryBuilder Repo { get; init; }
+        public required string RepoPath { get; init; }
+        public required ISettingsStore Settings { get; init; }
+
+        private Harness(ServiceProvider provider, string tempRoot)
+        {
+            _provider = provider;
+            _tempRoot = tempRoot;
+        }
+
+        public IAIReviewService Service => _provider.GetRequiredService<IAIReviewService>();
+
+        public IAiResultStore Store => _provider.GetRequiredService<IAiResultStore>();
+
+        public static async Task<Harness> CreateAsync(
+            Func<AgentSessionOptions, FakeAgentScript> scriptFactory,
+            bool addSecondCommit = false,
+            Action<AppSettings>? configureSettings = null)
+        {
+            var builder = RepositoryBuilder.Create()
+                .WithFile("src/App.cs", "class App {}\n")
+                .WithInitialCommit("root");
+            if (addSecondCommit)
+            {
+                builder
+                    .WithFile("src/App.cs", "class App { void Run() {} }\n")
+                    .WithCommit("feature work");
+            }
+
+            var repoPath = builder.Build();
+
+            var tempRoot = Path.Combine(Path.GetTempPath(), "CodeReviewr.AI.Tests", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempRoot);
+            var dbPath = Path.Combine(tempRoot, "durable.db");
+            using (var durable = new SqliteDurableUserStore(dbPath))
+                durable.EnsureSchema();
+
+            var settingsStore = new JsonSettingsStore(Path.Combine(tempRoot, "settings.json"));
+            settingsStore.Update(s =>
+            {
+                s.AiAssistanceEnabled = true;
+                s.AiDisclosureAcknowledged = true;
+                configureSettings?.Invoke(s);
+            });
+
+            var services = new ServiceCollection();
+            services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
+            services.AddCodeReviewrGit();
+            services.AddCodeReviewrReview();
+            services.AddSingleton<ISettingsStore>(settingsStore);
+            services.AddSingleton<ITokenStore, MemoryTokenStore>();
+            services.AddSingleton<IAiResultStore>(_ => new SqliteAiResultStore(dbPath));
+            services.AddCodeReviewrAIWithFakeAgent(scriptFactory);
+
+            var provider = services.BuildServiceProvider();
+            await provider.GetRequiredService<IGitEnvironment>().DetectAsync();
+
+            return new Harness(provider, tempRoot)
+            {
+                Repo = builder,
+                RepoPath = repoPath,
+                Settings = settingsStore,
+            };
+        }
+
+        public AiReviewRequest BuildRequest(
+            string prNodeId, string headSha, string mergeBaseSha, IReadOnlyList<AiChangedFileFact> files) => new(
+            PrNodeId: prNodeId,
+            RepositoryPath: RepoPath,
+            RepositoryKey: RepositoryKey,
+            HeadSha: headSha,
+            MergeBaseSha: mergeBaseSha,
+            Title: "Add null check",
+            Body: "Fixes a crash on null input.",
+            Author: "octocat",
+            BaseBranch: "main",
+            HeadBranch: "feature",
+            ChangedFiles: files);
+
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                await Service.ClearAiDataAsync();
+            }
+            catch
+            {
+                // Best-effort cleanup; some tests intentionally leave the coordinator mid-run.
+            }
+
+            await _provider.DisposeAsync();
+            Repo.Dispose();
+
+            try
+            {
+                if (Directory.Exists(_tempRoot))
+                    Directory.Delete(_tempRoot, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup.
+            }
+        }
+    }
+}

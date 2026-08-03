@@ -62,14 +62,47 @@ public sealed record AppSettings
 
     /// <summary>
     /// When false (default), AI features that would send repository content off-device are disabled.
-    /// Phase 3 wires this to the Copilot (or other) SDK.
     /// </summary>
     public bool AiAssistanceEnabled { get; set; }
 
     /// <summary>
-    /// When true, AI prompts redact likely secrets (tokens, private keys) before leaving the device.
+    /// Optional dedicated Copilot token when the GitHub account token lacks Copilot access.
+    /// Stored via <c>ITokenStore</c> under a dedicated key — not persisted in this JSON document.
     /// </summary>
-    public bool AiRedactSecrets { get; set; } = true;
+    public bool AiUseDedicatedCopilotToken { get; set; }
+
+    /// <summary>Optional model override; null/empty inherits Copilot CLI default.</summary>
+    public string? AiModelOverride { get; set; }
+
+    /// <summary>Optional reasoning effort for models that support it (low/medium/high/xhigh).</summary>
+    public string? AiReasoningEffort { get; set; }
+
+    /// <summary>User override for review rules. Empty uses built-in defaults.</summary>
+    public string AiReviewRules { get; set; } = "";
+
+    /// <summary>Per-review turn budget. Run pauses and asks when reached.</summary>
+    public int AiTurnBudget { get; set; } = 25;
+
+    /// <summary>Per-turn timeout in seconds.</summary>
+    public int AiTurnTimeoutSeconds { get; set; } = 180;
+
+    /// <summary>Per-run timeout in seconds.</summary>
+    public int AiRunTimeoutSeconds { get; set; } = 1800;
+
+    /// <summary>User-extensible path denylist patterns (glob-like), added to built-in secret patterns.</summary>
+    public List<string> AiPathDenylist { get; set; } = [];
+
+    /// <summary>Repository keys excluded from AI (privacy opt-out).</summary>
+    public List<string> AiExcludedRepositories { get; set; } = [];
+
+    /// <summary>User acknowledged that repository content is sent to GitHub Copilot.</summary>
+    public bool AiDisclosureAcknowledged { get; set; }
+
+    /// <summary>Days to retain unused materialised tree exports before lazy cleanup.</summary>
+    public int AiExportRetentionDays { get; set; } = 14;
+
+    /// <summary>File-count threshold that triggers pre-flight confirmation before a run.</summary>
+    public int AiLargePrFileThreshold { get; set; } = 30;
 
     /// <summary>Root folder scanned for local Git repositories (Phase 2).</summary>
     public string? DevelopmentFolder { get; set; }
