@@ -1739,6 +1739,185 @@ public sealed class ReviewViewModelTests
     }
 
     [Test]
+    public void AiChatPlaceholder_Reflects_SelectedFile()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        Assert.That(vm.AiChatSelectedFileLabel, Is.EqualTo("No file selected"));
+        Assert.That(vm.AiChatPlaceholder, Is.EqualTo("Ask about this pull request…"));
+
+        var file = new FileItemViewModel(FilePath.From("src/Auth.cs"), ChangeKind.Modified, isStagedList: false);
+        vm.SelectedFile = file;
+
+        Assert.That(vm.AiChatSelectedFileLabel, Is.EqualTo("src/Auth.cs"));
+        Assert.That(vm.AiChatPlaceholder, Is.EqualTo("Ask about Auth.cs…"));
+    }
+
+    [Test]
+    public void CanSendAiChat_Is_False_While_Busy()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        vm.AiChatInput = "What changed?";
+        Assert.That(vm.CanSendAiChat, Is.True);
+
+        vm.IsAiChatBusy = true;
+        Assert.That(vm.CanSendAiChat, Is.False);
+
+        vm.IsAiChatBusy = false;
+        Assert.That(vm.CanSendAiChat, Is.True);
+    }
+
+    [Test]
+    public async Task SendAiChat_Sets_And_Clears_IsAiChatBusy()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            []);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { AiAssistanceEnabled = true });
+
+        var ai = Substitute.For<IAIReviewService>();
+        var gate = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
+        ai.ChatAsync(Arg.Any<AiQuestionRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => gate.Task);
+
+        var vm = CreateViewModel(
+            pullRequests,
+            settings,
+            reviewService: reviewService,
+            comments: comments,
+            outbox: outbox,
+            durable: durable,
+            ai: ai);
+
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+
+        vm.AiChatInput = "Explain this PR";
+        Assert.That(vm.IsAiChatBusy, Is.False);
+
+        var sendTask = vm.SendAiChatCommand.ExecuteAsync(null);
+        await WaitUntilAsync(() => vm.IsAiChatBusy);
+        Assert.That(vm.CanSendAiChat, Is.False);
+
+        gate.SetResult("Because of X.");
+        await sendTask;
+
+        Assert.That(vm.IsAiChatBusy, Is.False);
+        Assert.That(vm.AiChatMessages.Count, Is.EqualTo(2));
+        Assert.That(vm.AiChatMessages[^1].Content, Is.EqualTo("Because of X."));
+    }
+
+    [Test]
+    public async Task ClearAiChat_ClearsMessages_AndCallsService()
+    {
+        var summary = CreateSummary(InboxSection.NeedsMyReview, "demo", authorLogin: "octocat");
+        var detail = new PullRequestDetail(summary, Body: null, Files: [], CheckRollupState: null);
+        var sha = new string('a', 40);
+        var session = new ReviewSession(
+            "/tmp/repo",
+            detail,
+            CommitId.FromSha(sha),
+            CommitId.FromSha(sha),
+            Substitute.For<IReviewTree>(),
+            []);
+
+        var pullRequests = Substitute.For<IPullRequestService>();
+        pullRequests.GetPendingReviewCommentCountAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<int>(),
+                Arg.Any<CancellationToken>())
+            .Returns(0);
+
+        var reviewService = Substitute.For<IReviewService>();
+        reviewService.OpenAsync(summary, Arg.Any<CancellationToken>()).Returns(session);
+
+        var comments = Substitute.For<IReviewCommentService>();
+        comments.GetThreadsAsync(session, Arg.Any<CancellationToken>()).Returns([]);
+        comments.SupportsRemoteViewedStateAsync(session, Arg.Any<CancellationToken>()).Returns(false);
+
+        var outbox = Substitute.For<IReviewOutbox>();
+        outbox.IsOffline.Returns(false);
+        outbox.ListPendingAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns([]);
+
+        var durable = Substitute.For<IDurableUserStore>();
+        durable.GetNoteAsync(summary.NodeId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        durable.ListAsync(summary.NodeId).Returns([]);
+
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings { AiAssistanceEnabled = true });
+
+        var ai = Substitute.For<IAIReviewService>();
+        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
+        ai.ClearChatHistoryAsync(summary.NodeId, Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var vm = CreateViewModel(
+            pullRequests,
+            settings,
+            reviewService: reviewService,
+            comments: comments,
+            outbox: outbox,
+            durable: durable,
+            ai: ai);
+
+        await vm.SelectPullRequestCommand.ExecuteAsync(summary);
+
+        vm.AiChatMessages.Add(new AiChatMessage("user", "Hello", DateTimeOffset.UtcNow));
+        vm.AiChatMessages.Add(new AiChatMessage("assistant", "Hi", DateTimeOffset.UtcNow));
+        Assert.That(vm.CanClearAiChat, Is.True);
+
+        await vm.ClearAiChatCommand.ExecuteAsync(null);
+
+        Assert.That(vm.AiChatMessages, Is.Empty);
+        Assert.That(vm.CanClearAiChat, Is.False);
+        await ai.Received(1).ClearChatHistoryAsync(summary.NodeId, Arg.Any<CancellationToken>());
+    }
+
+    [Test]
     public void PrFileListRebuild_Raises_SelectionClear_Before_Mutation()
     {
         var settings = Substitute.For<ISettingsStore>();

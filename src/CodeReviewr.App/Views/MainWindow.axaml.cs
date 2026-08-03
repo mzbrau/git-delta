@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
@@ -26,6 +28,9 @@ public partial class MainWindow : Window
     private bool _multiSelectModifiers;
     private bool _selectionSyncSubscribed;
     private bool _gitConsoleSubscribed;
+    private bool _aiChatScrollSubscribed;
+    private bool _aiChatRowSubscribed;
+    private double _aiChatPanelHeight = 240;
     private bool _inlineCommentLayoutHooked;
     private bool _syncingInlineCommentLayout;
     private TextBox? _activeMentionComposer;
@@ -66,6 +71,20 @@ public partial class MainWindow : Window
             vm.GitConsole.LinesUpdated += ScrollGitConsoleToEnd;
             _gitConsoleSubscribed = true;
         }
+
+        if (!_aiChatScrollSubscribed)
+        {
+            vm.Review.AiChatMessages.CollectionChanged += OnAiChatMessagesChanged;
+            _aiChatScrollSubscribed = true;
+        }
+
+        if (!_aiChatRowSubscribed)
+        {
+            vm.Review.PropertyChanged += OnReviewPropertyChangedForAiChat;
+            _aiChatRowSubscribed = true;
+        }
+
+        SyncAiChatRowHeight();
 
         vm.Review.FocusCommentDraftRequested += FocusPrCommentDraft;
         vm.Review.FocusFileFilterRequested += FocusPrFileFilter;
@@ -604,6 +623,50 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() =>
         {
             if (this.FindControl<ScrollViewer>("GitConsoleScroll") is { } scroll)
+                scroll.Offset = new Avalonia.Vector(scroll.Offset.X, double.MaxValue);
+        }, DispatcherPriority.Background);
+    }
+
+    private void OnAiChatMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        ScrollAiChatToEnd();
+
+    private void OnReviewPropertyChangedForAiChat(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ReviewViewModel.ShowAiChat))
+            SyncAiChatRowHeight();
+    }
+
+    private void SyncAiChatRowHeight()
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+        if (this.FindControl<Grid>("PrDiffChatGrid") is not { } grid) return;
+        if (grid.RowDefinitions.Count < 3) return;
+
+        var row = grid.RowDefinitions[2];
+        if (vm.Review.ShowAiChat)
+        {
+            var height = Math.Clamp(_aiChatPanelHeight, 120, 560);
+            row.MinHeight = 120;
+            row.MaxHeight = 560;
+            row.Height = new GridLength(height);
+            ScrollAiChatToEnd();
+        }
+        else
+        {
+            if (row.Height.IsAbsolute && row.Height.Value >= 120)
+                _aiChatPanelHeight = Math.Clamp(row.Height.Value, 120, 560);
+            row.MinHeight = 0;
+            row.MaxHeight = 560;
+            row.Height = new GridLength(0);
+        }
+    }
+
+    private void ScrollAiChatToEnd()
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.Review.ShowAiChat) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<ScrollViewer>("AiChatScrollViewer") is { } scroll)
                 scroll.Offset = new Avalonia.Vector(scroll.Offset.X, double.MaxValue);
         }, DispatcherPriority.Background);
     }

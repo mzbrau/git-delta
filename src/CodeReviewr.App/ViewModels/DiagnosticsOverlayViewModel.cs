@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics.Metrics;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Diagnostics;
@@ -9,6 +10,7 @@ namespace CodeReviewr.App.ViewModels;
 public partial class DiagnosticsOverlayViewModel : ObservableObject
 {
     private readonly MeterListener _listener;
+    private readonly object _timingsGate = new();
 
     public DiagnosticsOverlayViewModel()
     {
@@ -20,20 +22,55 @@ public partial class DiagnosticsOverlayViewModel : ObservableObject
         };
         _listener.SetMeasurementEventCallback<long>((instrument, measurement, _, _) =>
         {
-            switch (instrument.Name)
+            try
             {
-                case "git.invocations": GitInvocations += measurement; break;
-                case "git.bytes_read": BytesRead += measurement; break;
-                case "cache.hits": CacheHits += measurement; break;
-                case "cache.misses": CacheMisses += measurement; break;
-                case "syntax.lines_tokenised": LinesTokenised += measurement; break;
+                switch (instrument.Name)
+                {
+                    case "git.invocations":
+                        Interlocked.Add(ref _gitInvocations, measurement);
+                        break;
+                    case "git.bytes_read":
+                        Interlocked.Add(ref _bytesRead, measurement);
+                        break;
+                    case "cache.hits":
+                        Interlocked.Add(ref _cacheHits, measurement);
+                        break;
+                    case "cache.misses":
+                        Interlocked.Add(ref _cacheMisses, measurement);
+                        break;
+                    case "syntax.lines_tokenised":
+                        Interlocked.Add(ref _linesTokenised, measurement);
+                        break;
+                    default:
+                        return;
+                }
+
+                PostToUi(() =>
+                {
+                    OnPropertyChanged(nameof(GitInvocations));
+                    OnPropertyChanged(nameof(BytesRead));
+                    OnPropertyChanged(nameof(CacheHits));
+                    OnPropertyChanged(nameof(CacheMisses));
+                    OnPropertyChanged(nameof(LinesTokenised));
+                    OnPropertyChanged(nameof(Summary));
+                });
             }
-            OnPropertyChanged(nameof(Summary));
+            catch
+            {
+                // Meter callbacks must never throw into Record/Add callers (e.g. diff generation).
+            }
         });
         _listener.SetMeasurementEventCallback<double>((instrument, measurement, _, _) =>
         {
-            LastTimings.Insert(0, $"{instrument.Name}: {measurement:F1} ms");
-            while (LastTimings.Count > 20) LastTimings.RemoveAt(LastTimings.Count - 1);
+            try
+            {
+                var line = $"{instrument.Name}: {measurement:F1} ms";
+                PostToUi(() => AppendTiming(line));
+            }
+            catch
+            {
+                // Meter callbacks must never throw into Record/Add callers (e.g. diff generation).
+            }
         });
         _listener.Start();
     }
@@ -55,5 +92,35 @@ public partial class DiagnosticsOverlayViewModel : ObservableObject
     {
         GitPath = info?.Path;
         GitVersion = info?.Version.ToString();
+    }
+
+    private void AppendTiming(string line)
+    {
+        lock (_timingsGate)
+        {
+            LastTimings.Insert(0, line);
+            while (LastTimings.Count > 20)
+                LastTimings.RemoveAt(LastTimings.Count - 1);
+        }
+    }
+
+    private void PostToUi(Action action)
+    {
+        try
+        {
+            var dispatcher = Dispatcher.UIThread;
+            if (dispatcher.CheckAccess())
+            {
+                action();
+                return;
+            }
+
+            dispatcher.Post(action);
+        }
+        catch
+        {
+            // Headless tests / no Avalonia dispatcher: still apply under the timings lock.
+            action();
+        }
     }
 }

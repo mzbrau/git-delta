@@ -457,6 +457,26 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
         }
     }
 
+    public async Task ClearChatMessagesAsync(string prNodeId, CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = """
+                DELETE FROM ai_chat_messages
+                WHERE pr_node_id = $pr;
+                """;
+            cmd.Parameters.AddWithValue("$pr", prNodeId);
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task ClearAllAsync(CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);

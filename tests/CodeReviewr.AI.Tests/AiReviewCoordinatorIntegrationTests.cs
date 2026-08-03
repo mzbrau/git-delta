@@ -271,6 +271,116 @@ public sealed class AiReviewCoordinatorIntegrationTests
     }
 
     [Test]
+    public async Task ChatAsync_AfterRestart_ResumesStoredCopilotSession()
+    {
+        var script = new FakeAgentScript()
+            .OnTurn(t => t.Call("submit_pr_triage", ToJson(BuildTriage("Looks fine.", AiRiskLevel.Low, "src/App.cs"))));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
+        var snapshot = await harness.Service.StartReviewAsync(request);
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Complete));
+        Assert.That(snapshot.CopilotSessionId, Is.Not.Null.And.Not.Empty);
+        var storedSessionId = snapshot.CopilotSessionId!;
+
+        // Simulate app restart: new coordinator / FakeAgentClient, same durable store + repo.
+        var chatScript = new FakeAgentScript()
+            .OnTurn(t => t.Text("The ::: markers are Markdown callout fences."));
+        await using var harness2 = await harness.RestartWithNewCoordinatorAsync(_ => chatScript);
+
+        await harness2.Service.AttachCachedRunAsync(request);
+
+        var answer = await harness2.Service.ChatAsync(
+            new AiQuestionRequest("PR_1", "src/App.cs", "What do the ::: characters mean?"));
+
+        Assert.That(answer, Is.EqualTo("The ::: markers are Markdown callout fences."));
+        Assert.That(harness2.Agent.ResumedSessionIds, Does.Contain(storedSessionId));
+        Assert.That(harness2.Agent.LastSession, Is.Not.Null);
+        Assert.That(harness2.Agent.LastSession!.SentPrompts, Has.Count.EqualTo(1));
+        Assert.That(harness2.Agent.LastSession.SentPrompts[0], Does.Contain("Currently selected file: src/App.cs"));
+    }
+
+    [Test]
+    public async Task ChatAsync_WithoutAttach_ThrowsClearError()
+    {
+        await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.Empty);
+        var ex = Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await harness.Service.ChatAsync(new AiQuestionRequest("PR_missing", null, "Hello?")));
+        Assert.That(ex!.Message, Does.Contain("No AI review context"));
+    }
+
+    [Test]
+    public async Task ChatAsync_WithSelectedFile_IncludesFileFramingInPrompt()
+    {
+        var script = new FakeAgentScript()
+            .OnTurn(t => t.Call("submit_pr_triage", ToJson(BuildTriage("Looks fine.", AiRiskLevel.Low, "src/App.cs"))))
+            .OnTurn(t => t.Text("Answer about App.cs"));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
+        await harness.Service.StartReviewAsync(request);
+
+        await harness.Service.ChatAsync(new AiQuestionRequest(
+            "PR_1",
+            "src/App.cs",
+            "Explain this",
+            SelectedLinesContext: "File guidance from triage:\nCheck nulls"));
+
+        Assert.That(harness.Agent.LastSession, Is.Not.Null);
+        var prompt = harness.Agent.LastSession!.SentPrompts.Last();
+        Assert.That(prompt, Does.Contain("Currently selected file: src/App.cs"));
+        Assert.That(prompt, Does.Contain("File guidance from triage:"));
+        Assert.That(prompt, Does.Contain("Check nulls"));
+    }
+
+    [Test]
+    public async Task ChatAsync_SecondTurn_IncludesPriorConversationInPrompt()
+    {
+        var script = new FakeAgentScript()
+            .OnTurn(t => t.Call("submit_pr_triage", ToJson(BuildTriage("Looks fine.", AiRiskLevel.Low, "src/App.cs"))))
+            .OnTurn(t => t.Text("First answer about the crash."))
+            .OnTurn(t => t.Text("Second answer referring to earlier context."));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
+        await harness.Service.StartReviewAsync(request);
+
+        await harness.Service.ChatAsync(new AiQuestionRequest("PR_1", null, "Why was this changed?"));
+        await harness.Service.ChatAsync(new AiQuestionRequest("PR_1", null, "Can you elaborate?"));
+
+        Assert.That(harness.Agent.LastSession, Is.Not.Null);
+        var secondPrompt = harness.Agent.LastSession!.SentPrompts.Last();
+        Assert.That(secondPrompt, Does.Contain("Conversation so far:"));
+        Assert.That(secondPrompt, Does.Contain("user: Why was this changed?"));
+        Assert.That(secondPrompt, Does.Contain("assistant: First answer about the crash."));
+        Assert.That(secondPrompt, Does.Contain("Can you elaborate?"));
+    }
+
+    [Test]
+    public async Task ClearChatHistoryAsync_RemovesPersistedMessages_KeepsRun()
+    {
+        var script = new FakeAgentScript()
+            .OnTurn(t => t.Call("submit_pr_triage", ToJson(BuildTriage("Looks fine.", AiRiskLevel.Low, "src/App.cs"))))
+            .OnTurn(t => t.Text("Because it fixes a crash."));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
+        var snapshot = await harness.Service.StartReviewAsync(request);
+        await harness.Service.ChatAsync(new AiQuestionRequest("PR_1", null, "Why was this changed?"));
+
+        Assert.That(await harness.Service.GetChatHistoryAsync("PR_1"), Has.Count.EqualTo(2));
+
+        await harness.Service.ClearChatHistoryAsync("PR_1");
+
+        Assert.That(await harness.Service.GetChatHistoryAsync("PR_1"), Is.Empty);
+        Assert.That(await harness.Store.GetRunAsync(snapshot.RunId), Is.Not.Null);
+    }
+
+    [Test]
     public async Task ClearAiDataAsync_EmptiesTheDurableStore()
     {
         await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.ForPrTriage(
@@ -303,22 +413,31 @@ public sealed class AiReviewCoordinatorIntegrationTests
     /// <summary>Wires the real AI DI graph with a temp repo, a scratch durable.db, and a scripted <see cref="FakeAgentClient"/>.</summary>
     private sealed class Harness : IAsyncDisposable
     {
-        private readonly ServiceProvider _provider;
+        private ServiceProvider _provider;
         private readonly string _tempRoot;
+        private bool _ownsRepo;
+        private bool _ownsTempRoot;
+        private bool _disposed;
 
         public required RepositoryBuilder Repo { get; init; }
         public required string RepoPath { get; init; }
+        public required string DurableDbPath { get; init; }
         public required ISettingsStore Settings { get; init; }
+        public bool ClearAiDataOnDispose { get; set; } = true;
 
-        private Harness(ServiceProvider provider, string tempRoot)
+        private Harness(ServiceProvider provider, string tempRoot, bool ownsRepo, bool ownsTempRoot)
         {
             _provider = provider;
             _tempRoot = tempRoot;
+            _ownsRepo = ownsRepo;
+            _ownsTempRoot = ownsTempRoot;
         }
 
         public IAIReviewService Service => _provider.GetRequiredService<IAIReviewService>();
 
         public IAiResultStore Store => _provider.GetRequiredService<IAiResultStore>();
+
+        public FakeAgentClient Agent => (FakeAgentClient)_provider.GetRequiredService<IAgentClient>();
 
         public static async Task<Harness> CreateAsync(
             Func<AgentSessionOptions, FakeAgentScript> scriptFactory,
@@ -343,7 +462,51 @@ public sealed class AiReviewCoordinatorIntegrationTests
             using (var durable = new SqliteDurableUserStore(dbPath))
                 durable.EnsureSchema();
 
-            var settingsStore = new JsonSettingsStore(Path.Combine(tempRoot, "settings.json"));
+            return await CreateCoreAsync(tempRoot, dbPath, repoPath, builder, scriptFactory, configureSettings,
+                ownsRepo: true, ownsTempRoot: true).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Disposes the current DI graph (in-memory sessions) and returns a new harness sharing the
+        /// same durable.db and git repo — simulating an app restart.
+        /// </summary>
+        public async Task<Harness> RestartWithNewCoordinatorAsync(
+            Func<AgentSessionOptions, FakeAgentScript> scriptFactory,
+            Action<AppSettings>? configureSettings = null)
+        {
+            // Drop live sessions without wiping durable AI results or the temp repo.
+            ClearAiDataOnDispose = false;
+            await _provider.DisposeAsync().ConfigureAwait(false);
+            _ownsRepo = false;
+            _ownsTempRoot = false;
+            _disposed = true;
+
+            return await CreateCoreAsync(
+                    _tempRoot,
+                    DurableDbPath,
+                    RepoPath,
+                    Repo,
+                    scriptFactory,
+                    configureSettings,
+                    ownsRepo: true,
+                    ownsTempRoot: true)
+                .ConfigureAwait(false);
+        }
+
+        private static async Task<Harness> CreateCoreAsync(
+            string tempRoot,
+            string dbPath,
+            string repoPath,
+            RepositoryBuilder repo,
+            Func<AgentSessionOptions, FakeAgentScript> scriptFactory,
+            Action<AppSettings>? configureSettings,
+            bool ownsRepo,
+            bool ownsTempRoot)
+        {
+            var settingsFile = ownsTempRoot && !File.Exists(Path.Combine(tempRoot, "settings.json"))
+                ? "settings.json"
+                : $"settings-{Guid.NewGuid():N}.json";
+            var settingsStore = new JsonSettingsStore(Path.Combine(tempRoot, settingsFile));
             settingsStore.Update(s =>
             {
                 s.AiAssistanceEnabled = true;
@@ -363,10 +526,11 @@ public sealed class AiReviewCoordinatorIntegrationTests
             var provider = services.BuildServiceProvider();
             await provider.GetRequiredService<IGitEnvironment>().DetectAsync();
 
-            return new Harness(provider, tempRoot)
+            return new Harness(provider, tempRoot, ownsRepo, ownsTempRoot)
             {
-                Repo = builder,
+                Repo = repo,
                 RepoPath = repoPath,
+                DurableDbPath = dbPath,
                 Settings = settingsStore,
             };
         }
@@ -387,26 +551,38 @@ public sealed class AiReviewCoordinatorIntegrationTests
 
         public async ValueTask DisposeAsync()
         {
-            try
+            if (_disposed)
+                return;
+
+            if (ClearAiDataOnDispose)
             {
-                await Service.ClearAiDataAsync();
-            }
-            catch
-            {
-                // Best-effort cleanup; some tests intentionally leave the coordinator mid-run.
+                try
+                {
+                    await Service.ClearAiDataAsync();
+                }
+                catch
+                {
+                    // Best-effort cleanup; some tests intentionally leave the coordinator mid-run.
+                }
             }
 
             await _provider.DisposeAsync();
-            Repo.Dispose();
+            _disposed = true;
 
-            try
+            if (_ownsRepo)
+                Repo.Dispose();
+
+            if (_ownsTempRoot)
             {
-                if (Directory.Exists(_tempRoot))
-                    Directory.Delete(_tempRoot, recursive: true);
-            }
-            catch (IOException)
-            {
-                // Best-effort cleanup.
+                try
+                {
+                    if (Directory.Exists(_tempRoot))
+                        Directory.Delete(_tempRoot, recursive: true);
+                }
+                catch (IOException)
+                {
+                    // Best-effort cleanup.
+                }
             }
         }
     }

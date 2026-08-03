@@ -25,6 +25,12 @@ public interface IAIReviewService
 
     ValueTask<AiRunSnapshot?> GetCachedRunAsync(string prNodeId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Hydrates in-memory run context from a durable cached run (no live agent session yet).
+    /// Call after opening a PR that already has a completed AI review so chat/ask can lazily resume.
+    /// </summary>
+    Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default);
+
     Task<AiRunSnapshot> StartReviewAsync(AiReviewRequest request, CancellationToken ct = default);
 
     Task CancelAsync(string repositoryKey, CancellationToken ct = default);
@@ -62,6 +68,8 @@ public interface IAIReviewService
     ValueTask<IReadOnlyList<AiChatMessage>> GetChatHistoryAsync(
         string prNodeId,
         CancellationToken ct = default);
+
+    Task ClearChatHistoryAsync(string prNodeId, CancellationToken ct = default);
 
     Task ClearAiDataAsync(CancellationToken ct = default);
 }
@@ -103,6 +111,9 @@ public sealed class NullAIReviewService : IAIReviewService
 
     public ValueTask<AiRunSnapshot?> GetCachedRunAsync(string prNodeId, CancellationToken ct = default) =>
         ValueTask.FromResult<AiRunSnapshot?>(null);
+
+    public Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default) =>
+        Task.CompletedTask;
 
     public Task<AiRunSnapshot> StartReviewAsync(AiReviewRequest request, CancellationToken ct = default) =>
         Task.FromResult(new AiRunSnapshot(
@@ -165,6 +176,9 @@ public sealed class NullAIReviewService : IAIReviewService
         string prNodeId,
         CancellationToken ct = default) =>
         ValueTask.FromResult<IReadOnlyList<AiChatMessage>>([]);
+
+    public Task ClearChatHistoryAsync(string prNodeId, CancellationToken ct = default) =>
+        Task.CompletedTask;
 
     public Task ClearAiDataAsync(CancellationToken ct = default) => Task.CompletedTask;
 

@@ -13,18 +13,27 @@ internal sealed class FakeAgentClient(Func<AgentSessionOptions, FakeAgentScript>
     {
     }
 
+    /// <summary>Session IDs passed to <see cref="ResumeSessionAsync"/> (test spy).</summary>
+    public List<string> ResumedSessionIds { get; } = [];
+
+    /// <summary>Most recently created or resumed session (test spy).</summary>
+    public FakeAgentSession? LastSession { get; private set; }
+
     public Task StartAsync(CancellationToken ct = default) => Task.CompletedTask;
 
     public Task<IAgentSession> CreateSessionAsync(AgentSessionOptions options, CancellationToken ct = default)
     {
-        IAgentSession session = new FakeAgentSession(Guid.NewGuid().ToString("N"), scriptFactory(options), options);
-        return Task.FromResult(session);
+        var session = new FakeAgentSession(Guid.NewGuid().ToString("N"), scriptFactory(options), options);
+        LastSession = session;
+        return Task.FromResult<IAgentSession>(session);
     }
 
     public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionOptions options, CancellationToken ct = default)
     {
-        IAgentSession session = new FakeAgentSession(sessionId, scriptFactory(options), options);
-        return Task.FromResult(session);
+        ResumedSessionIds.Add(sessionId);
+        var session = new FakeAgentSession(sessionId, scriptFactory(options), options);
+        LastSession = session;
+        return Task.FromResult<IAgentSession>(session);
     }
 
     public Task<AiConnectionProbeResult> ProbeAsync(CancellationToken ct = default) =>

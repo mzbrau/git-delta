@@ -13,11 +13,7 @@ public sealed class MarkdownView : UserControl
 
     public MarkdownView()
     {
-        Content = new ScrollViewer
-        {
-            Content = _root,
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-        };
+        Content = _root;
     }
 
     public string? Markdown
