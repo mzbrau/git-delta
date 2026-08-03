@@ -83,6 +83,27 @@ public sealed class AgentPermissionPolicyTests
         Assert.That(decision, Is.EqualTo(AgentPermissionDecision.Approve));
     }
 
+    [TestCase("secrets/a.txt")]
+    [TestCase("secrets/nested/key")]
+    public void Evaluate_DoubleStarDenylist_DeniesPathsUnderPrefix(string path)
+    {
+        var policy = new AgentPermissionPolicy(userPathDenylist: ["secrets/**"]);
+
+        var decision = policy.Evaluate(new AgentPermissionRequest("read", null, path, null, "{}"));
+
+        Assert.That(decision, Is.EqualTo(AgentPermissionDecision.Deny));
+    }
+
+    [Test]
+    public void Evaluate_DoubleStarDenylist_DoesNotDenyUnrelatedFileNamedSecrets()
+    {
+        var policy = new AgentPermissionPolicy(userPathDenylist: ["secrets/**"]);
+
+        var decision = policy.Evaluate(new AgentPermissionRequest("read", null, "src/secrets.txt", null, "{}"));
+
+        Assert.That(decision, Is.EqualTo(AgentPermissionDecision.Approve));
+    }
+
     [Test]
     public void Denials_RecordsDeniedRequests_ButNotApprovedOnes()
     {

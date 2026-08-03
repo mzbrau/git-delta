@@ -91,6 +91,28 @@ public sealed class AiResultStoreTests
     }
 
     [Test]
+    public async Task UpsertPrResult_SameCacheKeyDifferentRun_UpdatesViaCacheKeyConflict()
+    {
+        var path = CreateDbPath();
+        using var durable = new SqliteDurableUserStore(path);
+        durable.EnsureSchema();
+        using var store = new SqliteAiResultStore(path);
+
+        await store.UpsertRunAsync(CreateRun("run-1", "PR_1"));
+        await store.UpsertRunAsync(CreateRun("run-2", "PR_1"));
+        await store.UpsertPrResultAsync(new AiPrResultRecord(
+            "run-1", "PR_1", "shared-cache", """{"summary":"first"}""", DateTimeOffset.UtcNow));
+
+        await store.UpsertPrResultAsync(new AiPrResultRecord(
+            "run-2", "PR_1", "shared-cache", """{"summary":"second"}""", DateTimeOffset.UtcNow));
+
+        var byCacheKey = await store.GetPrResultByCacheKeyAsync("shared-cache");
+        Assert.That(byCacheKey, Is.Not.Null);
+        Assert.That(byCacheKey!.RunId, Is.EqualTo("run-2"));
+        Assert.That(byCacheKey.PayloadJson, Does.Contain("second"));
+    }
+
+    [Test]
     public async Task UpsertFileResult_GetByCacheKeyAndListForRun_RoundTrips()
     {
         var path = CreateDbPath();

@@ -20,7 +20,9 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "CodeReviewr",
             "durable.db");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+            Directory.CreateDirectory(directory);
         _connectionString = new SqliteConnectionStringBuilder { DataSource = path }.ConnectionString;
     }
 
