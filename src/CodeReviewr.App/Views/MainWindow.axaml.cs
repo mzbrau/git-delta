@@ -1176,8 +1176,6 @@ public partial class MainWindow : Window
             UnstagedFileList.SelectedItems?.Clear();
         if (!ReferenceEquals(source, ConflictedFileList))
             ConflictedFileList.SelectedItems?.Clear();
-        if (!ReferenceEquals(source, AiSuggestedFileList))
-            AiSuggestedFileList.SelectedItems?.Clear();
     }
 
     private void SyncFileSelection()
@@ -1186,7 +1184,6 @@ public partial class MainWindow : Window
         CollectSelected(StagedFileList, selected);
         CollectSelected(UnstagedFileList, selected);
         CollectSelected(ConflictedFileList, selected);
-        CollectSelected(AiSuggestedFileList, selected);
         Vm.WorkingCopy.SetFileSelection(selected);
     }
 
@@ -1198,7 +1195,6 @@ public partial class MainWindow : Window
             StagedFileList.SelectedItems?.Clear();
             UnstagedFileList.SelectedItems?.Clear();
             ConflictedFileList.SelectedItems?.Clear();
-            AiSuggestedFileList.SelectedItems?.Clear();
             if (this.FindControl<ListBox>("StashFileList") is { } stashFiles)
                 stashFiles.SelectedItems?.Clear();
         }
@@ -1225,7 +1221,6 @@ public partial class MainWindow : Window
             StagedFileList.SelectedItems?.Clear();
             UnstagedFileList.SelectedItems?.Clear();
             ConflictedFileList.SelectedItems?.Clear();
-            AiSuggestedFileList.SelectedItems?.Clear();
             if (this.FindControl<ListBox>("HistoryFileList") is { } historyFiles)
                 historyFiles.SelectedItem = null;
 
@@ -1239,14 +1234,6 @@ public partial class MainWindow : Window
                         if (historyMatch is not null)
                             hf.SelectedItem = historyMatch;
                     }
-                    continue;
-                }
-
-                if (Vm.WorkingCopy.IsFileStatusAiSuggestedLayout)
-                {
-                    var aiMatch = FindEntryInList(AiSuggestedFileList, file);
-                    if (aiMatch is not null)
-                        AiSuggestedFileList.SelectedItems?.Add(aiMatch);
                     continue;
                 }
 

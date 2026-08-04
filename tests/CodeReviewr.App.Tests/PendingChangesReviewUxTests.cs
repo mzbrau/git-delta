@@ -124,47 +124,6 @@ public sealed class PendingChangesReviewUxTests
     }
 
     [Test]
-    public async Task ReapplyTriage_Restores_Stars_After_Refresh()
-    {
-        var repo = NewRepo();
-        try
-        {
-            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
-                .Returns(
-                    Status([Unstaged("a.txt", "oid1")], epoch: 1),
-                    Status([Unstaged("a.txt", "oid1")], epoch: 2));
-
-            var vm = CreateVm();
-            await vm.OpenAsync(repo);
-            Assert.That(vm.UnstagedFiles, Is.Not.Empty);
-
-            vm.PendingReview.AiTriage = new AiPrTriageResult(
-                Summary: "ok",
-                Risk: AiRiskLevel.Low,
-                Justifications: [],
-                SuggestedOrder: ["a.txt"],
-                Files:
-                [
-                    new AiFileTriage("a.txt", AiFileClassification.Normal, PriorityStars: 4, Guidance: "look here"),
-                ],
-                Measured: new AiMeasuredFacts(1, 1, 1));
-            vm.PendingReview.ReapplyTriageToFiles();
-
-            Assert.That(vm.UnstagedFiles[0].AiPriorityStars, Is.EqualTo(4));
-
-            await vm.RefreshAsync();
-
-            Assert.That(vm.UnstagedFiles, Is.Not.Empty);
-            Assert.That(vm.UnstagedFiles[0].AiPriorityStars, Is.EqualTo(4));
-            Assert.That(vm.UnstagedFiles[0].AiGuidance, Is.EqualTo("look here"));
-        }
-        finally
-        {
-            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
-        }
-    }
-
-    [Test]
     public async Task OnFileSelectionChanged_Raises_AiChatSelectedFileLabel()
     {
         var repo = NewRepo();
@@ -249,15 +208,6 @@ public sealed class PendingChangesReviewUxTests
             CreatedUtc: DateTimeOffset.UtcNow,
             UpdatedUtc: DateTimeOffset.UtcNow));
 
-    private static AiPrTriageResult SampleTriage(string path = "a.txt") =>
-        new(
-            Summary: "ok",
-            Risk: AiRiskLevel.Low,
-            Justifications: [],
-            SuggestedOrder: [path],
-            Files: [new AiFileTriage(path, AiFileClassification.Normal, PriorityStars: 3, Guidance: "g")],
-            Measured: new AiMeasuredFacts(1, 1, 1));
-
     [Test]
     public async Task SyncReviewState_Prunes_Orphan_Comments_When_Working_Copy_Empty()
     {
@@ -328,13 +278,12 @@ public sealed class PendingChangesReviewUxTests
             await vm.OpenAsync(repo);
 
             vm.PendingReview.AiRunState = AiRunState.Complete;
-            vm.PendingReview.AiTriage = SampleTriage();
             Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("Re-run AI review"));
 
             await vm.PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReview: true);
 
             Assert.That(vm.PendingReview.AiRunState, Is.EqualTo(AiRunState.Idle));
-            Assert.That(vm.PendingReview.AiTriage, Is.Null);
+            Assert.That(vm.PendingReview.HasAiRun, Is.False);
             Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("AI review"));
         }
         finally
@@ -356,13 +305,12 @@ public sealed class PendingChangesReviewUxTests
             await vm.OpenAsync(repo);
 
             vm.PendingReview.AiRunState = AiRunState.Complete;
-            vm.PendingReview.AiTriage = SampleTriage();
             vm.PendingReview.LocalComments.Add(Comment("gone", "gone.txt"));
 
             await vm.PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReview: false);
 
             Assert.That(vm.PendingReview.AiRunState, Is.EqualTo(AiRunState.Complete));
-            Assert.That(vm.PendingReview.AiTriage, Is.Not.Null);
+            Assert.That(vm.PendingReview.HasAiRun, Is.True);
             Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("Re-run AI review"));
             Assert.That(vm.PendingReview.LocalComments, Is.Empty);
             await _localComments.Received(1).DeleteAsync("gone", Arg.Any<CancellationToken>());
@@ -386,12 +334,11 @@ public sealed class PendingChangesReviewUxTests
             await vm.OpenAsync(repo);
 
             vm.PendingReview.AiRunState = AiRunState.Complete;
-            vm.PendingReview.AiTriage = SampleTriage();
 
             await vm.PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReview: false);
 
             Assert.That(vm.PendingReview.AiRunState, Is.EqualTo(AiRunState.Idle));
-            Assert.That(vm.PendingReview.AiTriage, Is.Null);
+            Assert.That(vm.PendingReview.HasAiRun, Is.False);
             Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("AI review"));
         }
         finally

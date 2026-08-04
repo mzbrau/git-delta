@@ -36,7 +36,7 @@
       <Color x:Key="ForgeErrorColor">#ffb4ab</Color>
       <Color x:Key="ForgeStatusAddedColor">#4ade80</Color>
       <Color x:Key="ForgeStatusDeletedColor">#ffb4ab</Color>
-      <Color x:Key="ForgeStatusModifiedColor">#4ade80</Color>
+      <Color x:Key="ForgeStatusModifiedColor">#9ba1a6</Color>
       <Color x:Key="ForgeStatusRequestChangesColor">#fb923c</Color>
       <Color x:Key="ForgeStatusUntrackedColor">#9ba1a6</Color>
       <Color x:Key="ForgeDiffAddedFillColor">#264ade80</Color>
@@ -91,7 +91,7 @@
       <SolidColorBrush x:Key="ForgeMinimapViewportBrush" Color="{StaticResource ForgeMinimapViewportColor}" />
       <SolidColorBrush x:Key="ForgeStatusAddedBadgeBgBrush" Color="#1A4ade80" />
       <SolidColorBrush x:Key="ForgeStatusDeletedBadgeBgBrush" Color="#1Affb4ab" />
-      <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1A4ade80" />
+      <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1A9ba1a6" />
       <SolidColorBrush x:Key="ForgeStatusUntrackedBadgeBgBrush" Color="#2d2d2d" />
       <SolidColorBrush x:Key="ForgeAiAccentBrush" Color="{StaticResource ForgeAiAccentColor}" />
       <SolidColorBrush x:Key="ForgeAiAccentBadgeBgBrush" Color="#1A5eead4" />
@@ -131,7 +131,7 @@
       <Color x:Key="ForgeErrorColor">#ba1a1a</Color>
       <Color x:Key="ForgeStatusAddedColor">#22863a</Color>
       <Color x:Key="ForgeStatusDeletedColor">#ba1a1a</Color>
-      <Color x:Key="ForgeStatusModifiedColor">#22863a</Color>
+      <Color x:Key="ForgeStatusModifiedColor">#63646c</Color>
       <Color x:Key="ForgeStatusRequestChangesColor">#c2410c</Color>
       <Color x:Key="ForgeStatusUntrackedColor">#63646c</Color>
       <Color x:Key="ForgeDiffAddedFillColor">#3322863a</Color>
@@ -186,7 +186,7 @@
       <SolidColorBrush x:Key="ForgeMinimapViewportBrush" Color="{StaticResource ForgeMinimapViewportColor}" />
       <SolidColorBrush x:Key="ForgeStatusAddedBadgeBgBrush" Color="#1A22863a" />
       <SolidColorBrush x:Key="ForgeStatusDeletedBadgeBgBrush" Color="#1Aba1a1a" />
-      <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1A22863a" />
+      <SolidColorBrush x:Key="ForgeStatusModifiedBadgeBgBrush" Color="#1A63646c" />
       <SolidColorBrush x:Key="ForgeStatusUntrackedBadgeBgBrush" Color="#eceef0" />
       <SolidColorBrush x:Key="ForgeAiAccentBrush" Color="{StaticResource ForgeAiAccentColor}" />
       <SolidColorBrush x:Key="ForgeAiAccentBadgeBgBrush" Color="#1A0d9488" />

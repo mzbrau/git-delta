@@ -87,9 +87,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         _notifications = notifications;
     }
 
-    /// <summary>Raised after a triage result is applied to the host's files so the host can rebuild AI-suggested layout.</summary>
-    public event Action? TriageApplied;
-
     /// <summary>Raised when the comment draft should receive keyboard focus.</summary>
     public event Action? FocusCommentDraftRequested;
 
@@ -103,7 +100,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     public event Action? RequestScrollToSelectedAnnotation;
 
     public ObservableCollection<IDiffAnnotation> DiffAnnotations { get; } = [];
-    public ObservableCollection<AiImportantFileItem> AiImportantFiles { get; } = [];
     public ObservableCollection<AiChatMessage> AiChatMessages { get; } = [];
     public ObservableCollection<LocalCommentItemViewModel> LocalComments { get; } = [];
 
@@ -127,8 +123,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
         AiRunState = AiRunState.Idle;
         AiProgress = null;
-        AiTriage = null;
-        AiImportantFiles.Clear();
         AiFileSummary = null;
         AiFileBandExpanded = true;
         AiFileQuestion = "";
@@ -150,7 +144,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         ClearDraftCommentAnchorCore();
         ExpandedFileLevelComment = null;
         IsCommentsSelected = false;
-        OnPropertyChanged(nameof(HasAiImportantFiles));
         OnPropertyChanged(nameof(CanClearAiChat));
         NotifyCommentCountsChanged();
     }
@@ -171,7 +164,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
     [ObservableProperty] private AiRunState _aiRunState = AiRunState.Idle;
     [ObservableProperty] private AiRunProgress? _aiProgress;
-    [ObservableProperty] private AiPrTriageResult? _aiTriage;
     [ObservableProperty] private bool _aiReviewSectionExpanded = true;
     [ObservableProperty] private string _aiAdHocInstructions = "";
     [ObservableProperty] private bool _showAiProgressDialog;
@@ -261,14 +253,13 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         ExpandedFileLevelComment = null;
     }
 
-    public bool HasAiTriage => AiTriage is not null;
-    public bool HasAiImportantFiles => AiImportantFiles.Count > 0;
+    /// <summary>True when an AI run exists (not idle) so chat / run-gated chrome can enable.</summary>
+    public bool HasAiRun => AiRunState != AiRunState.Idle;
     public bool IsAiRunActive => AiRunState == AiRunState.Running;
     public bool CanResumeAiReview => AiRunState is AiRunState.Incomplete or AiRunState.PausedBudget;
     public bool CanRerunAiReview => AiRunState is AiRunState.Complete or AiRunState.Failed;
     public bool HasAiFileSummary => AiFileSummary is not null;
-    public bool ShowAiFileBand =>
-        !string.IsNullOrWhiteSpace(SelectedFileAiGuidance) || AiFileSummary is not null;
+    public bool ShowAiFileBand => AiFileSummary is not null;
     public bool HasAiFileAnswer => !string.IsNullOrWhiteSpace(AiFileAnswer);
     public bool CanSendAiChat =>
         !string.IsNullOrWhiteSpace(AiChatInput) && !IsAiRunActive && !IsAiChatBusy;
@@ -282,15 +273,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
             ? "Ask about your pending changes…"
             : $"Ask about {_host.SelectedFile.Name}…";
 
-    public string? SelectedFileAiGuidance
-    {
-        get
-        {
-            var guidance = _host?.SelectedFile?.AiGuidance;
-            return string.IsNullOrWhiteSpace(guidance) ? null : guidance;
-        }
-    }
-
     public Material.Icons.MaterialIconKind AiFileBandChevron =>
         AiFileBandExpanded
             ? Material.Icons.MaterialIconKind.ChevronDown
@@ -299,19 +281,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     public bool IsRepositoryExcludedFromAi =>
         _host is not null &&
         _settings.Current.AiExcludedRepositories.Contains(RepositoryKey, StringComparer.OrdinalIgnoreCase);
-
-    public string AiRiskBadgeText => AiTriage?.Risk switch
-    {
-        AiRiskLevel.Low => "LOW RISK",
-        AiRiskLevel.Medium => "MEDIUM RISK",
-        AiRiskLevel.High => "HIGH RISK",
-        AiRiskLevel.Critical => "CRITICAL RISK",
-        _ => "",
-    };
-
-    public string? AiMeasuredFactsText => AiTriage is { Measured: { } measured }
-        ? $"{measured.FilesChanged} files changed, +{measured.LinesAdded} -{measured.LinesRemoved} lines"
-        : null;
 
     public string AiProgressText
     {
@@ -436,6 +405,7 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
     partial void OnAiRunStateChanged(AiRunState value)
     {
+        OnPropertyChanged(nameof(HasAiRun));
         OnPropertyChanged(nameof(IsAiRunActive));
         OnPropertyChanged(nameof(CanResumeAiReview));
         OnPropertyChanged(nameof(CanRerunAiReview));
@@ -466,16 +436,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
     partial void OnAiCopilotSessionIdChanged(string? value) => OnPropertyChanged(nameof(AiDiagnosticsText));
 
-    partial void OnAiTriageChanged(AiPrTriageResult? value)
-    {
-        AiReviewSessionHelpers.RebuildImportantFiles(value, AiImportantFiles);
-        OnPropertyChanged(nameof(HasAiTriage));
-        OnPropertyChanged(nameof(AiRiskBadgeText));
-        OnPropertyChanged(nameof(AiMeasuredFactsText));
-        OnPropertyChanged(nameof(HasAiImportantFiles));
-        NotifyAiFileBandChanged();
-    }
-
     partial void OnAiFileSummaryChanged(AiFileSummaryResult? value)
     {
         OnPropertyChanged(nameof(HasAiFileSummary));
@@ -496,15 +456,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
     [RelayCommand]
     private void ToggleAiFileBand() => AiFileBandExpanded = !AiFileBandExpanded;
-
-    [RelayCommand]
-    private async Task SelectAiImportantFileAsync(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || _host is null)
-            return;
-
-        await _host.SelectFileAsync(FilePath.From(path)).ConfigureAwait(false);
-    }
 
     [RelayCommand(CanExecute = nameof(AiButtonEnabled))]
     private async Task RequestAiReviewAsync()
@@ -673,7 +624,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         AiCopilotSessionId = snapshot.CopilotSessionId;
         AiLastError = snapshot.ErrorMessage;
         AiReviewFinishedUtc = snapshot.FinishedUtc ?? snapshot.StartedUtc;
-        ApplyAiTriageFields(snapshot.Triage);
 
         if (snapshot.State == AiRunState.Complete)
             ShowAiProgressDialog = false;
@@ -689,45 +639,32 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         }
 
         NotifyAiFileBandChanged();
-        TriageApplied?.Invoke();
     }
 
-    private void ApplyAiTriageFields(AiPrTriageResult? triage)
-    {
-        AiTriage = triage;
-        if (_host is not null)
-            AiReviewSessionHelpers.ApplyTriageToFiles(triage, _host.PendingFiles);
-    }
-
-    /// <summary>Re-applies the cached triage onto the host's current file instances (call after RebuildFileLists).</summary>
-    public void ReapplyTriageToFiles()
-    {
-        if (_host is null || AiTriage is null)
-            return;
-
-        AiReviewSessionHelpers.ApplyTriageToFiles(AiTriage, _host.PendingFiles);
-        UpdateFileUnresolvedCommentCounts();
-        NotifyAiFileBandChanged();
-    }
-
-    /// <summary>Pushes per-file unresolved local-comment counts onto the host's file list rows.</summary>
+    /// <summary>Pushes per-file local-comment counts onto the host's file list rows.</summary>
     public void UpdateFileUnresolvedCommentCounts()
     {
         if (_host is null)
             return;
 
-        var counts = LocalComments
+        var unresolved = LocalComments
             .Where(c => !c.IsResolved)
             .GroupBy(c => c.Path, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
 
+        var total = LocalComments
+            .GroupBy(c => c.Path, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+
         foreach (var file in _host.PendingFiles)
-            file.UnresolvedThreadCount = counts.TryGetValue(file.Path.Value, out var n) ? n : 0;
+        {
+            file.UnresolvedThreadCount = unresolved.TryGetValue(file.Path.Value, out var u) ? u : 0;
+            file.TotalCommentCount = total.TryGetValue(file.Path.Value, out var t) ? t : 0;
+        }
     }
 
     private void NotifyAiFileBandChanged()
     {
-        OnPropertyChanged(nameof(SelectedFileAiGuidance));
         OnPropertyChanged(nameof(ShowAiFileBand));
         OnPropertyChanged(nameof(HasAiFileSummary));
         OnPropertyChanged(nameof(AiChatSelectedFileLabel));
@@ -936,15 +873,10 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
         try
         {
-            string? linesContext = null;
-            if (!string.IsNullOrWhiteSpace(_host.SelectedFile?.AiGuidance))
-                linesContext = $"File guidance from triage:\n{_host.SelectedFile.AiGuidance.Trim()}";
-
             var reply = await _ai.ChatAsync(new AiQuestionRequest(
                     sessionKey,
                     _host.SelectedFile?.Path.Value,
-                    question,
-                    linesContext))
+                    question))
                 .ConfigureAwait(false);
             await InvokeOnUiAsync(() =>
             {
@@ -1066,7 +998,7 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         if (file is null || diff is null)
             return;
 
-        if (HasAiTriage && _settings.Current.AiAssistanceEnabled)
+        if (HasAiRun && _settings.Current.AiAssistanceEnabled)
         {
             _aiFileCts = new CancellationTokenSource();
             _ = LoadAiFileDetailAsync(file, diff, _aiFileCts.Token);
@@ -1220,19 +1152,15 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         }).ConfigureAwait(false);
     }
 
-    /// <summary>Clears AI triage / run state so the button returns to "AI review".</summary>
+    /// <summary>Clears AI run state so the button returns to "AI review".</summary>
     private void ResetAiReviewState()
     {
         AiRunState = AiRunState.Idle;
         AiProgress = null;
-        AiTriage = null;
         AiFileSummary = null;
         AiFileQuestion = "";
         AiFileAnswer = null;
         AiLastError = null;
-
-        if (_host is not null)
-            AiReviewSessionHelpers.ApplyTriageToFiles(null, _host.PendingFiles);
 
         foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
             DiffAnnotations.Remove(stale);

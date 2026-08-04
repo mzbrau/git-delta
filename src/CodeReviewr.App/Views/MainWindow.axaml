@@ -3,6 +3,7 @@
         xmlns:vm="using:CodeReviewr.App.ViewModels"
         xmlns:controls="using:CodeReviewr.App.Controls"
         xmlns:conv="using:CodeReviewr.App.Converters"
+        xmlns:ctrl="using:CodeReviewr.App.Controls"
         xmlns:core="using:CodeReviewr.Core"
         xmlns:ai="using:CodeReviewr.Core.AI"
         xmlns:icons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
@@ -610,7 +611,7 @@
                   </Button>
                   <Button Classes="IconOnly" Width="28" Height="28" Padding="4"
                           Command="{Binding WorkingCopy.PendingReview.ToggleAiChatCommand}"
-                          IsEnabled="{Binding WorkingCopy.PendingReview.HasAiTriage}"
+                          IsEnabled="{Binding WorkingCopy.PendingReview.HasAiRun}"
                           ToolTip.Tip="AI chat">
                     <icons:MaterialIcon Kind="ChatOutline" Width="16" Height="16"
                                         Foreground="{DynamicResource ForgeAiAccentBrush}" />
@@ -639,12 +640,6 @@
                                 CommandParameter="{x:Static core:FileListLayoutMode.Tree}"
                                 ToggleType="Radio"
                                 IsChecked="{Binding WorkingCopy.IsFileStatusTreeLayout, Mode=OneWay}" />
-                      <MenuItem Header="AI suggested order"
-                                Command="{Binding WorkingCopy.SetFileStatusListLayoutCommand}"
-                                CommandParameter="{x:Static core:FileListLayoutMode.AiSuggested}"
-                                ToggleType="Radio"
-                                IsVisible="{Binding WorkingCopy.PendingReview.HasAiTriage}"
-                                IsChecked="{Binding WorkingCopy.IsFileStatusAiSuggestedLayout, Mode=OneWay}" />
                     </MenuFlyout>
                   </Button.Flyout>
                   <StackPanel Orientation="Horizontal" Spacing="2">
@@ -723,7 +718,8 @@
                            SelectionMode="Single"
                            SelectionChanged="OnStashFileSelectionChanged"
                            ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                           Classes="FileList">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
                         <StackPanel />
@@ -731,52 +727,22 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:FileListEntry">
-                        <Panel>
-                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFolder}">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                                  Width="14" Height="14" Opacity="0.7" />
-                              <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
-                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
-                                         FontWeight="SemiBold" Opacity="0.9" />
-                            </StackPanel>
-                          </Border>
-                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFile}">
-                            <DockPanel>
-                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                      Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
-                                           Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                              </Border>
-                              <StackPanel Orientation="Horizontal" Spacing="6">
-                                <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
-                                                    Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                                <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center" />
-                                <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                    Opacity="0.55" VerticalAlignment="Center"
-                                                    Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                    IsVisible="{Binding File.HasCachedDiff}"
-                                                    ToolTip.Tip="Diff cached" />
-                              </StackPanel>
-                            </DockPanel>
-                          </Border>
-                        </Panel>
+                        <ctrl:FileListRowView />
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                     <ListBox.Styles>
                       <Style Selector="ListBoxItem">
                         <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="32" />
+                        <Setter Property="MinHeight" Value="24" />
                       </Style>
                     </ListBox.Styles>
+
                   </ListBox>
                 </StackPanel>
 
                 <!-- Comments (local-only review comments on pending changes) -->
-                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                <Button Classes="Ghost" Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsCommentsSelected}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                         Padding="12,8" Margin="0,0,0,-8"
                         IsVisible="{Binding WorkingCopy.IsFileStatusMode}"
                         Command="{Binding WorkingCopy.PendingReview.SelectCommentsCommand}">
@@ -787,76 +753,10 @@
                   </StackPanel>
                 </Button>
 
-                <!-- AI-suggested combined list (staged + unstaged + conflicted, priority ordered) -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusAiSuggestedLayout}">
-                  <TextBlock Text="AI SUGGESTED ORDER" Classes="SectionLabel" Margin="8,0,8,4" />
-                  <ListBox x:Name="AiSuggestedFileList"
-                           ItemsSource="{Binding WorkingCopy.AiSuggestedFileEntries}"
-                           SelectionMode="Multiple"
-                           SelectionChanged="OnFileSelectionChanged"
-                           PointerPressed="OnFileListPointerPressed"
-                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListBox.ItemsPanel>
-                      <ItemsPanelTemplate>
-                        <StackPanel />
-                      </ItemsPanelTemplate>
-                    </ListBox.ItemsPanel>
-                    <ListBox.ItemTemplate>
-                      <DataTemplate x:DataType="vm:FileListEntry">
-                        <Panel>
-                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFolder}">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                                  Width="14" Height="14" Opacity="0.7" />
-                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
-                                         FontWeight="SemiBold" Opacity="0.9" />
-                            </StackPanel>
-                          </Border>
-                          <Border Classes="FileRow" Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFile}">
-                            <DockPanel>
-                              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
-                                <Border CornerRadius="2" Padding="4,1"
-                                        Background="{DynamicResource ForgePrimaryContainerBrush}"
-                                        IsVisible="{Binding File.UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
-                                  <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
-                                </Border>
-                                <TextBlock Text="{Binding File.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
-                                           FontSize="10" VerticalAlignment="Center"
-                                           Foreground="{DynamicResource ForgeAiAccentBrush}"
-                                           IsVisible="{Binding File.HasAiStars}"
-                                           ToolTip.Tip="{Binding File.AiGuidanceTooltip}" />
-                                <Border CornerRadius="2" Padding="4,1"
-                                        Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                                  <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
-                                             Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                                </Border>
-                              </StackPanel>
-                              <StackPanel Orientation="Horizontal" Spacing="6">
-                                <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
-                                                    Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                                <TextBlock Text="{Binding Label}" Classes="MonoPath"
-                                           Classes.AiSkip="{Binding File.IsAiSkip}"
-                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                              </StackPanel>
-                            </DockPanel>
-                          </Border>
-                        </Panel>
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                    <ListBox.Styles>
-                      <Style Selector="ListBoxItem">
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="32" />
-                      </Style>
-                    </ListBox.Styles>
-                  </ListBox>
-                </StackPanel>
+
 
                 <!-- Staged -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusFlatOrTreeMode}">
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
                       <Button Classes="Link" Content="Unstage Selected"
@@ -869,7 +769,10 @@
                       <StackPanel Orientation="Horizontal" Spacing="6">
                         <icons:MaterialIcon Kind="{Binding WorkingCopy.StagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                             Width="14" Height="14" />
-                        <TextBlock Text="STAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Text="STAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
+                          <TextBlock Text="{Binding WorkingCopy.StagedFileCount, StringFormat=({0})}" Classes="SectionLabel" VerticalAlignment="Center" />
+                        </StackPanel>
                       </StackPanel>
                     </Button>
                   </DockPanel>
@@ -880,7 +783,8 @@
                            PointerPressed="OnFileListPointerPressed"
                            ScrollViewer.VerticalScrollBarVisibility="Disabled"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                           IsVisible="{Binding WorkingCopy.StagedExpanded}">
+                           IsVisible="{Binding WorkingCopy.StagedExpanded}"
+                           Classes="FileList">
                     <ListBox.ContextMenu>
                       <ContextMenu>
                         <MenuItem Header="Unstage"
@@ -899,64 +803,23 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:FileListEntry">
-                        <Panel>
-                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFolder}">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                                  Width="14" Height="14" Opacity="0.7" />
-                              <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
-                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
-                                         FontWeight="SemiBold" Opacity="0.9" />
-                            </StackPanel>
-                          </Border>
-                          <Border Classes="FileRow" Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFile}">
-                            <DockPanel>
-                              <TextBlock DockPanel.Dock="Right" Text="{Binding File.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
-                                         FontSize="10" VerticalAlignment="Center" Margin="4,0,0,0"
-                                         Foreground="{DynamicResource ForgeAiAccentBrush}"
-                                         IsVisible="{Binding File.HasAiStars}"
-                                         ToolTip.Tip="{Binding File.AiGuidanceTooltip}" />
-                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                      Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
-                                           Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                              </Border>
-                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                      Background="{DynamicResource ForgePrimaryContainerBrush}"
-                                      IsVisible="{Binding File.UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
-                                <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
-                              </Border>
-                              <CheckBox IsChecked="True" Margin="0,0,8,0" VerticalAlignment="Center"
-                                        Click="OnFileCheckClick" Tag="{Binding File}" />
-                              <StackPanel Orientation="Horizontal" Spacing="6">
-                                <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
-                                                    Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                                <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center" />
-                                <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                    Opacity="0.55" VerticalAlignment="Center"
-                                                    Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                    IsVisible="{Binding File.HasCachedDiff}"
-                                                    ToolTip.Tip="Diff cached" />
-                              </StackPanel>
-                            </DockPanel>
-                          </Border>
-                        </Panel>
+                        <ctrl:FileListRowView
+                            ShowStageCheckbox="True"
+                            StageCheckboxChecked="true" />
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                     <ListBox.Styles>
                       <Style Selector="ListBoxItem">
                         <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="32" />
+                        <Setter Property="MinHeight" Value="24" />
                       </Style>
                     </ListBox.Styles>
+
                   </ListBox>
                 </StackPanel>
 
                 <!-- Unstaged -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusFlatOrTreeMode}">
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
                       <Button Classes="Link" Content="Stage Selected"
@@ -969,7 +832,10 @@
                       <StackPanel Orientation="Horizontal" Spacing="6">
                         <icons:MaterialIcon Kind="{Binding WorkingCopy.UnstagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
                                             Width="14" Height="14" />
-                        <TextBlock Text="UNSTAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Text="UNSTAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
+                          <TextBlock Text="{Binding WorkingCopy.UnstagedFileCount, StringFormat=({0})}" Classes="SectionLabel" VerticalAlignment="Center" />
+                        </StackPanel>
                       </StackPanel>
                     </Button>
                   </DockPanel>
@@ -980,7 +846,8 @@
                            PointerPressed="OnFileListPointerPressed"
                            ScrollViewer.VerticalScrollBarVisibility="Disabled"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                           IsVisible="{Binding WorkingCopy.UnstagedExpanded}">
+                           IsVisible="{Binding WorkingCopy.UnstagedExpanded}"
+                           Classes="FileList">
                     <ListBox.ContextMenu>
                       <ContextMenu>
                         <MenuItem Header="Stage"
@@ -999,64 +866,23 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:FileListEntry">
-                        <Panel>
-                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFolder}">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                                  Width="14" Height="14" Opacity="0.7" />
-                              <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
-                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
-                                         FontWeight="SemiBold" Opacity="0.9" />
-                            </StackPanel>
-                          </Border>
-                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFile}">
-                            <DockPanel>
-                              <TextBlock DockPanel.Dock="Right" Text="{Binding File.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
-                                         FontSize="10" VerticalAlignment="Center" Margin="4,0,0,0"
-                                         Foreground="{DynamicResource ForgeAiAccentBrush}"
-                                         IsVisible="{Binding File.HasAiStars}"
-                                         ToolTip.Tip="{Binding File.AiGuidanceTooltip}" />
-                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                      Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
-                                           Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                              </Border>
-                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                      Background="{DynamicResource ForgePrimaryContainerBrush}"
-                                      IsVisible="{Binding File.UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
-                                <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
-                              </Border>
-                              <CheckBox IsChecked="False" Margin="0,0,8,0" VerticalAlignment="Center"
-                                        Click="OnFileCheckClick" Tag="{Binding File}" />
-                              <StackPanel Orientation="Horizontal" Spacing="6">
-                                <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
-                                                    Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                                <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center" />
-                                <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                    Opacity="0.55" VerticalAlignment="Center"
-                                                    Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                    IsVisible="{Binding File.HasCachedDiff}"
-                                                    ToolTip.Tip="Diff cached" />
-                              </StackPanel>
-                            </DockPanel>
-                          </Border>
-                        </Panel>
+                        <ctrl:FileListRowView
+                            ShowStageCheckbox="True"
+                            StageCheckboxChecked="false" />
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                     <ListBox.Styles>
                       <Style Selector="ListBoxItem">
                         <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="32" />
+                        <Setter Property="MinHeight" Value="24" />
                       </Style>
                     </ListBox.Styles>
+
                   </ListBox>
                 </StackPanel>
 
                 <!-- Conflicted -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusFlatOrTreeMode}">
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
                   <StackPanel IsVisible="{Binding WorkingCopy.HasConflictedFiles}">
                   <TextBlock Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
                              Foreground="{DynamicResource ForgeErrorBrush}" />
@@ -1066,7 +892,8 @@
                            SelectionChanged="OnFileSelectionChanged"
                            PointerPressed="OnFileListPointerPressed"
                            ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                           Classes="FileList">
                     <ListBox.ContextMenu>
                       <ContextMenu>
                         <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
@@ -1080,40 +907,16 @@
                     </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:FileListEntry">
-                        <Panel>
-                          <Border Padding="8,4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFolder}">
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                                  Width="14" Height="14" Opacity="0.7" />
-                              <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
-                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
-                                         FontWeight="SemiBold" Opacity="0.9" />
-                            </StackPanel>
-                          </Border>
-                          <Border Padding="8,4" Margin="{Binding IndentMargin}"
-                                  IsVisible="{Binding IsFile}">
-                            <DockPanel>
-                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1"
-                                      Background="{DynamicResource ForgeStatusDeletedBadgeBgBrush}">
-                                <TextBlock Text="C" FontSize="10" FontWeight="Bold"
-                                           Foreground="{DynamicResource ForgeErrorBrush}" />
-                              </Border>
-                              <StackPanel Orientation="Horizontal" Spacing="6">
-                                <TextBlock Text="{Binding Label}" Classes="MonoPath"
-                                           Foreground="{DynamicResource ForgeErrorBrush}" />
-                                <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                    Opacity="0.55" VerticalAlignment="Center"
-                                                    Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                    IsVisible="{Binding File.HasCachedDiff}"
-                                                    ToolTip.Tip="Diff cached" />
-                              </StackPanel>
-                            </DockPanel>
-                          </Border>
-                        </Panel>
+                        <ctrl:FileListRowView />
                       </DataTemplate>
                     </ListBox.ItemTemplate>
+                    <ListBox.Styles>
+                      <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="24" />
+                      </Style>
+                    </ListBox.Styles>
+
                   </ListBox>
                   </StackPanel>
                 </StackPanel>
@@ -1159,7 +962,7 @@
                   <Button DockPanel.Dock="Right" Classes="IconOnly" Width="28" Height="28" Padding="4"
                           Margin="0,0,4,0"
                           Command="{Binding Review.ToggleAiChatCommand}"
-                          IsEnabled="{Binding Review.HasAiTriage}"
+                          IsEnabled="{Binding Review.HasAiRun}"
                           ToolTip.Tip="AI chat">
                     <icons:MaterialIcon Kind="ChatOutline" Width="16" Height="16"
                                         Foreground="{DynamicResource ForgeAiAccentBrush}" />
@@ -1188,12 +991,6 @@
                                 CommandParameter="{x:Static core:FileListLayoutMode.Tree}"
                                 ToggleType="Radio"
                                 IsChecked="{Binding Review.IsPullRequestTreeLayout, Mode=OneWay}" />
-                      <MenuItem Header="AI suggested order"
-                                Command="{Binding Review.SetPullRequestFileListLayoutCommand}"
-                                CommandParameter="{x:Static core:FileListLayoutMode.AiSuggested}"
-                                ToggleType="Radio"
-                                IsVisible="{Binding Review.HasAiTriage}"
-                                IsChecked="{Binding Review.IsPullRequestAiSuggestedLayout, Mode=OneWay}" />
                     </MenuFlyout>
                   </Button.Flyout>
                   <StackPanel Orientation="Horizontal" Spacing="2">
@@ -1234,15 +1031,10 @@
                                 Command="{Binding Review.ToggleFilterUnresolvedCommand}"
                                 ToggleType="CheckBox"
                                 IsChecked="{Binding Review.FilterUnresolved, Mode=OneWay}" />
-                      <MenuItem Header="Review carefully (AI)"
-                                Command="{Binding Review.ToggleFilterReviewCarefullyCommand}"
-                                ToggleType="CheckBox"
-                                IsVisible="{Binding Review.HasAiTriage}"
-                                IsChecked="{Binding Review.FilterReviewCarefully, Mode=OneWay}" />
                       <MenuItem Header="Show dismissed AI annotations"
                                 Command="{Binding Review.ToggleAiShowDismissedAnnotationsCommand}"
                                 ToggleType="CheckBox"
-                                IsVisible="{Binding Review.HasAiTriage}"
+                                IsVisible="{Binding Review.HasAiRun}"
                                 IsChecked="{Binding Review.AiShowDismissedAnnotations, Mode=OneWay}" />
                     </MenuFlyout>
                   </Button.Flyout>
@@ -1285,7 +1077,7 @@
             </Border>
             <ScrollViewer>
               <StackPanel>
-                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                <Button Classes="Ghost" Classes.FileListSelected="{Binding Review.IsConversationSelected}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
                         Padding="12,8" Command="{Binding Review.SelectConversationCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <icons:MaterialIcon Kind="ForumOutline" Width="16" Height="16" />
@@ -1296,52 +1088,21 @@
                          ItemsSource="{Binding Review.PrFileEntries}"
                          SelectedItem="{Binding Review.SelectedPrFileEntry}"
                          SelectionMode="Single"
-                         Margin="0">
+                         Margin="0"
+                           Classes="FileList">
                   <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="vm:FileListEntry">
-                      <Panel>
-                        <Border Padding="8,4" Margin="{Binding IndentMargin}"
-                                IsVisible="{Binding IsFolder}">
-                          <StackPanel Orientation="Horizontal" Spacing="6">
-                            <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                                Width="14" Height="14" Opacity="0.7" />
-                            <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
-                                                Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                            <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
-                                       FontWeight="SemiBold" Opacity="0.9" TextTrimming="CharacterEllipsis" />
-                          </StackPanel>
-                        </Border>
-                        <Border Padding="8,4" Margin="{Binding IndentMargin}"
-                                IsVisible="{Binding IsFile}">
-                          <DockPanel>
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
-                              <icons:MaterialIcon Kind="Eye" Width="12" Height="12" Opacity="0.6"
-                                                  IsVisible="{Binding File.IsViewed}" ToolTip.Tip="Viewed" />
-                              <Border CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                      Background="{DynamicResource ForgePrimaryContainerBrush}"
-                                      IsVisible="{Binding File.UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
-                                <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
-                              </Border>
-                              <TextBlock Text="{Binding File.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
-                                         FontSize="10" VerticalAlignment="Center"
-                                         Foreground="{DynamicResource ForgeAiAccentBrush}"
-                                         IsVisible="{Binding File.HasAiStars}"
-                                         ToolTip.Tip="{Binding File.AiGuidanceTooltip}" />
-                              <Border CornerRadius="2" Padding="4,1"
-                                      Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                                <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
-                                           Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                              </Border>
-                            </StackPanel>
-                            <TextBlock Text="{Binding Label}" Classes="MonoPath PrFileLabel"
-                                       Classes.Unviewed="{Binding File.IsViewed, Converter={x:Static conv:ForgeConverters.InvertBool}}"
-                                       Classes.AiSkip="{Binding File.IsAiSkip}"
-                                       TextTrimming="CharacterEllipsis" />
-                          </DockPanel>
-                        </Border>
-                      </Panel>
+                      <ctrl:FileListRowView
+                            ShowViewedEye="True" />
                     </DataTemplate>
                   </ListBox.ItemTemplate>
+                  <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                      <Setter Property="Padding" Value="0" />
+                      <Setter Property="MinHeight" Value="24" />
+                    </Style>
+                  </ListBox.Styles>
+
                 </ListBox>
               </StackPanel>
             </ScrollViewer>
@@ -1495,55 +1256,9 @@
           </Border>
 
           <Panel ClipToBounds="True">
-            <!-- Comments view: AI triage summary + local (non-GitHub) review comments -->
+            <!-- Comments view: local (non-GitHub) review comments -->
             <ScrollViewer IsVisible="{Binding WorkingCopy.PendingReview.IsCommentsSelected}">
               <StackPanel Spacing="16" Margin="16">
-                <Border Background="{DynamicResource ForgeSurfaceContainerBrush}"
-                        CornerRadius="8" Padding="12"
-                        IsVisible="{Binding WorkingCopy.PendingReview.HasAiTriage}">
-                  <StackPanel Spacing="10">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                      <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
-                                          Foreground="{DynamicResource ForgeAiAccentBrush}" />
-                      <TextBlock Text="AI REVIEW" Classes="PanelHeader" Opacity="0.7" />
-                      <Border CornerRadius="2" Padding="6,2"
-                              Background="{Binding WorkingCopy.PendingReview.AiTriage.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBackground}}">
-                        <TextBlock Text="{Binding WorkingCopy.PendingReview.AiRiskBadgeText}" FontSize="10" FontWeight="SemiBold"
-                                   Foreground="{Binding WorkingCopy.PendingReview.AiTriage.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBrush}}" />
-                      </Border>
-                      <TextBlock Text="{Binding WorkingCopy.PendingReview.AiReviewFinishedUtc, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
-                                 FontSize="11" Opacity="0.6" VerticalAlignment="Center"
-                                 IsVisible="{Binding WorkingCopy.PendingReview.AiReviewFinishedUtc, Converter={x:Static conv:ForgeConverters.IsNotNull}}" />
-                    </StackPanel>
-                    <controls:MarkdownView Markdown="{Binding WorkingCopy.PendingReview.AiTriage.Summary}" />
-                    <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiMeasuredFactsText}"
-                               FontSize="11" Opacity="0.7"
-                               IsVisible="{Binding WorkingCopy.PendingReview.AiMeasuredFactsText, Converter={x:Static conv:ForgeConverters.IsNotNull}}" />
-                    <StackPanel Spacing="6" IsVisible="{Binding WorkingCopy.PendingReview.HasAiImportantFiles}">
-                      <TextBlock Text="IMPORTANT FILES" Classes="PanelHeader" Opacity="0.7" FontSize="11" />
-                      <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiImportantFiles}">
-                        <ItemsControl.ItemTemplate>
-                          <DataTemplate x:DataType="vm:AiImportantFileItem">
-                            <Button Classes="Ghost" Padding="4,4" HorizontalAlignment="Stretch"
-                                    HorizontalContentAlignment="Left"
-                                    Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.PendingReview.SelectAiImportantFileCommand}"
-                                    CommandParameter="{Binding Path}">
-                              <DockPanel>
-                                <TextBlock DockPanel.Dock="Left" Text="{Binding Path}" Classes="MonoPath"
-                                           FontSize="11" FontWeight="SemiBold" Margin="0,0,8,0"
-                                           TextTrimming="CharacterEllipsis" MaxWidth="220" />
-                                <TextBlock Text="{Binding Label}" FontSize="11" TextWrapping="NoWrap"
-                                           TextTrimming="CharacterEllipsis"
-                                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                              </DockPanel>
-                            </Button>
-                          </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                      </ItemsControl>
-                    </StackPanel>
-                  </StackPanel>
-                </Border>
-
                 <Border Background="{DynamicResource ForgeSurfaceContainerBrush}"
                         CornerRadius="8" Padding="12">
                   <StackPanel Spacing="8">
@@ -1621,18 +1336,11 @@
                                               Foreground="{DynamicResource ForgeAiAccentBrush}" />
                           <TextBlock Text="AI GUIDANCE" Classes="PanelHeader" Opacity="0.7"
                                      VerticalAlignment="Center" />
-                          <TextBlock Text="{Binding WorkingCopy.SelectedFile.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
-                                     FontSize="11" VerticalAlignment="Center"
-                                     Foreground="{DynamicResource ForgeAiAccentBrush}"
-                                     IsVisible="{Binding WorkingCopy.SelectedFile.HasAiStars}" />
                         </StackPanel>
                       </DockPanel>
                     </Button>
                     <ScrollViewer MaxHeight="160" IsVisible="{Binding WorkingCopy.PendingReview.AiFileBandExpanded}">
                       <StackPanel Spacing="6">
-                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.SelectedFileAiGuidance}" FontSize="12"
-                                   TextWrapping="Wrap"
-                                   IsVisible="{Binding WorkingCopy.PendingReview.SelectedFileAiGuidance, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
                         <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileSummary.Purpose}" FontSize="12" TextWrapping="Wrap"
                                    IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileSummary}" />
                         <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileSummary.InterestingChanges}" FontSize="12"
@@ -1926,7 +1634,7 @@
             <DockPanel>
               <Button DockPanel.Dock="Right" Classes="Ghost" Content="Re-run AI review" FontSize="11"
                       Command="{Binding Review.ConfirmIncrementalRereviewCommand}"
-                      IsVisible="{Binding Review.HasAiTriage}" />
+                      IsVisible="{Binding Review.HasAiRun}" />
               <TextBlock Text="{Binding Review.HeadMovedBanner}" TextWrapping="Wrap" FontSize="12"
                          VerticalAlignment="Center" />
             </DockPanel>
@@ -2082,72 +1790,6 @@
           <Panel ClipToBounds="True">
             <ScrollViewer IsVisible="{Binding Review.IsConversationSelected}">
               <StackPanel Spacing="16" Margin="16">
-                <!-- AI review -->
-                <Border Background="{DynamicResource ForgeSurfaceContainerBrush}"
-                        CornerRadius="8" Padding="12"
-                        IsVisible="{Binding Review.HasAiTriage}">
-                  <StackPanel Spacing="10">
-                    <DockPanel>
-                      <Button DockPanel.Dock="Right" Classes="Ghost" FontSize="11"
-                              Content="Re-run"
-                              IsVisible="{Binding Review.CanRerunAiReview}"
-                              Command="{Binding Review.RerunAiReviewCommand}" />
-                      <Button DockPanel.Dock="Right" Classes="Ghost" FontSize="11" Margin="0,0,4,0"
-                              Content="Resume"
-                              IsVisible="{Binding Review.CanResumeAiReview}"
-                              Command="{Binding Review.ResumeAiReviewCommand}" />
-                      <icons:MaterialIcon DockPanel.Dock="Right" Width="16" Height="16" Margin="0,0,8,0"
-                                          Kind="{Binding Review.AiReviewSectionExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                          Opacity="0.7" />
-                      <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left"
-                              Command="{Binding Review.ToggleAiReviewSectionCommand}">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                          <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
-                                              Foreground="{DynamicResource ForgeAiAccentBrush}" />
-                          <TextBlock Text="AI REVIEW" Classes="PanelHeader" Opacity="0.7" />
-                          <Border CornerRadius="2" Padding="6,2"
-                                  Background="{Binding Review.AiTriage.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBackground}}">
-                            <TextBlock Text="{Binding Review.AiRiskBadgeText}" FontSize="10" FontWeight="SemiBold"
-                                       Foreground="{Binding Review.AiTriage.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBrush}}" />
-                          </Border>
-                          <TextBlock Text="{Binding Review.AiReviewFinishedUtc, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
-                                     FontSize="11" Opacity="0.6" VerticalAlignment="Center"
-                                     IsVisible="{Binding Review.AiReviewFinishedUtc, Converter={x:Static conv:ForgeConverters.IsNotNull}}" />
-                        </StackPanel>
-                      </Button>
-                    </DockPanel>
-                    <StackPanel Spacing="10" IsVisible="{Binding Review.AiReviewSectionExpanded}">
-                      <controls:MarkdownView Markdown="{Binding Review.AiTriage.Summary}" />
-                      <SelectableTextBlock Text="{Binding Review.AiMeasuredFactsText}"
-                                 FontSize="11" Opacity="0.7"
-                                 IsVisible="{Binding Review.AiMeasuredFactsText, Converter={x:Static conv:ForgeConverters.IsNotNull}}" />
-                      <StackPanel Spacing="6"
-                                  IsVisible="{Binding Review.HasAiImportantFiles}">
-                        <TextBlock Text="IMPORTANT FILES" Classes="PanelHeader" Opacity="0.7" FontSize="11" />
-                        <ItemsControl ItemsSource="{Binding Review.AiImportantFiles}">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="vm:AiImportantFileItem">
-                              <Button Classes="Ghost" Padding="4,4" HorizontalAlignment="Stretch"
-                                      HorizontalContentAlignment="Left"
-                                      Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.SelectAiImportantFileCommand}"
-                                      CommandParameter="{Binding Path}">
-                                <DockPanel>
-                                  <TextBlock DockPanel.Dock="Left" Text="{Binding Path}" Classes="MonoPath"
-                                             FontSize="11" FontWeight="SemiBold" Margin="0,0,8,0"
-                                             TextTrimming="CharacterEllipsis" MaxWidth="220" />
-                                  <TextBlock Text="{Binding Label}" FontSize="11" TextWrapping="NoWrap"
-                                             TextTrimming="CharacterEllipsis"
-                                             Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                                </DockPanel>
-                              </Button>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                      </StackPanel>
-                    </StackPanel>
-                  </StackPanel>
-                </Border>
-
                 <!-- Description -->
                 <Border Background="{DynamicResource ForgeSurfaceContainerBrush}"
                         CornerRadius="8" Padding="12">
@@ -2291,18 +1933,11 @@
                                             Foreground="{DynamicResource ForgeAiAccentBrush}" />
                         <TextBlock Text="AI GUIDANCE" Classes="PanelHeader" Opacity="0.7"
                                    VerticalAlignment="Center" />
-                        <TextBlock Text="{Binding Review.SelectedFile.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
-                                   FontSize="11" VerticalAlignment="Center"
-                                   Foreground="{DynamicResource ForgeAiAccentBrush}"
-                                   IsVisible="{Binding Review.SelectedFile.HasAiStars}" />
                       </StackPanel>
                     </DockPanel>
                   </Button>
                   <ScrollViewer MaxHeight="180" IsVisible="{Binding Review.AiFileBandExpanded}">
                     <StackPanel Spacing="6">
-                      <SelectableTextBlock Text="{Binding Review.SelectedFileAiGuidance}" FontSize="12"
-                                 TextWrapping="Wrap"
-                                 IsVisible="{Binding Review.SelectedFileAiGuidance, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
                       <SelectableTextBlock Text="{Binding Review.AiFileSummary.Purpose}" FontSize="12" TextWrapping="Wrap"
                                  IsVisible="{Binding Review.HasAiFileSummary}" />
                       <SelectableTextBlock Text="{Binding Review.AiFileSummary.InterestingChanges}" FontSize="12"
@@ -2993,51 +2628,20 @@
                          ItemsSource="{Binding WorkingCopy.HistoryFileEntries}"
                          SelectionMode="Single"
                          SelectionChanged="OnHistoryFileSelectionChanged"
-                         Margin="8,8,8,12">
-                  <ListBox.ItemTemplate>
-                    <DataTemplate x:DataType="vm:FileListEntry">
-                      <Panel>
-                        <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                IsVisible="{Binding IsFolder}">
-                          <StackPanel Orientation="Horizontal" Spacing="6">
-                            <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                                Width="14" Height="14" Opacity="0.7" />
-                            <icons:MaterialIcon Kind="FolderOutline" Width="16" Height="16"
-                                                Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                            <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
-                                       FontWeight="SemiBold" Opacity="0.9" />
-                          </StackPanel>
-                        </Border>
-                        <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
-                                IsVisible="{Binding IsFile}">
-                          <DockPanel>
-                            <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
-                                    Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
-                              <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
-                                         Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                            </Border>
-                            <StackPanel Orientation="Horizontal" Spacing="6">
-                              <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
-                                                  Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
-                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
-                                         ToolTip.Tip="{Binding File.Path.Value}" />
-                              <icons:MaterialIcon Kind="CheckCircleOutline" Width="12" Height="12"
-                                                  Opacity="0.55" VerticalAlignment="Center"
-                                                  Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
-                                                  IsVisible="{Binding File.HasCachedDiff}"
-                                                  ToolTip.Tip="Diff cached" />
-                            </StackPanel>
-                          </DockPanel>
-                        </Border>
-                      </Panel>
-                    </DataTemplate>
-                  </ListBox.ItemTemplate>
-                  <ListBox.Styles>
-                    <Style Selector="ListBoxItem">
-                      <Setter Property="Padding" Value="0" />
-                      <Setter Property="MinHeight" Value="32" />
-                    </Style>
-                  </ListBox.Styles>
+                         Margin="8,8,8,12"
+                           Classes="FileList">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:FileListEntry">
+                        <ctrl:FileListRowView />
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.Styles>
+                      <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="24" />
+                      </Style>
+                    </ListBox.Styles>
+
                 </ListBox>
               </DockPanel>
             </Border>

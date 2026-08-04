@@ -533,14 +533,6 @@ public sealed class WorkingCopyViewModelCommitTests
             await vm.PendingReview.RefreshLocalCommentsAsync();
 
             vm.PendingReview.AiRunState = AiRunState.Complete;
-            vm.PendingReview.AiTriage = new AiPrTriageResult(
-                Summary: "stale",
-                Risk: AiRiskLevel.Low,
-                Justifications: [],
-                SuggestedOrder: ["committed.txt"],
-                Files: [new AiFileTriage("committed.txt", AiFileClassification.Normal, 3, "g")],
-                Measured: new AiMeasuredFacts(1, 1, 1));
-
             Assert.That(vm.PendingReview.UnresolvedCommentCount, Is.EqualTo(2));
             Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("Re-run AI review"));
 
@@ -552,7 +544,7 @@ public sealed class WorkingCopyViewModelCommitTests
             Assert.That(vm.PendingReview.LocalComments.Select(c => c.Id), Is.EqualTo(new[] { "keep" }));
             Assert.That(vm.PendingReview.UnresolvedCommentCount, Is.EqualTo(1));
             Assert.That(vm.PendingReview.AiRunState, Is.EqualTo(AiRunState.Idle));
-            Assert.That(vm.PendingReview.AiTriage, Is.Null);
+            Assert.That(vm.PendingReview.HasAiRun, Is.False);
             Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("AI review"));
             Assert.That(vm.UnstagedFiles.Select(f => f.Path.Value), Is.EqualTo(new[] { "remain.txt" }));
         }

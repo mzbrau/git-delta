@@ -47,15 +47,22 @@ public static class ForgeConverters
         });
 
     public static readonly IValueConverter PlusPrefix =
-        new FuncValueConverter<int, string>(v => $"+{v}");
+        new FuncValueConverter<object?, string>(v => $"+{AsInt(v)}");
 
     public static readonly IValueConverter MinusPrefix =
-        new FuncValueConverter<int, string>(v => $"-{v}");
+        new FuncValueConverter<object?, string>(v => $"-{AsInt(v)}");
+
+    private static int AsInt(object? v) => v switch
+    {
+        int i => i,
+        long l => (int)l,
+        _ => 0,
+    };
 
     public static readonly IValueConverter StatusBadgeBrush =
         new FuncValueConverter<ChangeKind, IBrush>(kind => kind switch
         {
-            ChangeKind.Added or ChangeKind.Copied => Brush("ForgeStatusAddedBrush"),
+            ChangeKind.Added or ChangeKind.Untracked or ChangeKind.Copied => Brush("ForgeStatusAddedBrush"),
             ChangeKind.Deleted => Brush("ForgeStatusDeletedBrush"),
             ChangeKind.Modified or ChangeKind.Renamed or ChangeKind.TypeChanged => Brush("ForgeStatusModifiedBrush"),
             ChangeKind.Conflicted => Brush("ForgeErrorBrush"),
@@ -65,10 +72,63 @@ public static class ForgeConverters
     public static readonly IValueConverter StatusBadgeBackground =
         new FuncValueConverter<ChangeKind, IBrush>(kind => kind switch
         {
-            ChangeKind.Added or ChangeKind.Copied => Brush("ForgeStatusAddedBadgeBgBrush"),
+            ChangeKind.Added or ChangeKind.Untracked or ChangeKind.Copied => Brush("ForgeStatusAddedBadgeBgBrush"),
             ChangeKind.Deleted => Brush("ForgeStatusDeletedBadgeBgBrush"),
             ChangeKind.Modified or ChangeKind.Renamed or ChangeKind.TypeChanged => Brush("ForgeStatusModifiedBadgeBgBrush"),
             _ => Brush("ForgeStatusUntrackedBadgeBgBrush"),
+        });
+
+    public static readonly IValueConverter StatusIconKind =
+        new FuncValueConverter<ChangeKind, MaterialIconKind>(kind => kind switch
+        {
+            ChangeKind.Added or ChangeKind.Untracked => MaterialIconKind.Plus,
+            ChangeKind.Deleted => MaterialIconKind.Minus,
+            ChangeKind.Modified => MaterialIconKind.Pencil,
+            ChangeKind.Renamed => MaterialIconKind.FileReplaceOutline,
+            ChangeKind.Copied => MaterialIconKind.ContentCopy,
+            ChangeKind.TypeChanged => MaterialIconKind.FileCogOutline,
+            ChangeKind.Conflicted => MaterialIconKind.AlertOctagonOutline,
+            ChangeKind.Ignored => MaterialIconKind.EyeOffOutline,
+            _ => MaterialIconKind.FileDocumentOutline,
+        });
+
+    public static readonly IValueConverter StatusIconTooltip =
+        new FuncValueConverter<ChangeKind, string>(kind => kind switch
+        {
+            ChangeKind.Added => "Added",
+            ChangeKind.Untracked => "Untracked",
+            ChangeKind.Deleted => "Deleted",
+            ChangeKind.Modified => "Modified",
+            ChangeKind.Renamed => "Renamed",
+            ChangeKind.Copied => "Copied",
+            ChangeKind.TypeChanged => "Type changed",
+            ChangeKind.Conflicted => "Conflicted",
+            ChangeKind.Ignored => "Ignored",
+            _ => kind.ToString(),
+        });
+
+    public static readonly IValueConverter AiChangeClassificationIcon =
+        new FuncValueConverter<AiChangeClassification?, MaterialIconKind>(kind => kind switch
+        {
+            AiChangeClassification.BehaviorChanged => MaterialIconKind.SwapHorizontal,
+            AiChangeClassification.NewFeature => MaterialIconKind.StarOutline,
+            AiChangeClassification.RefactorOnly => MaterialIconKind.AutoFix,
+            AiChangeClassification.Configuration => MaterialIconKind.CogOutline,
+            AiChangeClassification.Tests => MaterialIconKind.FlaskOutline,
+            AiChangeClassification.Generated => MaterialIconKind.RobotOutline,
+            _ => MaterialIconKind.HelpCircleOutline,
+        });
+
+    public static readonly IValueConverter AiChangeClassificationTooltip =
+        new FuncValueConverter<AiChangeClassification?, string?>(kind => kind switch
+        {
+            AiChangeClassification.BehaviorChanged => "Behavior changed",
+            AiChangeClassification.NewFeature => "New feature",
+            AiChangeClassification.RefactorOnly => "Refactor only",
+            AiChangeClassification.Configuration => "Configuration",
+            AiChangeClassification.Tests => "Tests",
+            AiChangeClassification.Generated => "Generated",
+            _ => null,
         });
 
     public static readonly IValueConverter ChevronKind =
@@ -115,27 +175,6 @@ public static class ForgeConverters
             ? local.ToString("d MMM")
             : local.ToString("d MMM yyyy");
     }
-
-    public static readonly IValueConverter AiStarsDisplay =
-        new FuncValueConverter<int, string>(v => new string('★', Math.Clamp(v, 0, 5)));
-
-    public static readonly IValueConverter AiRiskBadgeBackground =
-        new FuncValueConverter<AiRiskLevel, IBrush>(risk => risk switch
-        {
-            AiRiskLevel.Low => Brush("ForgeStatusAddedBadgeBgBrush"),
-            AiRiskLevel.Medium => Brush("ForgeStatusModifiedBadgeBgBrush"),
-            AiRiskLevel.High or AiRiskLevel.Critical => Brush("ForgeStatusDeletedBadgeBgBrush"),
-            _ => Brush("ForgeStatusUntrackedBadgeBgBrush"),
-        });
-
-    public static readonly IValueConverter AiRiskBadgeBrush =
-        new FuncValueConverter<AiRiskLevel, IBrush>(risk => risk switch
-        {
-            AiRiskLevel.Low => Brush("ForgeStatusAddedBrush"),
-            AiRiskLevel.Medium => Brush("ForgeStatusModifiedBrush"),
-            AiRiskLevel.High or AiRiskLevel.Critical => Brush("ForgeStatusDeletedBrush"),
-            _ => Brush("ForgeOnSurfaceVariantBrush"),
-        });
 
     public static readonly IValueConverter AiAnnotationSeverityBrush =
         new FuncValueConverter<AiAnnotationSeverity, IBrush>(severity => severity switch
