@@ -27,6 +27,7 @@ public sealed class WorkingCopyViewModelStashDialogTests
     private NotificationService _notifications = null!;
     private AlwaysConfirmDialog _confirm = null!;
     private IRepositoryWatcher _watcher = null!;
+    private ILocalCommentStore _localComments = null!;
 
     [SetUp]
     public void SetUp()
@@ -46,6 +47,8 @@ public sealed class WorkingCopyViewModelStashDialogTests
         _notifications = new NotificationService();
         _confirm = new AlwaysConfirmDialog();
         _watcher = Substitute.For<IRepositoryWatcher>();
+        _localComments = Substitute.For<ILocalCommentStore>();
+        _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([]);
 
         _settings.Current.Returns(new AppSettings());
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -63,7 +66,8 @@ public sealed class WorkingCopyViewModelStashDialogTests
     private WorkingCopyViewModel CreateVm(IStashDialog stashDialog) =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
             _conflicts, _stash, _history, _settings, _notifications, _confirm, stashDialog,
-            new IntraLineDiffer(), _fsmonitor, _watcher);
+            new IntraLineDiffer(), _fsmonitor, _watcher,
+            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications));
 
     private static RepositoryStatus StatusWithChange() =>
         new(

@@ -42,6 +42,7 @@ public static class ServiceConfiguration
         services.AddCodeReviewrReview();
         services.AddCodeReviewrAI();
         services.AddSingleton<MainWindowViewModel>();
+        services.AddTransient<PendingChangesReviewViewModel>();
         services.AddTransient<WorkingCopyViewModel>();
         services.AddTransient<ReviewViewModel>();
         services.AddSingleton<NotificationService>();

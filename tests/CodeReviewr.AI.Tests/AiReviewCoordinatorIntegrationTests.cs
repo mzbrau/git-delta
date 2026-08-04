@@ -621,7 +621,7 @@ public sealed class AiReviewCoordinatorIntegrationTests
 
         public AiReviewRequest BuildRequest(
             string prNodeId, string headSha, string mergeBaseSha, IReadOnlyList<AiChangedFileFact> files) => new(
-            PrNodeId: prNodeId,
+            SessionKey: prNodeId,
             RepositoryPath: RepoPath,
             RepositoryKey: RepositoryKey,
             HeadSha: headSha,

@@ -10,9 +10,10 @@ namespace CodeReviewr.AI;
 public static class AiCacheKeys
 {
     public static string ComputePrTriageKey(
-        string prNodeId,
+        string sessionKey,
         string headSha,
         string mergeBaseSha,
+        string scope,
         string promptVersion,
         string? model,
         string rulesHash,
@@ -20,9 +21,10 @@ public static class AiCacheKeys
         Hash(string.Join(
             '|',
             "pr-triage",
-            prNodeId,
+            sessionKey,
             headSha,
             mergeBaseSha,
+            scope,
             promptVersion,
             model ?? "",
             rulesHash,

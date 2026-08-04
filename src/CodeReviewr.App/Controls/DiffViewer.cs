@@ -112,6 +112,7 @@ public sealed class DiffViewer : Control
     private bool _draggingHScroll;
     private double? _maxCodeContentWidthCache;
     private bool _rowsInvalidatePosted;
+    private bool _annotationsInvalidatePosted;
     private int _paintEpoch;
     private readonly Dictionary<string, double> _measureWidthCache = new(StringComparer.Ordinal);
     private readonly Dictionary<LinePaintKey, LinePaintCache> _linePaintCache = new();
@@ -474,6 +475,23 @@ public sealed class DiffViewer : Control
 
     private void OnAnnotationsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        // Coalesce annotation Add/Remove storms (local+AI reload) into one invalidate,
+        // matching OnRowsCollectionChanged — avoids paint thrash while scrolling.
+        if (e.Action != NotifyCollectionChangedAction.Reset && _annotationsInvalidatePosted)
+            return;
+
+        if (e.Action != NotifyCollectionChangedAction.Reset)
+        {
+            _annotationsInvalidatePosted = true;
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                _annotationsInvalidatePosted = false;
+                _minimapSnapshot = null;
+                InvalidateVisual();
+            }, Avalonia.Threading.DispatcherPriority.Render);
+            return;
+        }
+
         _minimapSnapshot = null;
         InvalidateVisual();
     }
@@ -1889,6 +1907,13 @@ public sealed class DiffViewer : Control
         _selectionStart = _selectionEnd = idx;
         EnsureVisible(idx);
         InvalidateVisual();
+    }
+
+    /// <summary>Scrolls so the row for <paramref name="side"/>/<paramref name="line"/> is visible.</summary>
+    public void ScrollToLine(DiffSide side, int line)
+    {
+        if (TryGetRowIndex(side, line, out var idx))
+            EnsureVisible(idx);
     }
 
     private void EnsureVisible(int index)

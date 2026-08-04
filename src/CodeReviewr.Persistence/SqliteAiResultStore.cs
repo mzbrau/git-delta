@@ -5,9 +5,9 @@ using Microsoft.Data.Sqlite;
 namespace CodeReviewr.Persistence;
 
 /// <summary>
-/// Durable AI result store backed by durable.db (schema v3+). Assumes the
+/// Durable AI result store backed by durable.db (schema v4+). Assumes the
 /// ai_* tables already exist — they are created by <see cref="SqliteDurableUserStore"/>'s
-/// schema migration V3.
+/// schema migration V3 and renamed to <c>session_key</c> in V4.
 /// </summary>
 public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
 {
@@ -35,13 +35,13 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO ai_runs (
-                    id, pr_node_id, head_sha, merge_base_sha, copilot_session_id, state,
+                    id, session_key, head_sha, merge_base_sha, copilot_session_id, state,
                     turns_used, ad_hoc_instructions, cache_key, error_message, started_utc, finished_utc)
                 VALUES (
                     $id, $pr, $head, $base, $session, $state,
                     $turns, $adhoc, $cacheKey, $error, $started, $finished)
                 ON CONFLICT(id) DO UPDATE SET
-                    pr_node_id = excluded.pr_node_id,
+                    session_key = excluded.session_key,
                     head_sha = excluded.head_sha,
                     merge_base_sha = excluded.merge_base_sha,
                     copilot_session_id = excluded.copilot_session_id,
@@ -54,7 +54,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
                     finished_utc = excluded.finished_utc;
                 """;
             cmd.Parameters.AddWithValue("$id", run.Id);
-            cmd.Parameters.AddWithValue("$pr", run.PrNodeId);
+            cmd.Parameters.AddWithValue("$pr", run.SessionKey);
             cmd.Parameters.AddWithValue("$head", run.HeadSha);
             cmd.Parameters.AddWithValue("$base", run.MergeBaseSha);
             cmd.Parameters.AddWithValue("$session", (object?)run.CopilotSessionId ?? DBNull.Value);
@@ -73,7 +73,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
         }
     }
 
-    public async Task<AiRunRecord?> GetLatestRunAsync(string prNodeId, CancellationToken ct = default)
+    public async Task<AiRunRecord?> GetLatestRunAsync(string sessionKey, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -81,14 +81,14 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT id, pr_node_id, head_sha, merge_base_sha, copilot_session_id, state,
+                SELECT id, session_key, head_sha, merge_base_sha, copilot_session_id, state,
                        turns_used, ad_hoc_instructions, cache_key, error_message, started_utc, finished_utc
                 FROM ai_runs
-                WHERE pr_node_id = $pr
+                WHERE session_key = $pr
                 ORDER BY started_utc DESC
                 LIMIT 1;
                 """;
-            cmd.Parameters.AddWithValue("$pr", prNodeId);
+            cmd.Parameters.AddWithValue("$pr", sessionKey);
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadRun(reader) : null;
         }
@@ -106,7 +106,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT id, pr_node_id, head_sha, merge_base_sha, copilot_session_id, state,
+                SELECT id, session_key, head_sha, merge_base_sha, copilot_session_id, state,
                        turns_used, ad_hoc_instructions, cache_key, error_message, started_utc, finished_utc
                 FROM ai_runs
                 WHERE id = $id
@@ -130,21 +130,21 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO ai_pr_results (run_id, pr_node_id, cache_key, payload_json, updated_utc)
+                INSERT INTO ai_pr_results (run_id, session_key, cache_key, payload_json, updated_utc)
                 VALUES ($run, $pr, $cacheKey, $payload, $updated)
                 ON CONFLICT(run_id) DO UPDATE SET
-                    pr_node_id = excluded.pr_node_id,
+                    session_key = excluded.session_key,
                     cache_key = excluded.cache_key,
                     payload_json = excluded.payload_json,
                     updated_utc = excluded.updated_utc
                 ON CONFLICT(cache_key) DO UPDATE SET
                     run_id = excluded.run_id,
-                    pr_node_id = excluded.pr_node_id,
+                    session_key = excluded.session_key,
                     payload_json = excluded.payload_json,
                     updated_utc = excluded.updated_utc;
                 """;
             cmd.Parameters.AddWithValue("$run", result.RunId);
-            cmd.Parameters.AddWithValue("$pr", result.PrNodeId);
+            cmd.Parameters.AddWithValue("$pr", result.SessionKey);
             cmd.Parameters.AddWithValue("$cacheKey", result.CacheKey);
             cmd.Parameters.AddWithValue("$payload", result.PayloadJson);
             cmd.Parameters.AddWithValue("$updated", result.UpdatedUtc.UtcDateTime.ToString("O"));
@@ -164,7 +164,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT run_id, pr_node_id, cache_key, payload_json, updated_utc
+                SELECT run_id, session_key, cache_key, payload_json, updated_utc
                 FROM ai_pr_results
                 WHERE cache_key = $cacheKey
                 LIMIT 1;
@@ -187,7 +187,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT run_id, pr_node_id, cache_key, payload_json, updated_utc
+                SELECT run_id, session_key, cache_key, payload_json, updated_utc
                 FROM ai_pr_results
                 WHERE run_id = $run
                 LIMIT 1;
@@ -211,12 +211,12 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO ai_file_results (
-                    run_id, pr_node_id, path, cache_key, classification, priority_stars, guidance, summary_json, updated_utc)
+                    run_id, session_key, path, cache_key, classification, priority_stars, guidance, summary_json, updated_utc)
                 VALUES (
                     $run, $pr, $path, $cacheKey, $classification, $priority, $guidance, $summary, $updated)
                 ON CONFLICT(cache_key) DO UPDATE SET
                     run_id = excluded.run_id,
-                    pr_node_id = excluded.pr_node_id,
+                    session_key = excluded.session_key,
                     path = excluded.path,
                     classification = excluded.classification,
                     priority_stars = excluded.priority_stars,
@@ -225,7 +225,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
                     updated_utc = excluded.updated_utc;
                 """;
             cmd.Parameters.AddWithValue("$run", result.RunId);
-            cmd.Parameters.AddWithValue("$pr", result.PrNodeId);
+            cmd.Parameters.AddWithValue("$pr", result.SessionKey);
             cmd.Parameters.AddWithValue("$path", result.Path);
             cmd.Parameters.AddWithValue("$cacheKey", result.CacheKey);
             cmd.Parameters.AddWithValue("$classification", (object?)result.Classification ?? DBNull.Value);
@@ -249,7 +249,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT run_id, pr_node_id, path, cache_key, classification, priority_stars, guidance, summary_json, updated_utc
+                SELECT run_id, session_key, path, cache_key, classification, priority_stars, guidance, summary_json, updated_utc
                 FROM ai_file_results
                 WHERE cache_key = $cacheKey
                 LIMIT 1;
@@ -272,7 +272,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT run_id, pr_node_id, path, cache_key, classification, priority_stars, guidance, summary_json, updated_utc
+                SELECT run_id, session_key, path, cache_key, classification, priority_stars, guidance, summary_json, updated_utc
                 FROM ai_file_results
                 WHERE run_id = $run
                 ORDER BY path ASC;
@@ -299,12 +299,12 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO ai_annotations (
-                    id, run_id, pr_node_id, path, blob_oid, start_line, end_line, side, severity, body, read_state, updated_utc)
+                    id, run_id, session_key, path, blob_oid, start_line, end_line, side, severity, body, read_state, updated_utc)
                 VALUES (
                     $id, $run, $pr, $path, $blob, $start, $end, $side, $severity, $body, $readState, $updated)
                 ON CONFLICT(id) DO UPDATE SET
                     run_id = excluded.run_id,
-                    pr_node_id = excluded.pr_node_id,
+                    session_key = excluded.session_key,
                     path = excluded.path,
                     blob_oid = excluded.blob_oid,
                     start_line = excluded.start_line,
@@ -317,7 +317,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
                 """;
             cmd.Parameters.AddWithValue("$id", annotation.Id);
             cmd.Parameters.AddWithValue("$run", annotation.RunId);
-            cmd.Parameters.AddWithValue("$pr", annotation.PrNodeId);
+            cmd.Parameters.AddWithValue("$pr", annotation.SessionKey);
             cmd.Parameters.AddWithValue("$path", annotation.Path);
             cmd.Parameters.AddWithValue("$blob", annotation.BlobOid);
             cmd.Parameters.AddWithValue("$start", annotation.StartLine);
@@ -336,7 +336,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
     }
 
     public async Task<IReadOnlyList<AiAnnotationRecord>> ListAnnotationsAsync(
-        string prNodeId,
+        string sessionKey,
         string? path = null,
         bool includeDismissed = false,
         CancellationToken ct = default)
@@ -347,11 +347,11 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             var sql = """
-                SELECT id, run_id, pr_node_id, path, blob_oid, start_line, end_line, side, severity, body, read_state, updated_utc
+                SELECT id, run_id, session_key, path, blob_oid, start_line, end_line, side, severity, body, read_state, updated_utc
                 FROM ai_annotations
-                WHERE pr_node_id = $pr
+                WHERE session_key = $pr
                 """;
-            cmd.Parameters.AddWithValue("$pr", prNodeId);
+            cmd.Parameters.AddWithValue("$pr", sessionKey);
 
             if (path is not null)
             {
@@ -404,7 +404,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
         }
     }
 
-    public async Task AppendChatMessageAsync(string prNodeId, AiChatMessage message, CancellationToken ct = default)
+    public async Task AppendChatMessageAsync(string sessionKey, AiChatMessage message, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -412,10 +412,10 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                INSERT INTO ai_chat_messages (pr_node_id, role, content, timestamp_utc)
+                INSERT INTO ai_chat_messages (session_key, role, content, timestamp_utc)
                 VALUES ($pr, $role, $content, $timestamp);
                 """;
-            cmd.Parameters.AddWithValue("$pr", prNodeId);
+            cmd.Parameters.AddWithValue("$pr", sessionKey);
             cmd.Parameters.AddWithValue("$role", message.Role);
             cmd.Parameters.AddWithValue("$content", message.Content);
             cmd.Parameters.AddWithValue("$timestamp", message.TimestampUtc.UtcDateTime.ToString("O"));
@@ -427,7 +427,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
         }
     }
 
-    public async Task<IReadOnlyList<AiChatMessage>> ListChatMessagesAsync(string prNodeId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AiChatMessage>> ListChatMessagesAsync(string sessionKey, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -437,10 +437,10 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             cmd.CommandText = """
                 SELECT role, content, timestamp_utc
                 FROM ai_chat_messages
-                WHERE pr_node_id = $pr
+                WHERE session_key = $pr
                 ORDER BY id ASC;
                 """;
-            cmd.Parameters.AddWithValue("$pr", prNodeId);
+            cmd.Parameters.AddWithValue("$pr", sessionKey);
             var results = new List<AiChatMessage>();
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -459,7 +459,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
         }
     }
 
-    public async Task ClearChatMessagesAsync(string prNodeId, CancellationToken ct = default)
+    public async Task ClearChatMessagesAsync(string sessionKey, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -468,9 +468,9 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 DELETE FROM ai_chat_messages
-                WHERE pr_node_id = $pr;
+                WHERE session_key = $pr;
                 """;
-            cmd.Parameters.AddWithValue("$pr", prNodeId);
+            cmd.Parameters.AddWithValue("$pr", sessionKey);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
         finally

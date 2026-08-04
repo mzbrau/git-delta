@@ -574,10 +574,50 @@
                 ClipToBounds="True"
                 IsVisible="{Binding ShowFileStatusPane}">
           <DockPanel>
-            <Border DockPanel.Dock="Top" Height="40" Padding="16,0"
+            <Border DockPanel.Dock="Top" MinHeight="40" Padding="16,6"
                     Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
-              <TextBlock Text="{Binding WorkingCopy.FileListHeader}" FontWeight="SemiBold" VerticalAlignment="Center" />
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                            IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
+                  <Panel ToolTip.Tip="Unresolved comments"
+                         IsVisible="{Binding WorkingCopy.PendingReview.HasUnresolvedComments}">
+                    <icons:MaterialIcon Kind="MessageOutline" Width="18" Height="18" />
+                    <Border MinWidth="14" Height="14" CornerRadius="7" Padding="3,0"
+                            HorizontalAlignment="Right" VerticalAlignment="Top"
+                            Margin="10,-6,-6,0"
+                            Background="{DynamicResource ForgePrimaryBrush}">
+                      <TextBlock Text="{Binding WorkingCopy.PendingReview.UnresolvedCommentCount}" FontSize="9" FontWeight="Bold"
+                                 Foreground="{DynamicResource ForgeOnPrimaryBrush}"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                  </Panel>
+                  <Button Classes="IconOnly" Width="24" Height="24" Padding="3"
+                          Command="{Binding WorkingCopy.PendingReview.CancelAiReviewCommand}"
+                          IsVisible="{Binding WorkingCopy.PendingReview.IsAiRunActive}"
+                          ToolTip.Tip="Cancel AI review">
+                    <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+                  </Button>
+                  <Button Classes="Ghost" Padding="6,3" FontSize="11"
+                          Command="{Binding WorkingCopy.PendingReview.RequestAiReviewCommand}"
+                          IsEnabled="{Binding WorkingCopy.PendingReview.AiButtonEnabled}"
+                          ToolTip.Tip="{Binding WorkingCopy.PendingReview.AiButtonTooltip}">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                      <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
+                                          Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                      <TextBlock Text="{Binding WorkingCopy.PendingReview.AiButtonLabel}" />
+                    </StackPanel>
+                  </Button>
+                  <Button Classes="IconOnly" Width="28" Height="28" Padding="4"
+                          Command="{Binding WorkingCopy.PendingReview.ToggleAiChatCommand}"
+                          IsEnabled="{Binding WorkingCopy.PendingReview.HasAiTriage}"
+                          ToolTip.Tip="AI chat">
+                    <icons:MaterialIcon Kind="ChatOutline" Width="16" Height="16"
+                                        Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                  </Button>
+                </StackPanel>
+                <TextBlock Text="{Binding WorkingCopy.FileListHeader}" FontWeight="SemiBold" VerticalAlignment="Center" />
+              </DockPanel>
             </Border>
 
             <Border DockPanel.Dock="Top" Padding="8,6"
@@ -599,6 +639,12 @@
                                 CommandParameter="{x:Static core:FileListLayoutMode.Tree}"
                                 ToggleType="Radio"
                                 IsChecked="{Binding WorkingCopy.IsFileStatusTreeLayout, Mode=OneWay}" />
+                      <MenuItem Header="AI suggested order"
+                                Command="{Binding WorkingCopy.SetFileStatusListLayoutCommand}"
+                                CommandParameter="{x:Static core:FileListLayoutMode.AiSuggested}"
+                                ToggleType="Radio"
+                                IsVisible="{Binding WorkingCopy.PendingReview.HasAiTriage}"
+                                IsChecked="{Binding WorkingCopy.IsFileStatusAiSuggestedLayout, Mode=OneWay}" />
                     </MenuFlyout>
                   </Button.Flyout>
                   <StackPanel Orientation="Horizontal" Spacing="2">
@@ -729,8 +775,88 @@
                   </ListBox>
                 </StackPanel>
 
+                <!-- Comments (local-only review comments on pending changes) -->
+                <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="12,8" Margin="0,0,0,-8"
+                        IsVisible="{Binding WorkingCopy.IsFileStatusMode}"
+                        Command="{Binding WorkingCopy.PendingReview.SelectCommentsCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <icons:MaterialIcon Kind="ForumOutline" Width="16" Height="16" />
+                    <TextBlock Text="Comments"
+                               FontWeight="{Binding WorkingCopy.PendingReview.IsCommentsSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                  </StackPanel>
+                </Button>
+
+                <!-- AI-suggested combined list (staged + unstaged + conflicted, priority ordered) -->
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusAiSuggestedLayout}">
+                  <TextBlock Text="AI SUGGESTED ORDER" Classes="SectionLabel" Margin="8,0,8,4" />
+                  <ListBox x:Name="AiSuggestedFileList"
+                           ItemsSource="{Binding WorkingCopy.AiSuggestedFileEntries}"
+                           SelectionMode="Multiple"
+                           SelectionChanged="OnFileSelectionChanged"
+                           PointerPressed="OnFileListPointerPressed"
+                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel />
+                      </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:FileListEntry">
+                        <Panel>
+                          <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFolder}">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <icons:MaterialIcon Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                                  Width="14" Height="14" Opacity="0.7" />
+                              <TextBlock Text="{Binding Label}" Classes="MonoPath" VerticalAlignment="Center"
+                                         FontWeight="SemiBold" Opacity="0.9" />
+                            </StackPanel>
+                          </Border>
+                          <Border Classes="FileRow" Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
+                                  IsVisible="{Binding IsFile}">
+                            <DockPanel>
+                              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                                <Border CornerRadius="2" Padding="4,1"
+                                        Background="{DynamicResource ForgePrimaryContainerBrush}"
+                                        IsVisible="{Binding File.UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
+                                  <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
+                                </Border>
+                                <TextBlock Text="{Binding File.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
+                                           FontSize="10" VerticalAlignment="Center"
+                                           Foreground="{DynamicResource ForgeAiAccentBrush}"
+                                           IsVisible="{Binding File.HasAiStars}"
+                                           ToolTip.Tip="{Binding File.AiGuidanceTooltip}" />
+                                <Border CornerRadius="2" Padding="4,1"
+                                        Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
+                                  <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
+                                             Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                                </Border>
+                              </StackPanel>
+                              <StackPanel Orientation="Horizontal" Spacing="6">
+                                <icons:MaterialIcon Kind="FileDocument" Width="16" Height="16"
+                                                    Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                                <TextBlock Text="{Binding Label}" Classes="MonoPath"
+                                           Classes.AiSkip="{Binding File.IsAiSkip}"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                              </StackPanel>
+                            </DockPanel>
+                          </Border>
+                        </Panel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.Styles>
+                      <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="32" />
+                      </Style>
+                    </ListBox.Styles>
+                  </ListBox>
+                </StackPanel>
+
                 <!-- Staged -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusFlatOrTreeMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
                       <Button Classes="Link" Content="Unstage Selected"
@@ -788,10 +914,20 @@
                           <Border Classes="FileRow" Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
                                   IsVisible="{Binding IsFile}">
                             <DockPanel>
+                              <TextBlock DockPanel.Dock="Right" Text="{Binding File.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
+                                         FontSize="10" VerticalAlignment="Center" Margin="4,0,0,0"
+                                         Foreground="{DynamicResource ForgeAiAccentBrush}"
+                                         IsVisible="{Binding File.HasAiStars}"
+                                         ToolTip.Tip="{Binding File.AiGuidanceTooltip}" />
                               <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
                                       Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
                                 <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
                                            Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                              </Border>
+                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                      Background="{DynamicResource ForgePrimaryContainerBrush}"
+                                      IsVisible="{Binding File.UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
+                                <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
                               </Border>
                               <CheckBox IsChecked="True" Margin="0,0,8,0" VerticalAlignment="Center"
                                         Click="OnFileCheckClick" Tag="{Binding File}" />
@@ -820,7 +956,7 @@
                 </StackPanel>
 
                 <!-- Unstaged -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusFlatOrTreeMode}">
                   <DockPanel Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
                       <Button Classes="Link" Content="Stage Selected"
@@ -878,10 +1014,20 @@
                           <Border Padding="8,4" CornerRadius="4" Margin="{Binding IndentMargin}"
                                   IsVisible="{Binding IsFile}">
                             <DockPanel>
+                              <TextBlock DockPanel.Dock="Right" Text="{Binding File.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
+                                         FontSize="10" VerticalAlignment="Center" Margin="4,0,0,0"
+                                         Foreground="{DynamicResource ForgeAiAccentBrush}"
+                                         IsVisible="{Binding File.HasAiStars}"
+                                         ToolTip.Tip="{Binding File.AiGuidanceTooltip}" />
                               <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
                                       Background="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBackground}}">
                                 <TextBlock Text="{Binding File.StatusBadge}" FontSize="10" FontWeight="Bold"
                                            Foreground="{Binding File.Kind, Converter={x:Static conv:ForgeConverters.StatusBadgeBrush}}" />
+                              </Border>
+                              <Border DockPanel.Dock="Right" CornerRadius="2" Padding="4,1" Margin="4,0,0,0"
+                                      Background="{DynamicResource ForgePrimaryContainerBrush}"
+                                      IsVisible="{Binding File.UnresolvedThreadCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
+                                <TextBlock Text="{Binding File.UnresolvedThreadCount}" FontSize="10" FontWeight="Bold" />
                               </Border>
                               <CheckBox IsChecked="False" Margin="0,0,8,0" VerticalAlignment="Center"
                                         Click="OnFileCheckClick" Tag="{Binding File}" />
@@ -910,7 +1056,7 @@
                 </StackPanel>
 
                 <!-- Conflicted -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusFlatOrTreeMode}">
                   <StackPanel IsVisible="{Binding WorkingCopy.HasConflictedFiles}">
                   <TextBlock Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
                              Foreground="{DynamicResource ForgeErrorBrush}" />
@@ -1349,66 +1495,425 @@
           </Border>
 
           <Panel ClipToBounds="True">
-            <controls:DiffViewer Rows="{Binding WorkingCopy.DiffRows}"
-                                 ViewMode="{Binding WorkingCopy.ViewMode}"
-                                 EmptyMessage="{Binding WorkingCopy.DiffEmptyMessage}"
-                                 CanStageLines="{Binding WorkingCopy.CanStageLines}"
-                                 CanUnstageLines="{Binding WorkingCopy.CanUnstageLines}"
-                                 CanDiscardLines="{Binding WorkingCopy.CanDiscardLines}"
-                                 LeftSyntaxTokens="{Binding WorkingCopy.LeftSyntaxTokens}"
-                                 RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
-                                 RowHeight="20"
-                                 IsVisible="{Binding WorkingCopy.ShowDiffViewer}" />
+            <!-- Comments view: AI triage summary + local (non-GitHub) review comments -->
+            <ScrollViewer IsVisible="{Binding WorkingCopy.PendingReview.IsCommentsSelected}">
+              <StackPanel Spacing="16" Margin="16">
+                <Border Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                        CornerRadius="8" Padding="12"
+                        IsVisible="{Binding WorkingCopy.PendingReview.HasAiTriage}">
+                  <StackPanel Spacing="10">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
+                                          Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                      <TextBlock Text="AI REVIEW" Classes="PanelHeader" Opacity="0.7" />
+                      <Border CornerRadius="2" Padding="6,2"
+                              Background="{Binding WorkingCopy.PendingReview.AiTriage.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBackground}}">
+                        <TextBlock Text="{Binding WorkingCopy.PendingReview.AiRiskBadgeText}" FontSize="10" FontWeight="SemiBold"
+                                   Foreground="{Binding WorkingCopy.PendingReview.AiTriage.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBrush}}" />
+                      </Border>
+                      <TextBlock Text="{Binding WorkingCopy.PendingReview.AiReviewFinishedUtc, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
+                                 FontSize="11" Opacity="0.6" VerticalAlignment="Center"
+                                 IsVisible="{Binding WorkingCopy.PendingReview.AiReviewFinishedUtc, Converter={x:Static conv:ForgeConverters.IsNotNull}}" />
+                    </StackPanel>
+                    <controls:MarkdownView Markdown="{Binding WorkingCopy.PendingReview.AiTriage.Summary}" />
+                    <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiMeasuredFactsText}"
+                               FontSize="11" Opacity="0.7"
+                               IsVisible="{Binding WorkingCopy.PendingReview.AiMeasuredFactsText, Converter={x:Static conv:ForgeConverters.IsNotNull}}" />
+                    <StackPanel Spacing="6" IsVisible="{Binding WorkingCopy.PendingReview.HasAiImportantFiles}">
+                      <TextBlock Text="IMPORTANT FILES" Classes="PanelHeader" Opacity="0.7" FontSize="11" />
+                      <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiImportantFiles}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="vm:AiImportantFileItem">
+                            <Button Classes="Ghost" Padding="4,4" HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Left"
+                                    Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.PendingReview.SelectAiImportantFileCommand}"
+                                    CommandParameter="{Binding Path}">
+                              <DockPanel>
+                                <TextBlock DockPanel.Dock="Left" Text="{Binding Path}" Classes="MonoPath"
+                                           FontSize="11" FontWeight="SemiBold" Margin="0,0,8,0"
+                                           TextTrimming="CharacterEllipsis" MaxWidth="220" />
+                                <TextBlock Text="{Binding Label}" FontSize="11" TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                              </DockPanel>
+                            </Button>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
 
-            <controls:MarkdownFilePreview Markdown="{Binding WorkingCopy.MarkdownPreviewText}"
-                                          EmptyMessage="{Binding WorkingCopy.MarkdownPreviewEmptyMessage}"
-                                          CanAddLineComments="False"
-                                          IsVisible="{Binding WorkingCopy.ShowMarkdownPreviewPane}" />
-
-            <!-- Changed image: before | after -->
-            <Grid IsVisible="{Binding WorkingCopy.HasImageBefore}"
-                  ColumnDefinitions="*,4,*"
-                  Background="{DynamicResource ForgeSurfaceContainerLowestBrush}">
-              <DockPanel Grid.Column="0" Margin="12">
-                <TextBlock DockPanel.Dock="Top" Text="Before" FontSize="11" FontWeight="SemiBold"
-                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" Margin="0,0,0,8" />
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                  <Image Source="{Binding WorkingCopy.ImageBefore}" Stretch="Uniform"
-                         HorizontalAlignment="Center" VerticalAlignment="Center"
-                         MaxWidth="1200" MaxHeight="1200" />
-                </ScrollViewer>
-              </DockPanel>
-              <Border Grid.Column="1" Background="{DynamicResource ForgeOutlineVariantBrush}" />
-              <DockPanel Grid.Column="2" Margin="12">
-                <TextBlock DockPanel.Dock="Top" Text="After" FontSize="11" FontWeight="SemiBold"
-                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" Margin="0,0,0,8" />
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
-                  <Image Source="{Binding WorkingCopy.ImageAfter}" Stretch="Uniform"
-                         HorizontalAlignment="Center" VerticalAlignment="Center"
-                         MaxWidth="1200" MaxHeight="1200" />
-                </ScrollViewer>
-              </DockPanel>
-            </Grid>
-
-            <!-- Single image (added / untracked / no before) -->
-            <ScrollViewer IsVisible="{Binding WorkingCopy.IsSingleImagePreview}"
-                          Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
-                          HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                          Padding="12">
-              <Image Source="{Binding WorkingCopy.ImageAfter}" Stretch="Uniform"
-                     HorizontalAlignment="Center" VerticalAlignment="Center"
-                     MaxWidth="1200" MaxHeight="1200" />
+                <Border Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                        CornerRadius="8" Padding="12">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="LOCAL COMMENTS" Classes="PanelHeader" Opacity="0.7" />
+                    <TextBlock Text="No comments yet on your pending changes."
+                               FontSize="12" Opacity="0.6"
+                               IsVisible="{Binding WorkingCopy.PendingReview.HasUnresolvedComments, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                    <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.LocalComments}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:LocalCommentItemViewModel">
+                          <Border Margin="0,0,0,8" Padding="10" CornerRadius="6"
+                                  Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                                  BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1">
+                            <StackPanel Spacing="6">
+                              <DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                                  <Button Classes="Ghost" Content="Resolve" FontSize="10" Padding="4,0"
+                                          Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.PendingReview.ResolveLocalCommentCommand}"
+                                          CommandParameter="{Binding}"
+                                          IsVisible="{Binding IsResolved, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                                  <Button Classes="Ghost" Content="Unresolve" FontSize="10" Padding="4,0"
+                                          Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.PendingReview.UnresolveLocalCommentCommand}"
+                                          CommandParameter="{Binding}"
+                                          IsVisible="{Binding IsResolved}" />
+                                  <Button Classes="Ghost" Content="Delete" FontSize="10" Padding="4,0"
+                                          Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.PendingReview.DeleteLocalCommentCommand}"
+                                          CommandParameter="{Binding}" />
+                                </StackPanel>
+                                <Button Classes="Link" Padding="0" HorizontalAlignment="Left"
+                                        Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.PendingReview.SelectCommentCommand}"
+                                        CommandParameter="{Binding}">
+                                  <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="{Binding Label}" FontSize="11" FontWeight="SemiBold" Classes="MonoPath" />
+                                    <Border CornerRadius="2" Padding="4,1" Background="{DynamicResource ForgeSurfaceContainerHighBrush}"
+                                            IsVisible="{Binding IsResolved}">
+                                      <TextBlock Text="Resolved" FontSize="9" Opacity="0.7" />
+                                    </Border>
+                                  </StackPanel>
+                                </Button>
+                              </DockPanel>
+                              <controls:MarkdownView Markdown="{Binding Body}" />
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
             </ScrollViewer>
 
-            <Border Background="{DynamicResource ForgeSettingsScrimBrush}"
-                    IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
-              <ProgressBar Width="36" Height="36" IsIndeterminate="True"
-                           HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Border>
-            <TextBlock Text="{Binding WorkingCopy.DiffOverlayMessage}"
-                       IsVisible="{Binding WorkingCopy.DiffOverlayMessage, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
-                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                       FontSize="14" Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+            <Grid x:Name="WcDiffChatGrid"
+                  IsVisible="{Binding WorkingCopy.PendingReview.IsCommentsSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+              <Grid.RowDefinitions>
+                <RowDefinition Height="*" MinHeight="100" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="0" MinHeight="0" MaxHeight="420" />
+              </Grid.RowDefinitions>
+              <DockPanel Grid.Row="0">
+                <!-- AI file guidance band -->
+                <Border DockPanel.Dock="Top" Padding="10" MaxHeight="200"
+                        Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                        BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1"
+                        IsVisible="{Binding WorkingCopy.PendingReview.ShowAiFileBand}">
+                  <DockPanel>
+                    <Button DockPanel.Dock="Top" Classes="Ghost" HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Left" Padding="0,0,0,6"
+                            Command="{Binding WorkingCopy.PendingReview.ToggleAiFileBandCommand}">
+                      <DockPanel>
+                        <icons:MaterialIcon DockPanel.Dock="Right" Width="16" Height="16"
+                                            Kind="{Binding WorkingCopy.PendingReview.AiFileBandChevron}"
+                                            Opacity="0.7" />
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
+                                              Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                          <TextBlock Text="AI GUIDANCE" Classes="PanelHeader" Opacity="0.7"
+                                     VerticalAlignment="Center" />
+                          <TextBlock Text="{Binding WorkingCopy.SelectedFile.AiPriorityStars, Converter={x:Static conv:ForgeConverters.AiStarsDisplay}}"
+                                     FontSize="11" VerticalAlignment="Center"
+                                     Foreground="{DynamicResource ForgeAiAccentBrush}"
+                                     IsVisible="{Binding WorkingCopy.SelectedFile.HasAiStars}" />
+                        </StackPanel>
+                      </DockPanel>
+                    </Button>
+                    <ScrollViewer MaxHeight="160" IsVisible="{Binding WorkingCopy.PendingReview.AiFileBandExpanded}">
+                      <StackPanel Spacing="6">
+                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.SelectedFileAiGuidance}" FontSize="12"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding WorkingCopy.PendingReview.SelectedFileAiGuidance, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileSummary.Purpose}" FontSize="12" TextWrapping="Wrap"
+                                   IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileSummary}" />
+                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileSummary.InterestingChanges}" FontSize="12"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileSummary}"
+                                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileSummary.ReviewFocus}" FontSize="12" FontStyle="Italic"
+                                   TextWrapping="Wrap"
+                                   IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileSummary}"
+                                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                        <DockPanel Margin="0,6,0,0" IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileSummary}">
+                          <Button DockPanel.Dock="Right" Classes="Ghost" Content="Ask" FontSize="11" Margin="6,0,0,0"
+                                  Command="{Binding WorkingCopy.PendingReview.AskFileQuestionCommand}" />
+                          <TextBox Text="{Binding WorkingCopy.PendingReview.AiFileQuestion}" FontSize="12"
+                                   PlaceholderText="Ask a question about this file…" />
+                        </DockPanel>
+                        <controls:MarkdownView Markdown="{Binding WorkingCopy.PendingReview.AiFileAnswer}"
+                                               IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileAnswer}" />
+                      </StackPanel>
+                    </ScrollViewer>
+                  </DockPanel>
+                </Border>
+
+                <!-- Expanded AI annotation card (simplified: docked, not floating over the line) -->
+                <Border DockPanel.Dock="Bottom" Padding="12" MaxHeight="260"
+                        Background="{DynamicResource ForgeSurfaceContainerHighestBrush}"
+                        BorderBrush="{DynamicResource ForgeAiAccentBrush}" BorderThickness="0,1,0,0"
+                        IsVisible="{Binding WorkingCopy.PendingReview.HasExpandedAiAnnotation}">
+                  <StackPanel Spacing="8">
+                    <DockPanel>
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                        <Button Classes="Ghost" Content="Insert comment" FontSize="11"
+                                Command="{Binding WorkingCopy.PendingReview.InsertAiAnnotationAsCommentCommand}"
+                                CommandParameter="{Binding WorkingCopy.PendingReview.SelectedAiAnnotation.Result}" />
+                        <Button Classes="Ghost" Content="Dismiss" FontSize="11"
+                                Command="{Binding WorkingCopy.PendingReview.DismissAiAnnotationCommand}"
+                                CommandParameter="{Binding WorkingCopy.PendingReview.SelectedAiAnnotation.Result}" />
+                        <Button Classes="Ghost" Content="Close" FontSize="11"
+                                Command="{Binding WorkingCopy.PendingReview.ClearSelectedAnnotationCommand}" />
+                      </StackPanel>
+                      <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
+                                            Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                        <TextBlock Text="AI annotation" FontSize="11" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                        <Border CornerRadius="2" Padding="6,1"
+                                Background="{DynamicResource ForgeAiAccentBadgeBgBrush}">
+                          <TextBlock FontSize="10" FontWeight="SemiBold"
+                                     Text="{Binding WorkingCopy.PendingReview.SelectedAiAnnotation.Result.Severity}"
+                                     Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                        </Border>
+                      </StackPanel>
+                    </DockPanel>
+                    <controls:MarkdownView Markdown="{Binding WorkingCopy.PendingReview.SelectedAiAnnotation.Result.Body}" />
+                  </StackPanel>
+                </Border>
+
+                <!-- Draft comment composer (simplified: docked at bottom, not floating over the line) -->
+                <Border DockPanel.Dock="Bottom" Padding="12" MaxHeight="280"
+                        Background="{DynamicResource ForgeSurfaceContainerHighestBrush}"
+                        BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
+                        IsVisible="{Binding WorkingCopy.PendingReview.HasDraftCommentAnchor}">
+                  <StackPanel Spacing="8">
+                    <DockPanel>
+                      <Button DockPanel.Dock="Right" Classes="Ghost" Content="Cancel" FontSize="11"
+                              Command="{Binding WorkingCopy.PendingReview.ClearDraftCommentAnchorCommand}" />
+                      <TextBlock Text="{Binding WorkingCopy.PendingReview.DraftCommentTargetLabel}" FontSize="11" FontWeight="SemiBold"
+                                 Foreground="{DynamicResource ForgePrimaryBrush}"
+                                 VerticalAlignment="Center" TextWrapping="NoWrap" />
+                    </DockPanel>
+                    <TextBox Text="{Binding WorkingCopy.PendingReview.NewCommentBody}"
+                             AcceptsReturn="True" MinHeight="64"
+                             PlaceholderText="Add a comment…" />
+                    <DockPanel>
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                        <Button Classes="Ghost" Content="Add a suggestion" FontSize="11"
+                                Command="{Binding WorkingCopy.PendingReview.InsertSuggestionCommand}" />
+                        <Button Classes="Primary" Content="Add comment"
+                                Command="{Binding WorkingCopy.PendingReview.AddCommentCommand}" />
+                      </StackPanel>
+                      <StackPanel Orientation="Horizontal" Spacing="4">
+                        <Button Classes="Ghost" Content="Explain" FontSize="10" Padding="4,0"
+                                Command="{Binding WorkingCopy.PendingReview.RunAiInlineActionCommand}"
+                                CommandParameter="explain"
+                                ToolTip.Tip="Ask AI to explain the selected lines" />
+                        <Button Classes="Ghost" Content="Review" FontSize="10" Padding="4,0"
+                                Command="{Binding WorkingCopy.PendingReview.RunAiInlineActionCommand}"
+                                CommandParameter="review"
+                                ToolTip.Tip="Ask AI to review the selected lines" />
+                        <Button Classes="Ghost" Content="Find bugs" FontSize="10" Padding="4,0"
+                                Command="{Binding WorkingCopy.PendingReview.RunAiInlineActionCommand}"
+                                CommandParameter="find_bugs"
+                                ToolTip.Tip="Ask AI to look for bugs in the selected lines" />
+                        <Button Classes="Ghost" Content="Suggest tests" FontSize="10" Padding="4,0"
+                                Command="{Binding WorkingCopy.PendingReview.RunAiInlineActionCommand}"
+                                CommandParameter="suggest_tests"
+                                ToolTip.Tip="Ask AI to suggest tests for the selected lines" />
+                      </StackPanel>
+                    </DockPanel>
+                  </StackPanel>
+                </Border>
+
+                <Panel ClipToBounds="True">
+                  <controls:DiffViewer x:Name="WcDiffViewer"
+                                       Rows="{Binding WorkingCopy.DiffRows}"
+                                       ViewMode="{Binding WorkingCopy.ViewMode}"
+                                       EmptyMessage="{Binding WorkingCopy.DiffEmptyMessage}"
+                                       Annotations="{Binding WorkingCopy.PendingReview.DiffAnnotations}"
+                                       SelectedAnnotation="{Binding WorkingCopy.PendingReview.SelectedAnnotation, Mode=TwoWay}"
+                                       CanStageLines="{Binding WorkingCopy.CanStageLines}"
+                                       CanUnstageLines="{Binding WorkingCopy.CanUnstageLines}"
+                                       CanDiscardLines="{Binding WorkingCopy.CanDiscardLines}"
+                                       LeftSyntaxTokens="{Binding WorkingCopy.LeftSyntaxTokens}"
+                                       RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
+                                       CanAddLineComments="True"
+                                       AddLineCommentCommand="{Binding WorkingCopy.PendingReview.BeginLineCommentCommand}"
+                                       RowHeight="20"
+                                       IsVisible="{Binding WorkingCopy.ShowDiffViewer}" />
+
+                  <controls:MarkdownFilePreview Markdown="{Binding WorkingCopy.MarkdownPreviewText}"
+                                                EmptyMessage="{Binding WorkingCopy.MarkdownPreviewEmptyMessage}"
+                                                Annotations="{Binding WorkingCopy.PendingReview.DiffAnnotations}"
+                                                SelectedAnnotation="{Binding WorkingCopy.PendingReview.SelectedAnnotation, Mode=TwoWay}"
+                                                CanAddLineComments="True"
+                                                AddLineCommentCommand="{Binding WorkingCopy.PendingReview.BeginLineCommentCommand}"
+                                                IsVisible="{Binding WorkingCopy.ShowMarkdownPreviewPane}" />
+
+                  <Canvas IsVisible="{Binding WorkingCopy.PendingReview.HasExpandedLocalComment}">
+                    <Border x:Name="WcInlineLocalCommentCard"
+                            Width="520" MaxWidth="640"
+                            Padding="12"
+                            Background="{DynamicResource ForgeSurfaceContainerHighestBrush}"
+                            BorderBrush="{DynamicResource ForgePrimaryBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            BoxShadow="0 4 16 0 #40000000">
+                      <DockPanel>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                            <Button Classes="Ghost" Content="Resolve" FontSize="11"
+                                    Command="{Binding WorkingCopy.PendingReview.ResolveLocalCommentCommand}"
+                                    CommandParameter="{Binding WorkingCopy.PendingReview.SelectedLocalCommentItem}"
+                                    IsVisible="{Binding WorkingCopy.PendingReview.SelectedLocalCommentItem.IsResolved, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                            <Button Classes="Ghost" Content="Unresolve" FontSize="11"
+                                    Command="{Binding WorkingCopy.PendingReview.UnresolveLocalCommentCommand}"
+                                    CommandParameter="{Binding WorkingCopy.PendingReview.SelectedLocalCommentItem}"
+                                    IsVisible="{Binding WorkingCopy.PendingReview.SelectedLocalCommentItem.IsResolved}" />
+                            <Button Classes="Ghost" Content="Delete" FontSize="11"
+                                    Command="{Binding WorkingCopy.PendingReview.DeleteLocalCommentCommand}"
+                                    CommandParameter="{Binding WorkingCopy.PendingReview.SelectedLocalCommentItem}" />
+                            <Button Classes="Ghost" Content="Close" FontSize="11"
+                                    Command="{Binding WorkingCopy.PendingReview.ClearSelectedAnnotationCommand}" />
+                          </StackPanel>
+                          <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="Comment" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource ForgePrimaryBrush}" />
+                            <TextBlock Text="{Binding WorkingCopy.PendingReview.SelectedLocalCommentItem.Label}"
+                                       FontSize="10" Opacity="0.65" Classes="MonoPath"
+                                       TextTrimming="CharacterEllipsis" />
+                          </StackPanel>
+                        </DockPanel>
+                        <ScrollViewer MaxHeight="220">
+                          <controls:MarkdownView Markdown="{Binding WorkingCopy.PendingReview.SelectedLocalCommentItem.Body}" />
+                        </ScrollViewer>
+                      </DockPanel>
+                    </Border>
+                  </Canvas>
+
+                  <!-- Changed image: before | after -->
+                  <Grid IsVisible="{Binding WorkingCopy.HasImageBefore}"
+                        ColumnDefinitions="*,4,*"
+                        Background="{DynamicResource ForgeSurfaceContainerLowestBrush}">
+                    <DockPanel Grid.Column="0" Margin="12">
+                      <TextBlock DockPanel.Dock="Top" Text="Before" FontSize="11" FontWeight="SemiBold"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" Margin="0,0,0,8" />
+                      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                        <Image Source="{Binding WorkingCopy.ImageBefore}" Stretch="Uniform"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               MaxWidth="1200" MaxHeight="1200" />
+                      </ScrollViewer>
+                    </DockPanel>
+                    <Border Grid.Column="1" Background="{DynamicResource ForgeOutlineVariantBrush}" />
+                    <DockPanel Grid.Column="2" Margin="12">
+                      <TextBlock DockPanel.Dock="Top" Text="After" FontSize="11" FontWeight="SemiBold"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" Margin="0,0,0,8" />
+                      <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                        <Image Source="{Binding WorkingCopy.ImageAfter}" Stretch="Uniform"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               MaxWidth="1200" MaxHeight="1200" />
+                      </ScrollViewer>
+                    </DockPanel>
+                  </Grid>
+
+                  <!-- Single image (added / untracked / no before) -->
+                  <ScrollViewer IsVisible="{Binding WorkingCopy.IsSingleImagePreview}"
+                                Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
+                                HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                Padding="12">
+                    <Image Source="{Binding WorkingCopy.ImageAfter}" Stretch="Uniform"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                           MaxWidth="1200" MaxHeight="1200" />
+                  </ScrollViewer>
+
+                  <Border Background="{DynamicResource ForgeSettingsScrimBrush}"
+                          IsVisible="{Binding WorkingCopy.IsLoadingDiff}">
+                    <ProgressBar Width="36" Height="36" IsIndeterminate="True"
+                                 HorizontalAlignment="Center" VerticalAlignment="Center" />
+                  </Border>
+                  <TextBlock Text="{Binding WorkingCopy.DiffOverlayMessage}"
+                             IsVisible="{Binding WorkingCopy.DiffOverlayMessage, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"
+                             FontSize="14" Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                </Panel>
+              </DockPanel>
+
+              <GridSplitter Grid.Row="1" Height="4" ResizeDirection="Rows"
+                            Background="{DynamicResource ForgeOutlineVariantBrush}"
+                            IsVisible="{Binding WorkingCopy.PendingReview.ShowAiChat}" />
+              <Border Grid.Row="2" Padding="10"
+                      VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                      Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      BorderBrush="{DynamicResource ForgeAiAccentBrush}" BorderThickness="0,1,0,0"
+                      IsVisible="{Binding WorkingCopy.PendingReview.ShowAiChat}">
+                <Grid RowDefinitions="Auto,*,Auto,Auto">
+                  <DockPanel Grid.Row="0" Margin="0,0,0,8">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                      <Button Classes="Ghost" Content="Clear" FontSize="11"
+                              Command="{Binding WorkingCopy.PendingReview.ClearAiChatCommand}"
+                              IsEnabled="{Binding WorkingCopy.PendingReview.CanClearAiChat}"
+                              ToolTip.Tip="Clear chat history and start a new conversation" />
+                      <Button Classes="Ghost" Content="Close" FontSize="11"
+                              Command="{Binding WorkingCopy.PendingReview.ToggleAiChatCommand}" />
+                    </StackPanel>
+                    <StackPanel Orientation="Vertical" Spacing="2" VerticalAlignment="Center">
+                      <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <icons:MaterialIcon Kind="ChatOutline" Width="14" Height="14"
+                                            Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                        <TextBlock Text="AI CHAT" Classes="PanelHeader" Opacity="0.7" />
+                      </StackPanel>
+                      <TextBlock Text="{Binding WorkingCopy.PendingReview.AiChatSelectedFileLabel}" FontSize="10"
+                                 Opacity="0.55" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                  </DockPanel>
+                  <ScrollViewer x:Name="WcAiChatScrollViewer" Grid.Row="1"
+                                VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                                VerticalScrollBarVisibility="Auto"
+                                HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChatMessages}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="ai:AiChatMessage">
+                          <Border Margin="0,0,0,8" Padding="8" CornerRadius="6"
+                                  Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
+                            <StackPanel Spacing="4">
+                              <TextBlock Text="{Binding Role}" FontSize="10" FontWeight="SemiBold"
+                                         Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                              <controls:MarkdownView Markdown="{Binding Content}" />
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                  <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8"
+                              Margin="0,6,0,0" VerticalAlignment="Center"
+                              IsVisible="{Binding WorkingCopy.PendingReview.IsAiChatBusy}">
+                    <ProgressBar Width="72" Height="3" IsIndeterminate="True"
+                                 VerticalAlignment="Center" />
+                    <TextBlock Text="Thinking…" FontSize="11" Opacity="0.7"
+                               VerticalAlignment="Center" />
+                  </StackPanel>
+                  <DockPanel Grid.Row="3" Margin="0,8,0,0">
+                    <Button DockPanel.Dock="Right" Classes="Primary" Content="Send" Margin="6,0,0,0"
+                            Command="{Binding WorkingCopy.PendingReview.SendAiChatCommand}"
+                            IsEnabled="{Binding WorkingCopy.PendingReview.CanSendAiChat}" />
+                    <TextBox Text="{Binding WorkingCopy.PendingReview.AiChatInput}" FontSize="12"
+                             PlaceholderText="{Binding WorkingCopy.PendingReview.AiChatPlaceholder}"
+                             KeyDown="OnWcAiChatKeyDown" />
+                  </DockPanel>
+                </Grid>
+              </Border>
+            </Grid>
           </Panel>
         </DockPanel>
 
@@ -3147,6 +3652,103 @@
                             HorizontalScrollBarVisibility="Disabled"
                             VerticalScrollBarVisibility="Auto">
                 <SelectableTextBlock Text="{Binding Review.AiDiagnosticsText}" FontSize="11"
+                           FontFamily="Menlo, Consolas, monospace"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+              </ScrollViewer>
+            </Border>
+          </DockPanel>
+        </DockPanel>
+      </Border>
+    </Border>
+
+    <!-- AI instructions dialog (File Status / pending changes) -->
+    <Border IsVisible="{Binding WorkingCopy.PendingReview.ShowAiInstructionsDialog}"
+            Background="{DynamicResource ForgeSettingsScrimBrush}" ZIndex="210">
+      <Border Width="480" MaxHeight="400" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
+              CornerRadius="10" Padding="16">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
+            <icons:MaterialIcon Kind="Creation" Width="18" Height="18"
+                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+            <TextBlock Text="Start AI review" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </StackPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                      HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel" Classes="Ghost" Command="{Binding WorkingCopy.PendingReview.CancelAiInstructionsCommand}" />
+            <Button Content="Start review" Classes="Primary" Command="{Binding WorkingCopy.PendingReview.ConfirmStartAiReviewCommand}" />
+          </StackPanel>
+          <StackPanel Spacing="10">
+            <StackPanel Spacing="4">
+              <TextBlock Text="Review scope" FontSize="12" FontWeight="SemiBold" />
+              <RadioButton GroupName="WcReviewScope" Content="Staged changes only"
+                           IsChecked="{Binding WorkingCopy.PendingReview.IsScopeStaged}"
+                           Command="{Binding WorkingCopy.PendingReview.SetReviewScopeCommand}"
+                           CommandParameter="{x:Static ai:AiReviewScope.WorkingCopyStaged}" />
+              <RadioButton GroupName="WcReviewScope" Content="All pending changes (staged + unstaged)"
+                           IsChecked="{Binding WorkingCopy.PendingReview.IsScopeAll}"
+                           Command="{Binding WorkingCopy.PendingReview.SetReviewScopeCommand}"
+                           CommandParameter="{x:Static ai:AiReviewScope.WorkingCopyAll}" />
+            </StackPanel>
+            <StackPanel Spacing="6">
+              <TextBlock Text="Optional instructions for this review (focus areas, concerns, etc.)"
+                         FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
+              <TextBox Text="{Binding WorkingCopy.PendingReview.AiAdHocInstructions}" AcceptsReturn="True" MinHeight="80"
+                       TextWrapping="Wrap" PlaceholderText="e.g. Pay close attention to the auth changes…" />
+            </StackPanel>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+    </Border>
+
+    <!-- AI progress / status overlay (File Status / pending changes) -->
+    <Border IsVisible="{Binding WorkingCopy.PendingReview.ShowAiProgressDialog}"
+            Background="{DynamicResource ForgeSettingsScrimBrush}" ZIndex="211">
+      <Border Width="720" MaxHeight="640" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
+              CornerRadius="10" Padding="20">
+        <DockPanel>
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+            <Button DockPanel.Dock="Right" Classes="IconOnly" Width="24" Height="24" Padding="3"
+                    ToolTip.Tip="Close (review continues in the background)"
+                    Command="{Binding WorkingCopy.PendingReview.DismissAiProgressDialogCommand}">
+              <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
+            </Button>
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <icons:MaterialIcon Kind="Creation" Width="18" Height="18"
+                                  Foreground="{DynamicResource ForgeAiAccentBrush}" />
+              <TextBlock Text="{Binding WorkingCopy.PendingReview.AiStatusDialogTitle}" FontSize="14" FontWeight="SemiBold"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </DockPanel>
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                      HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Cancel review" Classes="Ghost"
+                    IsVisible="{Binding WorkingCopy.PendingReview.IsAiRunActive}"
+                    Command="{Binding WorkingCopy.PendingReview.CancelAiReviewCommand}" />
+            <Button Content="Close" Classes="Primary"
+                    Command="{Binding WorkingCopy.PendingReview.DismissAiProgressDialogCommand}" />
+          </StackPanel>
+          <DockPanel>
+            <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" Height="4" Margin="0,0,0,10"
+                         IsVisible="{Binding WorkingCopy.PendingReview.IsAiRunActive}" />
+            <SelectableTextBlock DockPanel.Dock="Top" Text="{Binding WorkingCopy.PendingReview.AiProgressText}" FontSize="12"
+                       TextWrapping="Wrap" Margin="0,0,0,8"
+                       Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+            <SelectableTextBlock DockPanel.Dock="Top" Text="{Binding WorkingCopy.PendingReview.AiLastError}" FontSize="12"
+                       TextWrapping="Wrap" Margin="0,0,0,8"
+                       IsVisible="{Binding WorkingCopy.PendingReview.AiLastError, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
+                       Foreground="{DynamicResource ForgeErrorBrush}" />
+            <Border IsVisible="{Binding WorkingCopy.PendingReview.HasAiDiagnostics}"
+                    Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                    CornerRadius="6" Padding="10">
+              <ScrollViewer x:Name="WcAiProgressScrollViewer"
+                            HorizontalScrollBarVisibility="Disabled"
+                            VerticalScrollBarVisibility="Auto">
+                <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiDiagnosticsText}" FontSize="11"
                            FontFamily="Menlo, Consolas, monospace"
                            TextWrapping="Wrap"
                            Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />

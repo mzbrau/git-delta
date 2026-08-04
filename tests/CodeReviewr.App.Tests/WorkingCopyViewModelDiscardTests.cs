@@ -48,6 +48,7 @@ public sealed class WorkingCopyViewModelDiscardTests
     private AlwaysConfirmDialog _confirm = null!;
     private FakeStashDialog _stashDialog = null!;
     private IRepositoryWatcher _watcher = null!;
+    private ILocalCommentStore _localComments = null!;
 
     [SetUp]
     public void SetUp()
@@ -69,6 +70,8 @@ public sealed class WorkingCopyViewModelDiscardTests
         _stashDialog = new FakeStashDialog(
             new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true));
         _watcher = Substitute.For<IRepositoryWatcher>();
+        _localComments = Substitute.For<ILocalCommentStore>();
+        _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([]);
 
         _settings.Current.Returns(new AppSettings());
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -85,7 +88,9 @@ public sealed class WorkingCopyViewModelDiscardTests
 
     private WorkingCopyViewModel CreateVm(IConfirmDialog? confirm = null, IStashDialog? stashDialog = null) =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
-            _settings, _notifications, confirm ?? _confirm, stashDialog ?? _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher);
+            _settings, _notifications, confirm ?? _confirm, stashDialog ?? _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher,
+            new PendingChangesReviewViewModel(
+                NullAIReviewService.Instance, _localComments, _settings, confirm ?? _confirm, _notifications));
 
     private static StatusEntry Unstaged(string path, ChangeKind kind = ChangeKind.Modified) =>
         new(FilePath.From(path), null, kind, IsStaged: false, IsUnstaged: true, IsConflicted: false);
@@ -172,7 +177,8 @@ public sealed class WorkingCopyViewModelDiscardTests
 
             var vm = new WorkingCopyViewModel(
                 _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
-                _settings, _notifications, confirm, _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher);
+                _settings, _notifications, confirm, _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher,
+                new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, confirm, _notifications));
             await vm.OpenAsync(repo);
             vm.SetFileSelection([vm.UnstagedFiles[0]]);
 

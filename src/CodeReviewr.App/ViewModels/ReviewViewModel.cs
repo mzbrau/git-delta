@@ -1002,7 +1002,7 @@ public partial class ReviewViewModel : ObservableObject
             .ToList();
 
         return new AiReviewRequest(
-            PrNodeId: summary.NodeId,
+            SessionKey: summary.NodeId,
             RepositoryPath: session.RepositoryPath,
             RepositoryKey: summary.NameWithOwner,
             HeadSha: session.Head.Value,
@@ -1062,73 +1062,13 @@ public partial class ReviewViewModel : ObservableObject
     private void ApplyAiTriageFields(AiPrTriageResult? triage)
     {
         AiTriage = triage;
-        var byPath = triage?.Files.ToDictionary(f => f.Path, StringComparer.Ordinal)
-                     ?? new Dictionary<string, AiFileTriage>(StringComparer.Ordinal);
-
-        foreach (var file in PrFiles)
-        {
-            if (byPath.TryGetValue(file.Path.Value, out var fileTriage))
-            {
-                file.AiPriorityStars = fileTriage.PriorityStars;
-                file.AiClassification = fileTriage.Classification.ToString();
-                file.AiGuidance = fileTriage.Guidance;
-            }
-            else
-            {
-                file.AiPriorityStars = 0;
-                file.AiClassification = null;
-                file.AiGuidance = null;
-            }
-        }
+        AiReviewSessionHelpers.ApplyTriageToFiles(triage, PrFiles);
     }
 
     private void RebuildAiImportantFiles()
     {
-        AiImportantFiles.Clear();
-        if (AiTriage is null)
-        {
-            OnPropertyChanged(nameof(HasAiImportantFiles));
-            return;
-        }
-
-        var reasons = AiTriage.Justifications
-            .GroupBy(j => j.FilePath, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First().Reason, StringComparer.Ordinal);
-
-        var orderIndex = new Dictionary<string, int>(StringComparer.Ordinal);
-        for (var i = 0; i < AiTriage.SuggestedOrder.Count; i++)
-            orderIndex.TryAdd(AiTriage.SuggestedOrder[i], i);
-
-        var important = AiTriage.Files
-            .Where(f => f.Classification == AiFileClassification.ReviewCarefully || f.PriorityStars >= 4)
-            .OrderBy(f => orderIndex.TryGetValue(f.Path, out var index) ? index : int.MaxValue)
-            .ThenByDescending(f => f.PriorityStars)
-            .ThenBy(f => f.Path, StringComparer.Ordinal);
-
-        foreach (var file in important)
-        {
-            string label;
-            if (!string.IsNullOrWhiteSpace(file.Guidance))
-                label = TruncateAiLabel(file.Guidance);
-            else if (reasons.TryGetValue(file.Path, out var reason) && !string.IsNullOrWhiteSpace(reason))
-                label = TruncateAiLabel(reason);
-            else if (file.Classification == AiFileClassification.ReviewCarefully)
-                label = "Review carefully";
-            else
-                label = $"{file.PriorityStars}★ priority";
-
-            AiImportantFiles.Add(new AiImportantFileItem(file.Path, label));
-        }
-
+        AiReviewSessionHelpers.RebuildImportantFiles(AiTriage, AiImportantFiles);
         OnPropertyChanged(nameof(HasAiImportantFiles));
-    }
-
-    private static string TruncateAiLabel(string text, int maxLength = 120)
-    {
-        var trimmed = text.Trim();
-        if (trimmed.Length <= maxLength)
-            return trimmed;
-        return trimmed[..(maxLength - 1)].TrimEnd() + "…";
     }
 
     private void NotifyAiFileBandChanged()

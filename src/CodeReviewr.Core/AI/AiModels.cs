@@ -54,6 +54,13 @@ public enum AiAnnotationSeverity
     Risk,
 }
 
+public enum AiReviewScope
+{
+    PullRequest,
+    WorkingCopyStaged,
+    WorkingCopyAll,
+}
+
 /// <summary>Measured PR facts computed locally — never model judgements.</summary>
 public sealed record AiMeasuredFacts(
     int FilesChanged,
@@ -106,7 +113,7 @@ public sealed record AiRunProgress(
 
 public sealed record AiRunSnapshot(
     string RunId,
-    string PrNodeId,
+    string SessionKey,
     string HeadSha,
     string MergeBaseSha,
     AiRunState State,
@@ -128,9 +135,9 @@ public sealed record AiChatMessage(
     string Content,
     DateTimeOffset TimestampUtc);
 
-/// <summary>Request to start or resume an AI review for a pull request.</summary>
+/// <summary>Request to start or resume an AI review session.</summary>
 public sealed record AiReviewRequest(
-    string PrNodeId,
+    string SessionKey,
     string RepositoryPath,
     string RepositoryKey,
     string HeadSha,
@@ -143,7 +150,8 @@ public sealed record AiReviewRequest(
     IReadOnlyList<AiChangedFileFact> ChangedFiles,
     string? AdHocInstructions = null,
     bool DiscardCached = false,
-    bool Resume = false);
+    bool Resume = false,
+    AiReviewScope Scope = AiReviewScope.PullRequest);
 
 public sealed record AiChangedFileFact(
     string Path,
@@ -154,20 +162,20 @@ public sealed record AiChangedFileFact(
     int? LinesRemoved = null);
 
 public sealed record AiFileDepthRequest(
-    string PrNodeId,
+    string SessionKey,
     string Path,
     string? BeforeBlobOid,
     string? AfterBlobOid,
     bool IncludeAnnotations = true);
 
 public sealed record AiQuestionRequest(
-    string PrNodeId,
+    string SessionKey,
     string? Path,
     string Question,
     string? SelectedLinesContext = null);
 
 public sealed record AiInlineActionRequest(
-    string PrNodeId,
+    string SessionKey,
     string Path,
     string Action,
     string SelectedLinesContext,
