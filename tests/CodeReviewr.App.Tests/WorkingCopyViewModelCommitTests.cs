@@ -2,6 +2,7 @@ using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
+using CodeReviewr.Core.AI;
 using CodeReviewr.Core.Diff;
 using CodeReviewr.Diff;
 using CodeReviewr.Git;
@@ -473,6 +474,87 @@ public sealed class WorkingCopyViewModelCommitTests
                 false,
                 Arg.Any<IProgress<string>?>(),
                 Arg.Any<CancellationToken>());
+
+            // Post-commit evaluation prunes comments for the committed path and resets the counter.
+            await _localComments.Received(1).DeleteAsync("c1", Arg.Any<CancellationToken>());
+            Assert.That(vm.PendingReview.UnresolvedCommentCount, Is.EqualTo(0));
+            Assert.That(vm.PendingReview.LocalComments, Is.Empty);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task Commit_Partial_Clears_Ai_And_Prunes_Committed_Path_Comments()
+    {
+        var repo = NewRepo();
+        try
+        {
+            var remain = new StatusEntry(
+                FilePath.From("remain.txt"), null, ChangeKind.Modified,
+                IsStaged: false, IsUnstaged: true, IsConflicted: false);
+
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(
+                    new RepositoryStatus(
+                        [Staged("committed.txt")],
+                        [remain],
+                        [], InProgressOperation.None, "main", 1),
+                    new RepositoryStatus(
+                        [],
+                        [remain],
+                        [], InProgressOperation.None, "main", 2));
+
+            _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns([
+                    new LocalCommentRecord(
+                        "gone", repo, "committed.txt", 1, 1, DiffSide.New, "on committed",
+                        IsResolved: false, ContentId: null,
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+                    new LocalCommentRecord(
+                        "keep", repo, "remain.txt", 2, 2, DiffSide.New, "on remain",
+                        IsResolved: false, ContentId: null,
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+                ]);
+
+            _commit.CommitAsync(
+                    Arg.Any<string>(),
+                    Arg.Any<string>(),
+                    Arg.Any<bool>(),
+                    Arg.Any<bool>(),
+                    Arg.Any<IProgress<string>?>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(Task.CompletedTask);
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+            await vm.PendingReview.RefreshLocalCommentsAsync();
+
+            vm.PendingReview.AiRunState = AiRunState.Complete;
+            vm.PendingReview.AiTriage = new AiPrTriageResult(
+                Summary: "stale",
+                Risk: AiRiskLevel.Low,
+                Justifications: [],
+                SuggestedOrder: ["committed.txt"],
+                Files: [new AiFileTriage("committed.txt", AiFileClassification.Normal, 3, "g")],
+                Measured: new AiMeasuredFacts(1, 1, 1));
+
+            Assert.That(vm.PendingReview.UnresolvedCommentCount, Is.EqualTo(2));
+            Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("Re-run AI review"));
+
+            vm.CommitMessage = "partial";
+            await vm.CommitCommand.ExecuteAsync(null);
+
+            await _localComments.Received(1).DeleteAsync("gone", Arg.Any<CancellationToken>());
+            await _localComments.DidNotReceive().DeleteAsync("keep", Arg.Any<CancellationToken>());
+            Assert.That(vm.PendingReview.LocalComments.Select(c => c.Id), Is.EqualTo(new[] { "keep" }));
+            Assert.That(vm.PendingReview.UnresolvedCommentCount, Is.EqualTo(1));
+            Assert.That(vm.PendingReview.AiRunState, Is.EqualTo(AiRunState.Idle));
+            Assert.That(vm.PendingReview.AiTriage, Is.Null);
+            Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("AI review"));
+            Assert.That(vm.UnstagedFiles.Select(f => f.Path.Value), Is.EqualTo(new[] { "remain.txt" }));
         }
         finally
         {
