@@ -62,7 +62,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private readonly List<FileItemViewModel> _selectedFiles = [];
     private bool _suppressSelectionSync;
     private bool _skipNextSelectedFileLoad;
-    private bool _fileStatusLayoutManuallySet;
     private readonly Dictionary<string, bool> _fileStatusExpandState = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> _historyExpandState = new(StringComparer.Ordinal);
     private readonly HashSet<(int HunkIndex, int LineIndexInHunk)> _expandedCollapses = [];
@@ -119,8 +118,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         ViewMode = settings.Current.DefaultDiffMode;
         _ignoreWhitespace = settings.Current.IgnoreWhitespace;
         _contextLines = settings.Current.ContextLines > 0 ? settings.Current.ContextLines : 3;
-        _fileStatusListLayout = settings.Current.FileStatusListLayout;
-        _historyFileListLayout = settings.Current.HistoryFileListLayout;
+        _fileStatusListLayout = NormalizeFileListLayout(settings.Current.FileStatusListLayout);
+        _historyFileListLayout = NormalizeFileListLayout(settings.Current.HistoryFileListLayout);
         // Watcher callbacks arrive on thread-pool / FileSystemWatcher threads.
         _watcher.RefreshRequested += () =>
             Dispatcher.UIThread.Post(() => _ = RefreshAsync());
@@ -129,22 +128,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 _notifications.Info("Status is slow. Enable Git fsmonitor for this repository?",
                     () => _ = EnableFsmonitorAsync(), "Enable"));
         PendingReview.AttachHost(this);
-        PendingReview.TriageApplied += OnPendingReviewTriageApplied;
-    }
-
-    private void OnPendingReviewTriageApplied()
-    {
-        // Switching layout below already triggers a rebuild via OnFileStatusListLayoutChanged;
-        // avoid rebuilding twice for the common "first triage of this session" case.
-        if (!_fileStatusLayoutManuallySet &&
-            PendingReview.HasAiTriage &&
-            FileStatusListLayout != FileListLayoutMode.AiSuggested)
-        {
-            FileStatusListLayout = FileListLayoutMode.AiSuggested;
-            return;
-        }
-
-        RebuildFileStatusEntries();
     }
 
     /// <summary>PR-parity AI review + local-only comments surface for File Status (pending changes).</summary>
@@ -172,7 +155,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     public ObservableCollection<FileListEntry> ConflictedFileEntries { get; } = [];
     public ObservableCollection<FileListEntry> StashFileEntries { get; } = [];
     public ObservableCollection<FileListEntry> HistoryFileEntries { get; } = [];
-    public ObservableCollection<FileListEntry> AiSuggestedFileEntries { get; } = [];
     public ObservableCollection<CommitInfo> HistoryCommits { get; } = [];
     public ResettableObservableCollection<DiffRow> DiffRows { get; } = new();
     public ObservableCollection<BranchInfo> Branches { get; } = [];
@@ -454,6 +436,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     public bool HasConflictedFiles => ConflictedFiles.Count > 0;
 
     public bool HasStagedFiles => StagedFiles.Count > 0;
+    public int StagedFileCount => StagedFiles.Count;
+    public int UnstagedFileCount => UnstagedFiles.Count;
     public bool CanCommit =>
         !IsCommitting && HasStagedFiles && !string.IsNullOrWhiteSpace(CommitMessage);
     public bool ShowCommitDock => IsFileStatusMode && HasStagedFiles;
@@ -462,19 +446,12 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     public bool IsFileStatusFlatLayout => FileStatusListLayout == FileListLayoutMode.Flat;
     public bool IsFileStatusTreeLayout => FileStatusListLayout == FileListLayoutMode.Tree;
-    public bool IsFileStatusAiSuggestedLayout => FileStatusListLayout == FileListLayoutMode.AiSuggested;
-
-    /// <summary>True when the Staged/Unstaged/Conflicted sections (as opposed to the combined AI-suggested list) should be shown.</summary>
-    public bool IsFileStatusFlatOrTreeMode => IsFileStatusMode && !IsFileStatusAiSuggestedLayout;
     public bool IsHistoryFlatLayout => HistoryFileListLayout == FileListLayoutMode.Flat;
     public bool IsHistoryTreeLayout => HistoryFileListLayout == FileListLayoutMode.Tree;
     public Material.Icons.MaterialIconKind FileStatusLayoutIcon =>
-        FileStatusListLayout switch
-        {
-            FileListLayoutMode.Tree => Material.Icons.MaterialIconKind.FileTree,
-            FileListLayoutMode.AiSuggested => Material.Icons.MaterialIconKind.Star,
-            _ => Material.Icons.MaterialIconKind.FormatListBulleted,
-        };
+        FileStatusListLayout == FileListLayoutMode.Tree
+            ? Material.Icons.MaterialIconKind.FileTree
+            : Material.Icons.MaterialIconKind.FormatListBulleted;
     public Material.Icons.MaterialIconKind HistoryLayoutIcon =>
         HistoryFileListLayout == FileListLayoutMode.Tree
             ? Material.Icons.MaterialIconKind.FileTree
@@ -612,7 +589,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         if (isNewRepository)
         {
             PendingReview.ResetState();
-            _fileStatusLayoutManuallySet = false;
         }
         await RefreshAsync();
         await LoadBranchesAsync();
@@ -632,7 +608,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(ShowCommitDock));
         OnPropertyChanged(nameof(ShowCommitDetailsDock));
         OnPropertyChanged(nameof(ShowStashDetailsDock));
-        OnPropertyChanged(nameof(IsFileStatusFlatOrTreeMode));
     }
 
     partial void OnSelectedStashChanged(StashInfo? value)
@@ -700,11 +675,11 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             }
 
             await InvokeOnUiAsync(ApplyStatus);
-            PendingReview.ReapplyTriageToFiles();
             SoftInvalidateChangedPaths(previousStatus, status);
             UpdateFileCacheIndicators();
             await RevalidateSelectedDiffAfterStatusAsync(previousStatus, status);
             await PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReviewAfter);
+            PendingReview.UpdateFileUnresolvedCommentCounts();
             ScheduleFileStatusPrefetch();
 
             CodeReviewrMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
@@ -783,6 +758,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
         OnPropertyChanged(nameof(HasConflictedFiles));
         OnPropertyChanged(nameof(HasStagedFiles));
+        OnPropertyChanged(nameof(StagedFileCount));
+        OnPropertyChanged(nameof(UnstagedFileCount));
         OnPropertyChanged(nameof(ShowCommitDock));
         NotifyCanCommitChanged();
 
@@ -827,31 +804,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             ConflictedFileEntries, ConflictedFiles, FileStatusListLayout, flatUsesFullPath: false, _fileStatusExpandState);
         FileListLayoutHelper.Rebuild(
             StashFileEntries, StashFiles, FileStatusListLayout, flatUsesFullPath: false, _fileStatusExpandState);
-
-        if (FileStatusListLayout == FileListLayoutMode.AiSuggested)
-        {
-            FileListLayoutHelper.Rebuild(
-                AiSuggestedFileEntries, BuildFilteredPendingFiles(), FileListLayoutMode.AiSuggested,
-                flatUsesFullPath: true, _fileStatusExpandState);
-        }
-        else
-        {
-            AiSuggestedFileEntries.Clear();
-        }
-    }
-
-    /// <summary>Staged + unstaged + conflicted files (post file-filter), unique by path, for the AI-suggested layout.</summary>
-    private List<FileItemViewModel> BuildFilteredPendingFiles()
-    {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var result = new List<FileItemViewModel>();
-        foreach (var file in StagedFiles)
-            if (seen.Add(file.Path.Value)) result.Add(file);
-        foreach (var file in UnstagedFiles)
-            if (seen.Add(file.Path.Value)) result.Add(file);
-        foreach (var file in ConflictedFiles)
-            if (seen.Add(file.Path.Value)) result.Add(file);
-        return result;
     }
 
     private void RebuildHistoryFileEntries()
@@ -860,6 +812,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             HistoryFileEntries, HistoryFiles, HistoryFileListLayout, flatUsesFullPath: false, _historyExpandState);
     }
 
+    private static FileListLayoutMode NormalizeFileListLayout(FileListLayoutMode mode) =>
+        // Legacy persisted "AiSuggested" (numeric 2) collapses to Flat after triage removal.
+        mode == FileListLayoutMode.Tree ? FileListLayoutMode.Tree : FileListLayoutMode.Flat;
+
     partial void OnFileStatusListLayoutChanged(FileListLayoutMode value)
     {
         _settings.Update(s => s.FileStatusListLayout = value);
@@ -867,8 +823,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         RebuildFileStatusEntries();
         OnPropertyChanged(nameof(IsFileStatusFlatLayout));
         OnPropertyChanged(nameof(IsFileStatusTreeLayout));
-        OnPropertyChanged(nameof(IsFileStatusAiSuggestedLayout));
-        OnPropertyChanged(nameof(IsFileStatusFlatOrTreeMode));
         OnPropertyChanged(nameof(FileStatusLayoutIcon));
         SelectionSyncRequested?.Invoke();
     }
@@ -885,11 +839,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     }
 
     [RelayCommand]
-    private void SetFileStatusListLayout(FileListLayoutMode mode)
-    {
-        _fileStatusLayoutManuallySet = true;
-        FileStatusListLayout = mode;
-    }
+    private void SetFileStatusListLayout(FileListLayoutMode mode) =>
+        FileStatusListLayout = NormalizeFileListLayout(mode);
 
     [RelayCommand]
     private void SetHistoryFileListLayout(FileListLayoutMode mode) => HistoryFileListLayout = mode;
@@ -1854,28 +1805,15 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             loadActivity?.SetTag("diff.view_mode", ViewMode.ToString());
 
             var sw = Stopwatch.StartNew();
-            FileDiff diff;
             if (file.Kind == ChangeKind.Untracked)
             {
-                DiffRows.Clear();
-                _currentDiff = null;
-                ClearDiffCacheState();
-                IsLoadingDiff = true;
-                IsDiffRefreshing = false;
-                var fullPath = RepositoryPathResolver.ResolveUnderRoot(_repoPath, file.Path);
-                if (!System.IO.File.Exists(fullPath))
-                {
-                    diff = UntrackedFileDiff.Create(file.Path, string.Empty, target);
-                }
-                else
-                {
-                    var bytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct);
-                    ct.ThrowIfCancellationRequested();
-                    diff = UntrackedFileDiff.Create(file.Path, bytes, target);
-                }
-
-                ct.ThrowIfCancellationRequested();
-                await PresentDiffAsync(file, diff, target, ct);
+                await LoadTrackedDiffWithSwrAsync(
+                    file,
+                    key,
+                    target,
+                    force: false,
+                    factory: token => LoadUntrackedFileDiffAsync(_repoPath, file.Path, target, token),
+                    ct);
             }
             else
             {
@@ -2254,13 +2192,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
         void UpdateFs(FileItemViewModel file)
         {
-            if (file.Kind == ChangeKind.Untracked)
-            {
-                file.HasCachedDiff = false;
-                file.IsDiffStale = false;
-                return;
-            }
-
             var target = IsCombinedReviewMode
                 ? DiffTarget.HeadToWorktree
                 : file.IsStagedList ? DiffTarget.HeadToIndex : DiffTarget.IndexToWorktree;
@@ -2269,6 +2200,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             {
                 file.HasCachedDiff = true;
                 file.IsDiffStale = entry.IsStale;
+                file.ApplyChangeStats(FileChangeStats.FromDiff(entry.Diff));
             }
             else
             {
@@ -2290,6 +2222,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 {
                     file.HasCachedDiff = true;
                     file.IsDiffStale = entry.IsStale;
+                    file.ApplyChangeStats(FileChangeStats.FromDiff(entry.Diff));
                 }
                 else
                 {
@@ -2308,6 +2241,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 {
                     file.HasCachedDiff = true;
                     file.IsDiffStale = entry.IsStale;
+                    file.ApplyChangeStats(FileChangeStats.FromDiff(entry.Diff));
                 }
                 else
                 {
@@ -2540,6 +2474,21 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         return System.Text.Encoding.UTF8.GetString(bytes, offset, bytes.Length - offset);
     }
 
+    private static async Task<FileDiff> LoadUntrackedFileDiffAsync(
+        string repoPath,
+        FilePath path,
+        DiffTarget target,
+        CancellationToken ct)
+    {
+        var fullPath = RepositoryPathResolver.ResolveUnderRoot(repoPath, path);
+        if (!System.IO.File.Exists(fullPath))
+            return UntrackedFileDiff.Create(path, string.Empty, target);
+
+        var bytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
+        ct.ThrowIfCancellationRequested();
+        return UntrackedFileDiff.Create(path, bytes, target);
+    }
+
     private static DiffWarmKey FileStatusWarmKey(FilePath path, DiffTarget target, DiffOptions options) =>
         new("fs", path.Value, target.AsWorkingCopy(), options);
 
@@ -2570,7 +2519,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             foreach (var (path, target, kind) in work)
             {
                 if (ct.IsCancellationRequested) break;
-                if (kind == ChangeKind.Untracked) continue;
 
                 var key = FileStatusWarmKey(path, target, options);
                 if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry)
@@ -2580,9 +2528,18 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 var repoPath = _repoPath;
                 var filePath = path;
                 var diffTarget = target;
-                pending.Add(_warmStore.GetOrStart(
-                    key,
-                    token => _diffService.GetDiffAsync(repoPath, filePath, diffTarget.AsWorkingCopy(), options, token)));
+                if (kind == ChangeKind.Untracked)
+                {
+                    pending.Add(_warmStore.GetOrStart(
+                        key,
+                        token => LoadUntrackedFileDiffAsync(repoPath, filePath, diffTarget, token)));
+                }
+                else
+                {
+                    pending.Add(_warmStore.GetOrStart(
+                        key,
+                        token => _diffService.GetDiffAsync(repoPath, filePath, diffTarget.AsWorkingCopy(), options, token)));
+                }
             }
 
             if (pending.Count > 0)
@@ -2895,12 +2852,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         var removed = 0;
         if (diff is not null)
         {
-            foreach (var hunk in diff.Hunks)
-            foreach (var line in hunk.Lines)
-            {
-                if (line.Kind == DiffLineKind.Added) added++;
-                else if (line.Kind == DiffLineKind.Removed) removed++;
-            }
+            var stats = FileChangeStats.FromDiff(diff);
+            added = stats.LinesAdded;
+            removed = stats.LinesRemoved;
+            SelectedFile?.ApplyChangeStats(stats);
         }
         SelectedAddedLines = added;
         SelectedRemovedLines = removed;
@@ -3765,67 +3720,54 @@ public partial class FileItemViewModel : ObservableObject
 
     [ObservableProperty] private bool _hasCachedDiff;
     [ObservableProperty] private bool _isDiffStale;
+    [ObservableProperty] private int _totalCommentCount;
     [ObservableProperty] private int _unresolvedThreadCount;
     [ObservableProperty] private bool _isViewed;
     [ObservableProperty] private bool _isViewedPending;
     [ObservableProperty] private bool _hasCommentThreads;
     [ObservableProperty] private bool _hasStaleThreads;
 
-    /// <summary>AI-suggested review priority, 0 (no signal) to 5 (highest).</summary>
-    [ObservableProperty] private int _aiPriorityStars;
+    [ObservableProperty] private int? _linesAdded;
+    [ObservableProperty] private int? _linesRemoved;
+    [ObservableProperty] private int? _changePercent;
 
-    /// <summary>AI file classification: <c>Skip</c>, <c>ReviewCarefully</c>, or <c>Normal</c> (null = no AI signal yet).</summary>
-    [ObservableProperty] private string? _aiClassification;
+    /// <summary>Future AI semantic classification; unset until a later AI overhaul populates it.</summary>
+    [ObservableProperty] private AiChangeClassification? _aiChangeClassification;
 
-    /// <summary>Short AI guidance for reviewing this file, if provided by the triage.</summary>
-    [ObservableProperty] private string? _aiGuidance;
+    public bool HasLineStats => LinesAdded.HasValue && LinesRemoved.HasValue;
+    public bool HasChangePercent => ChangePercent.HasValue;
+    public bool HasAiChangeClassification => AiChangeClassification.HasValue;
 
-    public bool HasAiStars => AiPriorityStars > 0;
-    public bool IsAiSkip => string.Equals(AiClassification, "Skip", StringComparison.OrdinalIgnoreCase);
-    public bool IsAiReviewCarefully => string.Equals(AiClassification, "ReviewCarefully", StringComparison.OrdinalIgnoreCase);
+    public string? ChangePercentTooltip =>
+        ChangePercent is int p ? $"{p}% of file changed" : null;
 
-    /// <summary>Tooltip for the file-list stars/AI badge: stars plus guidance when present.</summary>
-    public string? AiGuidanceTooltip
+    /// <summary>Applies locally computed diff stats for the file list row.</summary>
+    public void ApplyChangeStats(FileChangeStats stats)
     {
-        get
-        {
-            var stars = HasAiStars ? new string('★', Math.Clamp(AiPriorityStars, 0, 5)) : null;
-            var guidance = string.IsNullOrWhiteSpace(AiGuidance) ? null : AiGuidance.Trim();
-            if (stars is null && guidance is null)
-                return null;
-            if (stars is null)
-                return guidance;
-            if (guidance is null)
-                return stars;
-            return $"{stars}\n{guidance}";
-        }
+        LinesAdded = stats.LinesAdded;
+        LinesRemoved = stats.LinesRemoved;
+        ChangePercent = stats.ChangePercent;
     }
 
-    partial void OnAiPriorityStarsChanged(int value)
+    /// <summary>Applies add/delete counts when total/percent may be unknown (e.g. GraphQL).</summary>
+    public void ApplyLineCounts(int added, int removed, int? changePercent = null)
     {
-        OnPropertyChanged(nameof(HasAiStars));
-        OnPropertyChanged(nameof(AiGuidanceTooltip));
+        var stats = FileChangeStats.FromCounts(added, removed, totalLines: null, Kind);
+        LinesAdded = stats.LinesAdded;
+        LinesRemoved = stats.LinesRemoved;
+        ChangePercent = changePercent ?? stats.ChangePercent;
     }
 
-    partial void OnAiGuidanceChanged(string? value) => OnPropertyChanged(nameof(AiGuidanceTooltip));
-
-    partial void OnAiClassificationChanged(string? value)
+    partial void OnLinesAddedChanged(int? value) => OnPropertyChanged(nameof(HasLineStats));
+    partial void OnLinesRemovedChanged(int? value) => OnPropertyChanged(nameof(HasLineStats));
+    partial void OnChangePercentChanged(int? value)
     {
-        OnPropertyChanged(nameof(IsAiSkip));
-        OnPropertyChanged(nameof(IsAiReviewCarefully));
+        OnPropertyChanged(nameof(HasChangePercent));
+        OnPropertyChanged(nameof(ChangePercentTooltip));
     }
 
-    public string StatusBadge => Kind switch
-    {
-        ChangeKind.Added or ChangeKind.Copied => "A",
-        ChangeKind.Deleted => "D",
-        ChangeKind.Modified or ChangeKind.TypeChanged => "M",
-        ChangeKind.Renamed => "R",
-        ChangeKind.Untracked => "U",
-        ChangeKind.Conflicted => "C",
-        ChangeKind.Ignored => "I",
-        _ => "?",
-    };
+    partial void OnAiChangeClassificationChanged(AiChangeClassification? value) =>
+        OnPropertyChanged(nameof(HasAiChangeClassification));
 
     public static FileItemViewModel From(StatusEntry e, bool isStagedList) =>
         new(e.Path, e.Kind, isStagedList,

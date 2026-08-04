@@ -11,25 +11,6 @@ public sealed class AiPromptCatalogTests
     }
 
     [Test]
-    public void GetTriagePrompt_RendersAllPlaceholders()
-    {
-        var catalog = new AiPromptCatalog();
-
-        var prompt = catalog.GetTriagePrompt(new Dictionary<string, string>
-        {
-            ["rules"] = "RULE-TEXT",
-            ["facts"] = "FACTS-TEXT",
-            ["adhoc_instructions"] = "ADHOC-TEXT",
-        });
-
-        Assert.That(prompt, Does.Contain("RULE-TEXT"));
-        Assert.That(prompt, Does.Contain("FACTS-TEXT"));
-        Assert.That(prompt, Does.Contain("ADHOC-TEXT"));
-        Assert.That(prompt, Does.Not.Contain("{{"));
-        Assert.That(prompt, Does.Contain("submit_pr_triage"));
-    }
-
-    [Test]
     public void GetFileSummaryPrompt_RendersAllPlaceholders()
     {
         var catalog = new AiPromptCatalog();
@@ -102,29 +83,19 @@ public sealed class AiPromptCatalogTests
     [Test]
     public void Render_IsCached_AcrossCalls()
     {
-        // Not observable from the outside beyond "doesn't throw and returns the same content
-        // twice", but guards against the embedded-resource cache silently corrupting output.
         var catalog = new AiPromptCatalog();
-        var placeholders = new Dictionary<string, string> { ["rules"] = "R", ["facts"] = "F", ["adhoc_instructions"] = "A" };
+        var placeholders = new Dictionary<string, string>
+        {
+            ["rules"] = "R",
+            ["adhoc_instructions"] = "A",
+            ["path"] = "p",
+            ["before_oid"] = "b",
+            ["after_oid"] = "a",
+        };
 
-        var first = catalog.GetTriagePrompt(placeholders);
-        var second = catalog.GetTriagePrompt(placeholders);
+        var first = catalog.GetFileSummaryPrompt(placeholders);
+        var second = catalog.GetFileSummaryPrompt(placeholders);
 
         Assert.That(first, Is.EqualTo(second));
-    }
-
-    [Test]
-    public Task TriagePrompt_MatchesSnapshot()
-    {
-        var catalog = new AiPromptCatalog();
-
-        var prompt = catalog.GetTriagePrompt(new Dictionary<string, string>
-        {
-            ["rules"] = "- Prioritize correctness and security.\n- Flag missing tests.",
-            ["facts"] = "Title: Add login retry\nFiles changed: 2 (+10 / -2)",
-            ["adhoc_instructions"] = "Pay extra attention to error handling.",
-        });
-
-        return Verify(prompt);
     }
 }

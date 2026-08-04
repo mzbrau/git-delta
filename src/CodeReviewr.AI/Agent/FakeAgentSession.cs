@@ -92,10 +92,6 @@ internal sealed class FakeAgentScript
                 t.Text(assistantText);
         });
 
-    /// <summary>Convenience builder for the common case of a scripted <c>submit_pr_triage</c> call.</summary>
-    public static FakeAgentScript ForPrTriage(string triageJson, string? assistantText = null) =>
-        ForToolCall("submit_pr_triage", triageJson, assistantText);
-
     /// <summary>Dequeues the next scripted turn, or an empty no-op turn once the script is exhausted.</summary>
     internal FakeAgentTurn NextTurn() =>
         _turns.Count > 0 ? _turns.Dequeue() : new FakeAgentTurn([], null, null, null);

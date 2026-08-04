@@ -79,10 +79,23 @@ public enum ViewedFilter
     NotViewed,
 }
 
-/// <summary>Layout for changed-file sidebars (flat paths vs folder tree vs AI order).</summary>
+/// <summary>Layout for changed-file sidebars (flat paths vs folder tree).</summary>
 public enum FileListLayoutMode
 {
     Flat,
     Tree,
-    AiSuggested,
+}
+
+/// <summary>
+/// Semantic classification of a file's changes (future AI). UI shows an icon when set;
+/// nothing populates this yet.
+/// </summary>
+public enum AiChangeClassification
+{
+    BehaviorChanged,
+    NewFeature,
+    RefactorOnly,
+    Configuration,
+    Tests,
+    Generated,
 }

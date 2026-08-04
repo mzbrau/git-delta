@@ -33,10 +33,6 @@
     <Setter Property="FontWeight" Value="Bold" />
   </Style>
 
-  <Style Selector="TextBlock.PrFileLabel.AiSkip">
-    <Setter Property="Opacity" Value="0.55" />
-  </Style>
-
   <Style Selector="Button.Ghost">
     <Setter Property="Background" Value="Transparent" />
     <Setter Property="BorderBrush" Value="Transparent" />
@@ -184,22 +180,38 @@
     <Setter Property="BorderThickness" Value="0" />
   </Style>
 
-  <Style Selector="ListBoxItem.FileRow">
-    <Setter Property="Padding" Value="8,4" />
-    <Setter Property="MinHeight" Value="32" />
+  <Style Selector="ListBoxItem.FileRow, ListBox.FileList ListBoxItem">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="MinHeight" Value="24" />
     <Setter Property="CornerRadius" Value="0" />
     <Setter Property="Margin" Value="0,0,0,1" />
     <Setter Property="BorderThickness" Value="0" />
   </Style>
-  <Style Selector="ListBoxItem.FileRow:pointerover /template/ ContentPresenter">
+  <Style Selector="ListBoxItem.FileRow:pointerover /template/ ContentPresenter, ListBox.FileList ListBoxItem:pointerover /template/ ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource ForgeSurfaceContainerHighBrush}" />
   </Style>
-  <Style Selector="ListBoxItem.FileRow:selected /template/ ContentPresenter">
+  <Style Selector="ListBoxItem.FileRow:selected /template/ ContentPresenter, ListBox.FileList ListBoxItem:selected /template/ ContentPresenter">
     <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
   </Style>
-  <Style Selector="ListBoxItem.FileRow:selected">
+  <Style Selector="ListBoxItem.FileRow:selected, ListBox.FileList ListBoxItem:selected">
     <Setter Property="BorderBrush" Value="{DynamicResource ForgePrimaryBrush}" />
     <Setter Property="BorderThickness" Value="3,0,0,0" />
+  </Style>
+
+  <Style Selector="Border.FileListRow">
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="CornerRadius" Value="4" />
+  </Style>
+
+  <!-- Comments / Conversation selection chrome (mirrors ListBoxItem.FileRow:selected) -->
+  <Style Selector="Button.Ghost.FileListSelected">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource ForgePrimaryBrush}" />
+    <Setter Property="BorderThickness" Value="3,0,0,0" />
+    <Setter Property="CornerRadius" Value="0" />
+  </Style>
+  <Style Selector="Button.Ghost.FileListSelected:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
   </Style>
 
   <Style Selector="ListBoxItem.NavItem">

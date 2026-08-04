@@ -77,49 +77,14 @@ internal sealed class AiReviewCoordinator(
         // Session intentionally left null — EnsureLiveSessionAsync resumes lazily.
     }
 
-    public async ValueTask<IReadOnlyList<FilePath>> SuggestFileOrderAsync(
+    public ValueTask<IReadOnlyList<FilePath>> SuggestFileOrderAsync(
         string sessionKey,
         IReadOnlyList<FilePath> changedFiles,
-        CancellationToken ct = default)
-    {
-        var cached = await GetCachedRunAsync(sessionKey, ct).ConfigureAwait(false);
-        if (cached?.Triage is not { SuggestedOrder.Count: > 0 } triage)
-            return changedFiles;
+        CancellationToken ct = default) =>
+        ValueTask.FromResult(changedFiles);
 
-        var remaining = changedFiles.ToDictionary(f => f.Value, f => f, StringComparer.Ordinal);
-        var ordered = new List<FilePath>(changedFiles.Count);
-        foreach (var path in triage.SuggestedOrder)
-        {
-            if (remaining.Remove(path, out var file))
-                ordered.Add(file);
-        }
-
-        ordered.AddRange(changedFiles.Where(f => remaining.ContainsKey(f.Value)));
-        return ordered;
-    }
-
-    public async ValueTask<IReadOnlyList<AIChecklistItem>> GetChecklistAsync(string sessionKey, CancellationToken ct = default)
-    {
-        var cached = await GetCachedRunAsync(sessionKey, ct).ConfigureAwait(false);
-        if (cached?.Triage is not { } triage)
-            return [];
-
-        var items = new List<AIChecklistItem>
-        {
-            new("risk", $"Overall risk: {triage.Risk}", triage.Summary, MapSeverity(triage.Risk)),
-        };
-
-        foreach (var justification in triage.Justifications)
-        {
-            items.Add(new AIChecklistItem(
-                $"justification:{justification.FilePath}", justification.FilePath, justification.Reason, AIChecklistSeverity.Warning));
-        }
-
-        foreach (var file in triage.Files.Where(f => f.Classification == AiFileClassification.ReviewCarefully))
-            items.Add(new AIChecklistItem($"file:{file.Path}", file.Path, file.Guidance, AIChecklistSeverity.Suggestion));
-
-        return items;
-    }
+    public ValueTask<IReadOnlyList<AIChecklistItem>> GetChecklistAsync(string sessionKey, CancellationToken ct = default) =>
+        ValueTask.FromResult<IReadOnlyList<AIChecklistItem>>([]);
 
     public ValueTask<IReadOnlyList<IDiffAnnotation>> GetAnnotationsAsync(FileDiffKey key, CancellationToken ct = default)
     {
@@ -219,6 +184,19 @@ internal sealed class AiReviewCoordinator(
                     return ToSnapshot(cachedRun, triage);
                 }
             }
+            else
+            {
+                // Triage no longer writes a PR payload; reuse a complete shell run with the same cache key.
+                var latestRun = await resultStore.GetLatestRunAsync(request.SessionKey, ct).ConfigureAwait(false);
+                if (latestRun is { State: AiRunState.Complete } &&
+                    string.Equals(latestRun.CacheKey, cacheKey, StringComparison.Ordinal))
+                {
+                    var context = RegisterRunContext(
+                        request, latestRun.Id, latestRun.CopilotSessionId, triage: null, AiRunState.Complete);
+                    context.CacheKey = cacheKey;
+                    return ToSnapshot(latestRun, triage: null);
+                }
+            }
         }
 
         string? resumeSessionId = null;
@@ -248,44 +226,10 @@ internal sealed class AiReviewCoordinator(
             AiRunState.Running, TurnsUsed: 0, request.AdHocInstructions, cacheKey, ErrorMessage: null,
             startedUtc, FinishedUtc: null), ct).ConfigureAwait(false);
 
-        var completion = new TaskCompletionSource<AiRunSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
-        workQueue.Enqueue(new AiWorkItem(request.RepositoryKey, AiWorkPriority.Triage, Path: null, async workCt =>
-        {
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(workCt, runContext.RunCts.Token);
-            try
-            {
-                var snapshot = await RunTriageAsync(request, runContext, linkedCts.Token).ConfigureAwait(false);
-                completion.TrySetResult(snapshot);
-            }
-            catch (TimeoutException ex)
-            {
-                logger.LogError(ex, "AI triage timed out waiting for Copilot for session {SessionKey}.", request.SessionKey);
-                var turnTimeout = Math.Max(10, settingsStore.Current.AiTurnTimeoutSeconds);
-                var message =
-                    $"AI review timed out after {turnTimeout}s with no Copilot activity (turn idle timeout). {ex.Message}";
-                NotifyActivityLog(runContext, $"Error: {message}");
-                var incomplete = await FinishRunAsync(runContext, AiRunState.Incomplete, message, CancellationToken.None)
-                    .ConfigureAwait(false);
-                completion.TrySetResult(incomplete);
-            }
-            catch (OperationCanceledException)
-            {
-                var message = ClassifyCancellation(runContext);
-                NotifyActivityLog(runContext, $"Error: {message}");
-                var incomplete = await FinishRunAsync(runContext, AiRunState.Incomplete, message, CancellationToken.None)
-                    .ConfigureAwait(false);
-                completion.TrySetResult(incomplete);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "AI triage failed for session {SessionKey}.", request.SessionKey);
-                NotifyActivityLog(runContext, $"Error: {ex.Message}");
-                var failed = await FinishRunAsync(runContext, AiRunState.Failed, ex.Message, CancellationToken.None).ConfigureAwait(false);
-                completion.TrySetResult(failed);
-            }
-        }));
-
-        return await completion.Task.ConfigureAwait(false);
+        // Triage was removed; open a durable run shell so file-depth / chat can attach later.
+        runContext.Triage = null;
+        NotifyActivityLog(runContext, "AI review session ready (triage disabled; file-depth available).");
+        return await FinishRunAsync(runContext, AiRunState.Complete, errorMessage: null, ct).ConfigureAwait(false);
     }
 
     public Task CancelAsync(string repositoryKey, CancellationToken ct = default)
@@ -449,51 +393,12 @@ internal sealed class AiReviewCoordinator(
     // Run implementation.
     // ---------------------------------------------------------------------
 
-    private async Task<AiRunSnapshot> RunTriageAsync(AiReviewRequest request, RunContext context, CancellationToken ct)
-    {
-        AgentPermissionPolicy? policy = null;
-        try
-        {
-            var capture = new TriageCapture();
-            policy = await OpenOrResumeSessionAsync(
-                    context,
-                    resumeSessionId: context.CopilotSessionId,
-                    capture,
-                    ct)
-                .ConfigureAwait(false);
-
-            NotifyProgress(context, AiRunStage.Triaging, "Waiting on: Copilot triage turn");
-            NotifyActivityLog(context, "Waiting on: Copilot triage turn");
-            var placeholders = new Dictionary<string, string>
-            {
-                ["rules"] = EffectiveRules(),
-                ["facts"] = factsAssembler.BuildFactsBlock(request),
-                ["adhoc_instructions"] = request.AdHocInstructions ?? "(none)",
-            };
-            var prompt = prompts.GetTriagePrompt(placeholders);
-
-            context.TurnsUsed++;
-            await SendTurnWithBudgetAsync(context, prompt, ct).ConfigureAwait(false);
-
-            if (capture.Result is null)
-                return await FinishRunAsync(context, AiRunState.Incomplete, "The agent did not submit a triage result.", ct).ConfigureAwait(false);
-
-            context.Triage = capture.Result;
-            return await FinishRunAsync(context, AiRunState.Complete, errorMessage: null, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            LogPermissionDenials(context, policy);
-        }
-    }
-
     /// <summary>
     /// Materialises the review tree and creates or resumes a Copilot session on <paramref name="context"/>.
     /// </summary>
     private async Task<AgentPermissionPolicy> OpenOrResumeSessionAsync(
         RunContext context,
         string? resumeSessionId,
-        TriageCapture capture,
         CancellationToken ct)
     {
         NotifyProgress(context, AiRunStage.Materialising, "Waiting on: materialising working copy");
@@ -510,7 +415,7 @@ internal sealed class AiReviewCoordinator(
         NotifyActivityLog(context, "Waiting on: connecting to GitHub Copilot");
         var token = await ResolveTokenAsync(context.RepositoryPath, ct).ConfigureAwait(false);
 
-        var tools = BuildTools(context, capture);
+        var tools = BuildTools(context);
         var policy = new AgentPermissionPolicy(settingsStore.Current.AiPathDenylist);
 
         AgentPermissionDecision OnPermission(AgentPermissionRequest request)
@@ -778,12 +683,6 @@ internal sealed class AiReviewCoordinator(
         if (context.Session is not null)
             return context;
 
-        if (string.IsNullOrEmpty(context.CopilotSessionId))
-        {
-            throw new InvalidOperationException(
-                $"The cached AI review for session '{sessionKey}' has no resumable Copilot session. Start a new review first.");
-        }
-
         await context.SessionGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -792,17 +691,28 @@ internal sealed class AiReviewCoordinator(
 
             try
             {
+                // StartReview no longer opens a Copilot session; create one lazily for file-depth / chat,
+                // or resume when a prior CopilotSessionId was persisted.
                 await OpenOrResumeSessionAsync(
                         context,
                         resumeSessionId: context.CopilotSessionId,
-                        new TriageCapture(),
                         ct)
                     .ConfigureAwait(false);
+
+                if (context.RunId is not null)
+                {
+                    await resultStore.UpsertRunAsync(new AiRunRecord(
+                        context.RunId, context.SessionKey, context.HeadSha, context.MergeBaseSha,
+                        context.CopilotSessionId, context.State, context.TurnsUsed, context.AdHocInstructions,
+                        context.CacheKey ?? "", context.ErrorMessage, context.StartedUtc, context.FinishedUtc), ct)
+                        .ConfigureAwait(false);
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                var action = string.IsNullOrEmpty(context.CopilotSessionId) ? "open" : "resume";
                 throw new InvalidOperationException(
-                    $"Failed to resume the Copilot session for '{sessionKey}'. The session may have expired. Start a new review. ({ex.Message})",
+                    $"Failed to {action} the Copilot session for '{sessionKey}'. Start a new review. ({ex.Message})",
                     ex);
             }
 
@@ -944,12 +854,8 @@ internal sealed class AiReviewCoordinator(
     // Custom tools invoked by the agent.
     // ---------------------------------------------------------------------
 
-    private IReadOnlyList<AgentCustomTool> BuildTools(RunContext context, TriageCapture capture) =>
+    private IReadOnlyList<AgentCustomTool> BuildTools(RunContext context) =>
     [
-        new AgentCustomTool(
-            "submit_pr_triage",
-            "Submit the final pull request triage result. Call exactly once, at the end of the review.",
-            (argsJson, ct) => HandleSubmitPrTriage(context, capture, argsJson, ct)),
         new AgentCustomTool(
             "submit_file_summary",
             "Submit the summary for the file currently being reviewed in depth.",
@@ -960,38 +866,6 @@ internal sealed class AiReviewCoordinator(
             (argsJson, ct) => HandleAddAnnotation(context, argsJson, ct)),
     ];
 
-    private async Task<string> HandleSubmitPrTriage(RunContext context, TriageCapture capture, string argsJson, CancellationToken ct)
-    {
-        try
-        {
-            var triage = Deserialize<AiPrTriageResult>(argsJson) ?? throw new InvalidOperationException("Empty triage payload.");
-            triage = triage with { Measured = factsAssembler.ComputeMeasuredFacts(context.Request) };
-            capture.Result = triage;
-
-            await resultStore.UpsertPrResultAsync(new AiPrResultRecord(
-                context.RunId!, context.SessionKey, context.CacheKey ?? "", Serialize(triage), DateTimeOffset.UtcNow), ct)
-                .ConfigureAwait(false);
-
-            foreach (var file in triage.Files)
-            {
-                var fact = context.Request.ChangedFiles.FirstOrDefault(f => string.Equals(f.Path, file.Path, StringComparison.Ordinal));
-                var fileCacheKey = AiCacheKeys.ComputeFileKey(
-                    file.Path, fact?.BeforeBlobOid, fact?.AfterBlobOid, AiPromptCatalog.PromptVersion,
-                    context.Model, context.RulesHash ?? "", context.InstructionsHash ?? "");
-
-                await resultStore.UpsertFileResultAsync(new AiFileResultRecord(
-                    context.RunId!, context.SessionKey, file.Path, fileCacheKey, file.Classification.ToString(),
-                    file.PriorityStars, file.Guidance, SummaryJson: null, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
-            }
-
-            return """{"status":"ok"}""";
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to process submit_pr_triage payload for session {SessionKey}.", context.SessionKey);
-            return Serialize(new ToolErrorResult(ex.Message));
-        }
-    }
 
     private async Task<string> HandleSubmitFileSummary(RunContext context, string argsJson, CancellationToken ct)
     {
@@ -1068,11 +942,6 @@ internal sealed class AiReviewCoordinator(
         DiffSide Side,
         AiAnnotationSeverity Severity,
         string Body);
-
-    private sealed class TriageCapture
-    {
-        public AiPrTriageResult? Result;
-    }
 
     private sealed record FileDepthContext(string Path, string? BeforeOid, string? AfterOid);
 

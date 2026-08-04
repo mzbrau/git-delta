@@ -72,8 +72,9 @@ public sealed class WorkingCopyViewModelSnappyTests
             new IntraLineDiffer(), _fsmonitor, _watcher,
             new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications));
 
-    private static StatusEntry Unstaged(string path) =>
-        new(FilePath.From(path), null, ChangeKind.Modified, IsStaged: false, IsUnstaged: true, IsConflicted: false);
+    private static StatusEntry Unstaged(string path, string? worktreeOid = null) =>
+        new(FilePath.From(path), null, ChangeKind.Modified, IsStaged: false, IsUnstaged: true, IsConflicted: false,
+            WorktreeOid: worktreeOid is null ? null : ContentId.FromSha(worktreeOid));
 
     private static StatusEntry Staged(string path) =>
         new(FilePath.From(path), null, ChangeKind.Modified, IsStaged: true, IsUnstaged: false, IsConflicted: false);
@@ -231,8 +232,9 @@ public sealed class WorkingCopyViewModelSnappyTests
 
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            // Bump worktree OID so soft-refresh treats the file as changed and revalidates the diff.
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
-                .Returns(Status([Unstaged("a.txt")], epoch: 2));
+                .Returns(Status([Unstaged("a.txt", worktreeOid: "oid2")], epoch: 2));
             _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
                 .Returns(async ci =>
                 {

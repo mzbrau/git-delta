@@ -1722,28 +1722,6 @@ public sealed class ReviewViewModelTests
     }
 
     [Test]
-    public void AiRiskBadgeText_Formats_Risk_Levels()
-    {
-        var settings = Substitute.For<ISettingsStore>();
-        settings.Current.Returns(new AppSettings());
-        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
-
-        Assert.That(vm.AiRiskBadgeText, Is.EqualTo(""));
-
-        vm.AiTriage = CreateTriage(AiRiskLevel.Low);
-        Assert.That(vm.AiRiskBadgeText, Is.EqualTo("LOW RISK"));
-
-        vm.AiTriage = CreateTriage(AiRiskLevel.Medium);
-        Assert.That(vm.AiRiskBadgeText, Is.EqualTo("MEDIUM RISK"));
-
-        vm.AiTriage = CreateTriage(AiRiskLevel.High);
-        Assert.That(vm.AiRiskBadgeText, Is.EqualTo("HIGH RISK"));
-
-        vm.AiTriage = CreateTriage(AiRiskLevel.Critical);
-        Assert.That(vm.AiRiskBadgeText, Is.EqualTo("CRITICAL RISK"));
-    }
-
-    [Test]
     public void AiChatPlaceholder_Reflects_SelectedFile()
     {
         var settings = Substitute.For<ISettingsStore>();
@@ -2121,46 +2099,14 @@ public sealed class ReviewViewModelTests
         Assert.That(selectedBefore, Is.Not.Null);
         Assert.That(vm.PullRequestFileListLayout, Is.EqualTo(FileListLayoutMode.Flat));
 
-        var rebuildMutations = 0;
-        void OnEntriesChanged(object? _, NotifyCollectionChangedEventArgs e)
-        {
-            if (e.Action is NotifyCollectionChangedAction.Reset or NotifyCollectionChangedAction.Remove)
-                rebuildMutations++;
-        }
-
-        vm.PrFileEntries.CollectionChanged += OnEntriesChanged;
-        try
-        {
-            await vm.ConfirmStartAiReviewCommand.ExecuteAsync(null);
-            await WaitUntilAsync(() => vm.AiRunState == AiRunState.Complete);
-        }
-        finally
-        {
-            vm.PrFileEntries.CollectionChanged -= OnEntriesChanged;
-        }
+        await vm.ConfirmStartAiReviewCommand.ExecuteAsync(null);
+        await WaitUntilAsync(() => vm.AiRunState == AiRunState.Complete);
 
         Assert.That(vm.SelectedFile, Is.SameAs(selectedBefore));
-        Assert.That(vm.PullRequestFileListLayout, Is.EqualTo(FileListLayoutMode.AiSuggested));
-        Assert.That(rebuildMutations, Is.EqualTo(1),
-            "Triage + AiSuggested layout must share a single PrFileEntries rebuild");
+        Assert.That(vm.PullRequestFileListLayout, Is.EqualTo(FileListLayoutMode.Flat));
+        Assert.That(vm.HasAiRun, Is.True);
         Assert.That(vm.DiffEmptyMessage, Does.Not.Contain("Source array was not long enough"));
         Assert.That(vm.DiffEmptyMessage, Does.Not.Contain("Failed to load diff"));
-    }
-
-    [Test]
-    public void AiGuidanceTooltip_Includes_Stars_And_Guidance()
-    {
-        var file = new FileItemViewModel(FilePath.From("src/a.cs"), ChangeKind.Modified, isStagedList: false);
-        Assert.That(file.AiGuidanceTooltip, Is.Null);
-
-        file.AiPriorityStars = 4;
-        Assert.That(file.AiGuidanceTooltip, Is.EqualTo("★★★★"));
-
-        file.AiGuidance = "Check auth";
-        Assert.That(file.AiGuidanceTooltip, Is.EqualTo("★★★★\nCheck auth"));
-
-        file.AiPriorityStars = 0;
-        Assert.That(file.AiGuidanceTooltip, Is.EqualTo("Check auth"));
     }
 
     [Test]
@@ -2240,61 +2186,11 @@ public sealed class ReviewViewModelTests
 
         Assert.That(vm.AiRunState, Is.EqualTo(AiRunState.Complete));
         Assert.That(vm.AiReviewFinishedUtc, Is.EqualTo(finished));
-        Assert.That(vm.HasAiTriage, Is.True);
+        Assert.That(vm.HasAiRun, Is.True);
     }
 
     [Test]
-    public void AiImportantFiles_Includes_ReviewCarefully_Or_HighStars_Only()
-    {
-        var settings = Substitute.For<ISettingsStore>();
-        settings.Current.Returns(new AppSettings());
-        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
-
-        vm.AiTriage = new AiPrTriageResult(
-            Summary: "Summary",
-            Risk: AiRiskLevel.Medium,
-            Justifications:
-            [
-                new AiRiskJustification("a/careful.cs", "Touches auth"),
-                new AiRiskJustification("b/star.cs", "Large rewrite"),
-            ],
-            SuggestedOrder: ["b/star.cs", "a/careful.cs", "c/normal.cs"],
-            Files:
-            [
-                new AiFileTriage("c/normal.cs", AiFileClassification.Normal, 2, "Ignore me"),
-                new AiFileTriage("a/careful.cs", AiFileClassification.ReviewCarefully, 3, "Check auth paths"),
-                new AiFileTriage("b/star.cs", AiFileClassification.Normal, 5, null),
-                new AiFileTriage("d/skip.cs", AiFileClassification.Skip, 1, null),
-            ],
-            Measured: new AiMeasuredFacts(4, 10, 2));
-
-        Assert.That(vm.HasAiImportantFiles, Is.True);
-        Assert.That(vm.AiImportantFiles.Select(f => f.Path), Is.EqualTo(new[] { "b/star.cs", "a/careful.cs" }));
-        Assert.That(vm.AiImportantFiles[0].Label, Is.EqualTo("Large rewrite"));
-        Assert.That(vm.AiImportantFiles[1].Label, Is.EqualTo("Check auth paths"));
-    }
-
-    [Test]
-    public void SelectAiImportantFile_Selects_Matching_PrFile()
-    {
-        var settings = Substitute.For<ISettingsStore>();
-        settings.Current.Returns(new AppSettings());
-        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
-
-        var careful = new FileItemViewModel(FilePath.From("a/careful.cs"), ChangeKind.Modified, isStagedList: false);
-        var other = new FileItemViewModel(FilePath.From("other.cs"), ChangeKind.Modified, isStagedList: false);
-        vm.PrFiles.Add(careful);
-        vm.PrFiles.Add(other);
-        vm.IsConversationSelected = true;
-
-        vm.SelectAiImportantFileCommand.Execute("a/careful.cs");
-
-        Assert.That(vm.SelectedFile, Is.SameAs(careful));
-        Assert.That(vm.IsConversationSelected, Is.False);
-    }
-
-    [Test]
-    public void ShowAiFileBand_Visible_For_Guidance_Or_Summary_And_Toggle_Keeps_Data()
+    public void ShowAiFileBand_Visible_For_Summary_And_Toggle_Keeps_Data()
     {
         var settings = Substitute.For<ISettingsStore>();
         settings.Current.Returns(new AppSettings());
@@ -2302,19 +2198,6 @@ public sealed class ReviewViewModelTests
 
         Assert.That(vm.ShowAiFileBand, Is.False);
         Assert.That(vm.AiFileBandExpanded, Is.True);
-
-        var file = new FileItemViewModel(FilePath.From("src/App.cs"), ChangeKind.Modified, isStagedList: false)
-        {
-            AiGuidance = "Watch the DI registration.",
-        };
-        vm.SelectedFile = file;
-        Assert.That(vm.ShowAiFileBand, Is.True);
-        Assert.That(vm.SelectedFileAiGuidance, Is.EqualTo("Watch the DI registration."));
-
-        vm.ToggleAiFileBandCommand.Execute(null);
-        Assert.That(vm.AiFileBandExpanded, Is.False);
-        Assert.That(vm.ShowAiFileBand, Is.True);
-        Assert.That(vm.SelectedFileAiGuidance, Is.EqualTo("Watch the DI registration."));
 
         vm.SelectedFile = new FileItemViewModel(FilePath.From("src/Empty.cs"), ChangeKind.Modified, isStagedList: false);
         Assert.That(vm.ShowAiFileBand, Is.False);
@@ -2326,6 +2209,10 @@ public sealed class ReviewViewModelTests
             "Focus");
         Assert.That(vm.ShowAiFileBand, Is.True);
         Assert.That(vm.HasAiFileSummary, Is.True);
+
+        vm.ToggleAiFileBandCommand.Execute(null);
+        Assert.That(vm.AiFileBandExpanded, Is.False);
+        Assert.That(vm.ShowAiFileBand, Is.True);
     }
 
     private static AiPrTriageResult CreateTriage(AiRiskLevel risk) =>
