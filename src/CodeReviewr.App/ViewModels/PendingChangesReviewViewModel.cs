@@ -1163,6 +1163,84 @@ public partial class PendingChangesReviewViewModel : ObservableObject
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Prunes local comments whose paths left the working tree, and optionally clears AI triage.
+    /// Pass <paramref name="clearAiReview"/> after an in-app commit so the review button resets even
+    /// when other files remain pending; otherwise AI is cleared only when the working copy is empty.
+    /// </summary>
+    public async Task SyncReviewStateWithPendingFilesAsync(bool clearAiReview, CancellationToken ct = default)
+    {
+        if (_host is null)
+            return;
+
+        var pendingPaths = _host.PendingFiles
+            .Select(f => f.Path.Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var orphans = LocalComments
+            .Where(c => !pendingPaths.Contains(c.Path))
+            .ToList();
+
+        foreach (var orphan in orphans)
+        {
+            try
+            {
+                await _localComments.DeleteAsync(orphan.Id, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _notifications.Error($"Failed to remove comment for committed file: {ex.Message}", exception: ex);
+            }
+        }
+
+        await InvokeOnUiAsync(() =>
+        {
+            if (orphans.Count > 0)
+            {
+                var orphanIds = orphans.Select(o => o.Id).ToHashSet(StringComparer.Ordinal);
+                if ((SelectedLocalCommentAnnotation?.Record.Id is { } selId && orphanIds.Contains(selId))
+                    || (ExpandedFileLevelComment?.Id is { } expId && orphanIds.Contains(expId)))
+                {
+                    SelectedAnnotation = null;
+                    ExpandedFileLevelComment = null;
+                }
+
+                for (var i = LocalComments.Count - 1; i >= 0; i--)
+                {
+                    if (orphanIds.Contains(LocalComments[i].Id))
+                        LocalComments.RemoveAt(i);
+                }
+
+                NotifyCommentCountsChanged();
+                ReloadLocalCommentAnnotationsForSelection();
+            }
+
+            if (clearAiReview || _host.PendingFiles.Count == 0)
+                ResetAiReviewState();
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>Clears AI triage / run state so the button returns to "AI review".</summary>
+    private void ResetAiReviewState()
+    {
+        AiRunState = AiRunState.Idle;
+        AiProgress = null;
+        AiTriage = null;
+        AiFileSummary = null;
+        AiFileQuestion = "";
+        AiFileAnswer = null;
+        AiLastError = null;
+
+        if (_host is not null)
+            AiReviewSessionHelpers.ApplyTriageToFiles(null, _host.PendingFiles);
+
+        foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
+            DiffAnnotations.Remove(stale);
+
+        if (SelectedAiAnnotation is not null)
+            SelectedAnnotation = null;
+    }
+
     private void ReloadLocalCommentAnnotationsForSelection()
     {
         var selectedId = SelectedLocalCommentAnnotation?.Record.Id;

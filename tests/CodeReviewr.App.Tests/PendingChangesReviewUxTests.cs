@@ -234,4 +234,169 @@ public sealed class PendingChangesReviewUxTests
             try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
         }
     }
+
+    private static LocalCommentItemViewModel Comment(string id, string path, bool resolved = false) =>
+        new(new LocalCommentRecord(
+            Id: id,
+            RepositoryKey: "repo",
+            Path: path,
+            StartLine: 1,
+            EndLine: 1,
+            Side: DiffSide.New,
+            Body: "fix",
+            IsResolved: resolved,
+            ContentId: null,
+            CreatedUtc: DateTimeOffset.UtcNow,
+            UpdatedUtc: DateTimeOffset.UtcNow));
+
+    private static AiPrTriageResult SampleTriage(string path = "a.txt") =>
+        new(
+            Summary: "ok",
+            Risk: AiRiskLevel.Low,
+            Justifications: [],
+            SuggestedOrder: [path],
+            Files: [new AiFileTriage(path, AiFileClassification.Normal, PriorityStars: 3, Guidance: "g")],
+            Measured: new AiMeasuredFacts(1, 1, 1));
+
+    [Test]
+    public async Task SyncReviewState_Prunes_Orphan_Comments_When_Working_Copy_Empty()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([], epoch: 1));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            vm.PendingReview.LocalComments.Add(Comment("c1", "a.txt"));
+            vm.PendingReview.LocalComments.Add(Comment("c2", "b.txt", resolved: true));
+            Assert.That(vm.PendingReview.UnresolvedCommentCount, Is.EqualTo(1));
+
+            await vm.PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReview: false);
+
+            Assert.That(vm.PendingReview.LocalComments, Is.Empty);
+            Assert.That(vm.PendingReview.UnresolvedCommentCount, Is.EqualTo(0));
+            await _localComments.Received(1).DeleteAsync("c1", Arg.Any<CancellationToken>());
+            await _localComments.Received(1).DeleteAsync("c2", Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task SyncReviewState_Keeps_Comments_On_Still_Pending_Paths()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("keep.txt", "oid1")], epoch: 1));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            vm.PendingReview.LocalComments.Add(Comment("keep", "keep.txt"));
+            vm.PendingReview.LocalComments.Add(Comment("gone", "gone.txt"));
+
+            await vm.PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReview: false);
+
+            Assert.That(vm.PendingReview.LocalComments.Select(c => c.Id), Is.EqualTo(new[] { "keep" }));
+            Assert.That(vm.PendingReview.UnresolvedCommentCount, Is.EqualTo(1));
+            await _localComments.Received(1).DeleteAsync("gone", Arg.Any<CancellationToken>());
+            await _localComments.DidNotReceive().DeleteAsync("keep", Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task SyncReviewState_Clears_Ai_On_Commit_Even_When_Files_Remain()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt", "oid1")], epoch: 1));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            vm.PendingReview.AiRunState = AiRunState.Complete;
+            vm.PendingReview.AiTriage = SampleTriage();
+            Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("Re-run AI review"));
+
+            await vm.PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReview: true);
+
+            Assert.That(vm.PendingReview.AiRunState, Is.EqualTo(AiRunState.Idle));
+            Assert.That(vm.PendingReview.AiTriage, Is.Null);
+            Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("AI review"));
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task SyncReviewState_Leaves_Ai_On_Refresh_When_Files_Remain()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt", "oid1")], epoch: 1));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            vm.PendingReview.AiRunState = AiRunState.Complete;
+            vm.PendingReview.AiTriage = SampleTriage();
+            vm.PendingReview.LocalComments.Add(Comment("gone", "gone.txt"));
+
+            await vm.PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReview: false);
+
+            Assert.That(vm.PendingReview.AiRunState, Is.EqualTo(AiRunState.Complete));
+            Assert.That(vm.PendingReview.AiTriage, Is.Not.Null);
+            Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("Re-run AI review"));
+            Assert.That(vm.PendingReview.LocalComments, Is.Empty);
+            await _localComments.Received(1).DeleteAsync("gone", Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task SyncReviewState_Clears_Ai_When_Working_Copy_Empty()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([], epoch: 1));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            vm.PendingReview.AiRunState = AiRunState.Complete;
+            vm.PendingReview.AiTriage = SampleTriage();
+
+            await vm.PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReview: false);
+
+            Assert.That(vm.PendingReview.AiRunState, Is.EqualTo(AiRunState.Idle));
+            Assert.That(vm.PendingReview.AiTriage, Is.Null);
+            Assert.That(vm.PendingReview.AiButtonLabel, Is.EqualTo("AI review"));
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
 }

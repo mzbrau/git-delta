@@ -664,7 +664,11 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     }
 
     [RelayCommand]
-    public async Task RefreshAsync()
+    /// <param name="clearAiReviewAfter">
+    /// When true (in-app commit), clear AI triage/summary after sync so the button resets even if
+    /// other files remain pending. Ordinary refreshes only clear AI when the working copy is empty.
+    /// </param>
+    public async Task RefreshAsync(bool clearAiReviewAfter = false)
     {
         if (_repoPath is null) return;
         await _refreshGate.WaitAsync().ConfigureAwait(true);
@@ -700,6 +704,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             SoftInvalidateChangedPaths(previousStatus, status);
             UpdateFileCacheIndicators();
             await RevalidateSelectedDiffAfterStatusAsync(previousStatus, status);
+            await PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReviewAfter);
             ScheduleFileStatusPrefetch();
 
             CodeReviewrMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
@@ -3415,7 +3420,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
             try
             {
-                await RefreshAsync();
+                await RefreshAsync(clearAiReviewAfter: true);
                 if (_allHistoryCommits.Count > 0)
                     _ = SoftRefreshHistoryAsync();
                 if (pushAfter)
