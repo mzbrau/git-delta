@@ -11,6 +11,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AiPromptCatalog>();
         services.AddSingleton<PrFactsAssembler>();
         services.AddSingleton<ReviewTreeMaterialiser>();
+        services.AddSingleton<WorkingCopyMaterialiser>();
         services.AddSingleton<AiWorkQueue>();
         services.AddSingleton<IAgentClient, CopilotAgentClient>();
         services.AddSingleton<IAIReviewService, AiReviewCoordinator>();
@@ -30,6 +31,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AiPromptCatalog>();
         services.AddSingleton<PrFactsAssembler>();
         services.AddSingleton<ReviewTreeMaterialiser>();
+        services.AddSingleton<WorkingCopyMaterialiser>();
         services.AddSingleton<AiWorkQueue>();
         services.AddSingleton<IAgentClient>(_ => new FakeAgentClient(scriptFactory));
         services.AddSingleton<IAIReviewService, AiReviewCoordinator>();

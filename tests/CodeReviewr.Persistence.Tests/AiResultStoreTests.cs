@@ -8,13 +8,13 @@ namespace CodeReviewr.Persistence.Tests;
 public sealed class AiResultStoreTests
 {
     [Test]
-    public void EnsureSchema_ReachesVersion3()
+    public void EnsureSchema_ReachesVersion4()
     {
         var path = CreateDbPath();
         using var durable = new SqliteDurableUserStore(path);
         durable.EnsureSchema();
-        Assert.That(durable.SchemaVersion, Is.EqualTo(3));
-        Assert.That(SqliteDurableUserStore.CurrentSchemaVersion, Is.EqualTo(3));
+        Assert.That(durable.SchemaVersion, Is.EqualTo(4));
+        Assert.That(SqliteDurableUserStore.CurrentSchemaVersion, Is.EqualTo(4));
     }
 
     [Test]
@@ -30,7 +30,7 @@ public sealed class AiResultStoreTests
 
         var byId = await store.GetRunAsync("run-1");
         Assert.That(byId, Is.Not.Null);
-        Assert.That(byId!.PrNodeId, Is.EqualTo("PR_1"));
+        Assert.That(byId!.SessionKey, Is.EqualTo("PR_1"));
         Assert.That(byId.State, Is.EqualTo(AiRunState.Running));
 
         var latest = await store.GetLatestRunAsync("PR_1");

@@ -153,8 +153,34 @@ public sealed class PrFactsAssemblerTests
         Assert.That(block, Does.Contain("(unknown)"));
     }
 
+    [Test]
+    public void BuildFactsBlock_WorkingCopyScope_UsesPendingChangesLabels()
+    {
+        var assembler = new PrFactsAssembler();
+        var request = CreateRequest([]) with
+        {
+            Scope = AiReviewScope.WorkingCopyAll,
+            Title = null,
+            Author = null,
+            HeadBranch = null,
+            BaseBranch = null,
+            HeadSha = "snap-tree",
+            MergeBaseSha = "head-ref",
+        };
+
+        var block = assembler.BuildFactsBlock(request);
+
+        Assert.That(block, Does.Contain("Pending changes"));
+        Assert.That(block, Does.Contain("Snapshot tree: snap-tree"));
+        Assert.That(block, Does.Contain("Base (HEAD): head-ref"));
+        Assert.That(block, Does.Not.Contain("Author:"));
+        Assert.That(block, Does.Not.Contain("Branch:"));
+        Assert.That(block, Does.Not.Contain("Head SHA:"));
+        Assert.That(block, Does.Not.Contain("Merge-base SHA:"));
+    }
+
     private static AiReviewRequest CreateRequest(IReadOnlyList<AiChangedFileFact> files) => new(
-        PrNodeId: "PR_1",
+        SessionKey: "PR_1",
         RepositoryPath: "/tmp/repo",
         RepositoryKey: "owner/repo",
         HeadSha: "head-sha",

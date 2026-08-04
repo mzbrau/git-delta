@@ -100,7 +100,7 @@ public sealed class GitProcessRunner : IGitProcessRunner
         var command = Cli.Wrap(options.ExecutableOverride ?? _executablePath)
             .WithArguments(fullArguments)
             .WithWorkingDirectory(workingDirectory)
-            .WithEnvironmentVariables(BuildEnvironment())
+            .WithEnvironmentVariables(BuildEnvironment(options.ExtraEnvironment))
             .WithValidation(CommandResultValidation.None)
             .WithStandardOutputPipe(stdoutTarget)
             .WithStandardErrorPipe(stderrTarget);
@@ -242,21 +242,33 @@ public sealed class GitProcessRunner : IGitProcessRunner
         return full;
     }
 
-    private static Dictionary<string, string?> BuildEnvironment() => new()
+    private static Dictionary<string, string?> BuildEnvironment(
+        IReadOnlyDictionary<string, string?>? extra = null)
     {
-        // Fail fast instead of blocking on a terminal prompt a GUI process cannot answer.
-        ["GIT_TERMINAL_PROMPT"] = "0",
-        // stderr is parsed as a structured result; error text must be stable across locales.
-        ["LC_ALL"] = "C",
-        // Background reads must never take the index lock.
-        ["GIT_OPTIONAL_LOCKS"] = "0",
-        // A pager waiting on a TTY that doesn't exist looks exactly like a hang.
-        ["GIT_PAGER"] = "cat",
-        ["GIT_ASKPASS"] = "",
-        // Commands like `merge --continue` fall back to an interactive commit message editor
-        // unless one is already staged; a spawned editor with no TTY is another way to freeze.
-        ["GIT_EDITOR"] = "true",
-    };
+        var env = new Dictionary<string, string?>
+        {
+            // Fail fast instead of blocking on a terminal prompt a GUI process cannot answer.
+            ["GIT_TERMINAL_PROMPT"] = "0",
+            // stderr is parsed as a structured result; error text must be stable across locales.
+            ["LC_ALL"] = "C",
+            // Background reads must never take the index lock.
+            ["GIT_OPTIONAL_LOCKS"] = "0",
+            // A pager waiting on a TTY that doesn't exist looks exactly like a hang.
+            ["GIT_PAGER"] = "cat",
+            ["GIT_ASKPASS"] = "",
+            // Commands like `merge --continue` fall back to an interactive commit message editor
+            // unless one is already staged; a spawned editor with no TTY is another way to freeze.
+            ["GIT_EDITOR"] = "true",
+        };
+
+        if (extra is null)
+            return env;
+
+        foreach (var (key, value) in extra)
+            env[key] = value;
+
+        return env;
+    }
 
     private static PipeTarget BuildTextTarget(StringBuilder builder, Action<string>? onLine) =>
         onLine is null

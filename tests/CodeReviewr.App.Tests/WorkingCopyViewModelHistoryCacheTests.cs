@@ -28,6 +28,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
     private AlwaysConfirmDialog _confirm = null!;
     private FakeStashDialog _stashDialog = null!;
     private IRepositoryWatcher _watcher = null!;
+    private ILocalCommentStore _localComments = null!;
 
     [SetUp]
     public void SetUp()
@@ -49,6 +50,8 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
         _stashDialog = new FakeStashDialog(
             new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true));
         _watcher = Substitute.For<IRepositoryWatcher>();
+        _localComments = Substitute.For<ILocalCommentStore>();
+        _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([]);
 
         _settings.Current.Returns(new AppSettings());
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -70,7 +73,8 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
     private WorkingCopyViewModel CreateVm() =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
             _conflicts, _stash, _history, _settings, _notifications, _confirm, _stashDialog,
-            new IntraLineDiffer(), _fsmonitor, _watcher);
+            new IntraLineDiffer(), _fsmonitor, _watcher,
+            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications));
 
     private static CommitInfo Commit(string oid, string subject) =>
         new(oid, oid[..Math.Min(7, oid.Length)], subject, "", "Test", "test@example.com",

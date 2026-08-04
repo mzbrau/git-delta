@@ -32,8 +32,14 @@ public partial class MainWindow : Window
     private bool _aiChatRowSubscribed;
     private bool _aiProgressScrollSubscribed;
     private double _aiChatPanelHeight = 240;
+    private bool _wcAiChatScrollSubscribed;
+    private bool _wcAiChatRowSubscribed;
+    private bool _wcAiProgressScrollSubscribed;
+    private double _wcAiChatPanelHeight = 240;
     private bool _inlineCommentLayoutHooked;
+    private bool _wcInlineCommentLayoutHooked;
     private bool _syncingInlineCommentLayout;
+    private bool _syncingWcInlineCommentLayout;
     private TextBox? _activeMentionComposer;
 
     public MainWindow()
@@ -91,12 +97,35 @@ public partial class MainWindow : Window
             _aiChatRowSubscribed = true;
         }
 
+        if (!_wcAiChatScrollSubscribed)
+        {
+            vm.WorkingCopy.PendingReview.AiChatMessages.CollectionChanged += OnWcAiChatMessagesChanged;
+            _wcAiChatScrollSubscribed = true;
+        }
+
+        if (!_wcAiProgressScrollSubscribed)
+        {
+            vm.WorkingCopy.PendingReview.AiActivityLogUpdated += ScrollWcAiProgressToEnd;
+            _wcAiProgressScrollSubscribed = true;
+        }
+
+        if (!_wcAiChatRowSubscribed)
+        {
+            vm.WorkingCopy.PendingReview.PropertyChanged += OnWcReviewPropertyChangedForAiChat;
+            _wcAiChatRowSubscribed = true;
+        }
+
         SyncAiChatRowHeight();
+        SyncWcAiChatRowHeight();
 
         vm.Review.FocusCommentDraftRequested += FocusPrCommentDraft;
         vm.Review.FocusFileFilterRequested += FocusPrFileFilter;
         vm.Review.ExpandedThreadChanged += SyncInlineCommentLayout;
         vm.Review.MentionPopupChanged += PositionMentionPopup;
+
+        vm.WorkingCopy.PendingReview.ExpandedLocalCommentChanged += SyncWcInlineCommentLayout;
+        vm.WorkingCopy.PendingReview.RequestScrollToSelectedAnnotation += ScrollWcToSelectedAnnotation;
+        vm.WorkingCopy.PendingReview.FocusCommentDraftRequested += FocusWcCommentDraft;
 
         if (!_inlineCommentLayoutHooked)
         {
@@ -113,6 +142,18 @@ public partial class MainWindow : Window
                 viewer.ViewportChanged += SyncInlineCommentLayout;
             }
         }
+
+        if (!_wcInlineCommentLayoutHooked)
+        {
+            _wcInlineCommentLayoutHooked = true;
+            if (this.FindControl<Border>("WcInlineLocalCommentCard") is { } wcCard)
+                wcCard.PropertyChanged += OnWcInlineCardLayoutChanged;
+            if (this.FindControl<DiffViewer>("WcDiffViewer") is { } wcViewer)
+            {
+                wcViewer.PropertyChanged += OnWcDiffViewerPropertyChanged;
+                wcViewer.ViewportChanged += SyncWcInlineCommentLayout;
+            }
+        }
     }
 
     private void OnInlineCardLayoutChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
@@ -121,10 +162,141 @@ public partial class MainWindow : Window
             SyncInlineCommentLayout();
     }
 
+    private void OnWcInlineCardLayoutChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == BoundsProperty || e.Property == Visual.IsVisibleProperty)
+            SyncWcInlineCommentLayout();
+    }
+
     private void OnPrDiffViewerPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
     {
         if (e.Property == BoundsProperty)
             SyncInlineCommentLayout();
+    }
+
+    private void OnWcDiffViewerPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property == BoundsProperty)
+            SyncWcInlineCommentLayout();
+    }
+
+    private void ScrollWcToSelectedAnnotation()
+    {
+        if (DataContext is not MainWindowViewModel vm ||
+            this.FindControl<DiffViewer>("WcDiffViewer") is not { } viewer)
+            return;
+
+        if (vm.WorkingCopy.PendingReview.SelectedLocalCommentAnnotation is { } ann)
+            viewer.ScrollToLine(ann.Range.End.Side, ann.Range.End.Line);
+
+        SyncWcInlineCommentLayout();
+    }
+
+    private void FocusWcCommentDraft()
+    {
+        // Draft composer is docked; focus best-effort on the visible TextBox after layout.
+        Dispatcher.UIThread.Post(() =>
+        {
+            // No named draft box for WC — leave focus to Avalonia default.
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void SyncWcInlineCommentLayout()
+    {
+        if (_syncingWcInlineCommentLayout)
+            return;
+
+        if (DataContext is not MainWindowViewModel vm ||
+            this.FindControl<DiffViewer>("WcDiffViewer") is not { } viewer)
+        {
+            return;
+        }
+
+        _syncingWcInlineCommentLayout = true;
+        try
+        {
+            if (vm.WorkingCopy.PendingReview.HasExpandedLocalComment &&
+                this.FindControl<Border>("WcInlineLocalCommentCard") is { } card)
+            {
+                if (vm.WorkingCopy.PendingReview.SelectedLocalCommentAnnotation is { } ann)
+                {
+                    var side = ann.Range.End.Side == DiffSide.Old ? "LEFT" : "RIGHT";
+                    var line = ann.Range.End.Line;
+                    PositionWcInlineCard(vm, card, side, line, clampReserve: 220);
+                    if (vm.WorkingCopy.ShowMarkdownPreviewPane)
+                        viewer.ClearInlineInset();
+                    else
+                        ApplyInlineInset(viewer, side, line, card);
+                    return;
+                }
+
+                if (vm.WorkingCopy.PendingReview.ExpandedFileLevelComment is not null)
+                {
+                    PositionFileCommentCard(viewer, card);
+                    if (vm.WorkingCopy.ShowMarkdownPreviewPane)
+                        viewer.ClearInlineInset();
+                    else
+                        ApplyFileCommentInset(viewer, card);
+                    return;
+                }
+            }
+
+            viewer.ClearInlineInset();
+        }
+        finally
+        {
+            _syncingWcInlineCommentLayout = false;
+        }
+    }
+
+    private void PositionWcInlineCard(
+        MainWindowViewModel vm,
+        Border card,
+        string? sideName,
+        int line,
+        double clampReserve)
+    {
+        var side = string.Equals(sideName, "LEFT", StringComparison.OrdinalIgnoreCase)
+            ? DiffSide.Old
+            : DiffSide.New;
+
+        double left = 48;
+        double top = 24;
+        if (TryGetWcLineAnchorRect(vm, side, line, out var anchor, out var hostHeight, out var hostWidth))
+        {
+            left = Math.Max(8, anchor.X);
+            top = Math.Max(8, anchor.Y);
+            var maxTop = Math.Max(8, hostHeight - clampReserve);
+            if (top > maxTop)
+                top = maxTop;
+            var maxWidth = Math.Max(280, hostWidth - left - 16);
+            card.Width = Math.Min(520, maxWidth);
+        }
+
+        Canvas.SetLeft(card, left);
+        Canvas.SetTop(card, top);
+    }
+
+    private bool TryGetWcLineAnchorRect(
+        MainWindowViewModel vm,
+        DiffSide side,
+        int line,
+        out Rect anchor,
+        out double hostHeight,
+        out double hostWidth)
+    {
+        anchor = default;
+        hostHeight = 400;
+        hostWidth = 800;
+
+        if (this.FindControl<DiffViewer>("WcDiffViewer") is { } viewer)
+        {
+            hostHeight = viewer.Bounds.Height;
+            hostWidth = viewer.Bounds.Width;
+            return viewer.TryGetLineAnchorRect(side, line, out anchor);
+        }
+
+        return false;
     }
 
     private void FocusPrCommentDraft()
@@ -688,6 +860,75 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Background);
     }
 
+    private void OnWcAiChatMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e) =>
+        ScrollWcAiChatToEnd();
+
+    private void ScrollWcAiProgressToEnd()
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.WorkingCopy.PendingReview.ShowAiProgressDialog) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<ScrollViewer>("WcAiProgressScrollViewer") is { } scroll)
+                scroll.Offset = new Avalonia.Vector(scroll.Offset.X, double.MaxValue);
+        }, DispatcherPriority.Background);
+    }
+
+    private void OnWcReviewPropertyChangedForAiChat(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PendingChangesReviewViewModel.ShowAiChat))
+            SyncWcAiChatRowHeight();
+    }
+
+    private void SyncWcAiChatRowHeight()
+    {
+        if (DataContext is not MainWindowViewModel vm) return;
+        if (this.FindControl<Grid>("WcDiffChatGrid") is not { } grid) return;
+        if (grid.RowDefinitions.Count < 3) return;
+
+        var row = grid.RowDefinitions[2];
+        if (vm.WorkingCopy.PendingReview.ShowAiChat)
+        {
+            var height = Math.Clamp(_wcAiChatPanelHeight, 120, 560);
+            row.MinHeight = 120;
+            row.MaxHeight = 560;
+            row.Height = new GridLength(height);
+            ScrollWcAiChatToEnd();
+        }
+        else
+        {
+            if (row.Height.IsAbsolute && row.Height.Value >= 120)
+                _wcAiChatPanelHeight = Math.Clamp(row.Height.Value, 120, 560);
+            row.MinHeight = 0;
+            row.MaxHeight = 560;
+            row.Height = new GridLength(0);
+        }
+    }
+
+    private void ScrollWcAiChatToEnd()
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.WorkingCopy.PendingReview.ShowAiChat) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<ScrollViewer>("WcAiChatScrollViewer") is { } scroll)
+                scroll.Offset = new Avalonia.Vector(scroll.Offset.X, double.MaxValue);
+        }, DispatcherPriority.Background);
+    }
+
+    private void OnWcAiChatKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            return;
+
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+
+        if (vm.WorkingCopy.PendingReview.SendAiChatCommand.CanExecute(null))
+        {
+            _ = vm.WorkingCopy.PendingReview.SendAiChatCommand.ExecuteAsync(null);
+            e.Handled = true;
+        }
+    }
+
     private void OnOpened(object? sender, EventArgs e)
     {
         if (Vm.WindowWidth >= 640) Width = Vm.WindowWidth;
@@ -935,6 +1176,8 @@ public partial class MainWindow : Window
             UnstagedFileList.SelectedItems?.Clear();
         if (!ReferenceEquals(source, ConflictedFileList))
             ConflictedFileList.SelectedItems?.Clear();
+        if (!ReferenceEquals(source, AiSuggestedFileList))
+            AiSuggestedFileList.SelectedItems?.Clear();
     }
 
     private void SyncFileSelection()
@@ -943,6 +1186,7 @@ public partial class MainWindow : Window
         CollectSelected(StagedFileList, selected);
         CollectSelected(UnstagedFileList, selected);
         CollectSelected(ConflictedFileList, selected);
+        CollectSelected(AiSuggestedFileList, selected);
         Vm.WorkingCopy.SetFileSelection(selected);
     }
 
@@ -954,6 +1198,7 @@ public partial class MainWindow : Window
             StagedFileList.SelectedItems?.Clear();
             UnstagedFileList.SelectedItems?.Clear();
             ConflictedFileList.SelectedItems?.Clear();
+            AiSuggestedFileList.SelectedItems?.Clear();
             if (this.FindControl<ListBox>("StashFileList") is { } stashFiles)
                 stashFiles.SelectedItems?.Clear();
         }
@@ -980,6 +1225,7 @@ public partial class MainWindow : Window
             StagedFileList.SelectedItems?.Clear();
             UnstagedFileList.SelectedItems?.Clear();
             ConflictedFileList.SelectedItems?.Clear();
+            AiSuggestedFileList.SelectedItems?.Clear();
             if (this.FindControl<ListBox>("HistoryFileList") is { } historyFiles)
                 historyFiles.SelectedItem = null;
 
@@ -993,6 +1239,14 @@ public partial class MainWindow : Window
                         if (historyMatch is not null)
                             hf.SelectedItem = historyMatch;
                     }
+                    continue;
+                }
+
+                if (Vm.WorkingCopy.IsFileStatusAiSuggestedLayout)
+                {
+                    var aiMatch = FindEntryInList(AiSuggestedFileList, file);
+                    if (aiMatch is not null)
+                        AiSuggestedFileList.SelectedItems?.Add(aiMatch);
                     continue;
                 }
 

@@ -23,7 +23,7 @@ public interface IAIReviewService
         FileDiffKey key,
         CancellationToken ct = default);
 
-    ValueTask<AiRunSnapshot?> GetCachedRunAsync(string prNodeId, CancellationToken ct = default);
+    ValueTask<AiRunSnapshot?> GetCachedRunAsync(string sessionKey, CancellationToken ct = default);
 
     /// <summary>
     /// Hydrates in-memory run context from a durable cached run (no live agent session yet).
@@ -47,12 +47,12 @@ public interface IAIReviewService
     Task RequestFileDepthAsync(AiFileDepthRequest request, CancellationToken ct = default);
 
     ValueTask<AiFileSummaryResult?> GetFileSummaryAsync(
-        string prNodeId,
+        string sessionKey,
         string path,
         CancellationToken ct = default);
 
     ValueTask<IReadOnlyList<AiAnnotationResult>> GetFileAnnotationsAsync(
-        string prNodeId,
+        string sessionKey,
         string path,
         bool includeDismissed = false,
         CancellationToken ct = default);
@@ -69,10 +69,10 @@ public interface IAIReviewService
     Task<string> ChatAsync(AiQuestionRequest request, CancellationToken ct = default);
 
     ValueTask<IReadOnlyList<AiChatMessage>> GetChatHistoryAsync(
-        string prNodeId,
+        string sessionKey,
         CancellationToken ct = default);
 
-    Task ClearChatHistoryAsync(string prNodeId, CancellationToken ct = default);
+    Task ClearChatHistoryAsync(string sessionKey, CancellationToken ct = default);
 
     Task ClearAiDataAsync(CancellationToken ct = default);
 }
@@ -112,7 +112,7 @@ public sealed class NullAIReviewService : IAIReviewService
         CancellationToken ct = default) =>
         ValueTask.FromResult<IReadOnlyList<IDiffAnnotation>>([]);
 
-    public ValueTask<AiRunSnapshot?> GetCachedRunAsync(string prNodeId, CancellationToken ct = default) =>
+    public ValueTask<AiRunSnapshot?> GetCachedRunAsync(string sessionKey, CancellationToken ct = default) =>
         ValueTask.FromResult<AiRunSnapshot?>(null);
 
     public Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default) =>
@@ -121,7 +121,7 @@ public sealed class NullAIReviewService : IAIReviewService
     public Task<AiRunSnapshot> StartReviewAsync(AiReviewRequest request, CancellationToken ct = default) =>
         Task.FromResult(new AiRunSnapshot(
             RunId: Guid.NewGuid().ToString("N"),
-            PrNodeId: request.PrNodeId,
+            SessionKey: request.SessionKey,
             HeadSha: request.HeadSha,
             MergeBaseSha: request.MergeBaseSha,
             State: AiRunState.Failed,
@@ -151,13 +151,13 @@ public sealed class NullAIReviewService : IAIReviewService
         Task.CompletedTask;
 
     public ValueTask<AiFileSummaryResult?> GetFileSummaryAsync(
-        string prNodeId,
+        string sessionKey,
         string path,
         CancellationToken ct = default) =>
         ValueTask.FromResult<AiFileSummaryResult?>(null);
 
     public ValueTask<IReadOnlyList<AiAnnotationResult>> GetFileAnnotationsAsync(
-        string prNodeId,
+        string sessionKey,
         string path,
         bool includeDismissed = false,
         CancellationToken ct = default) =>
@@ -179,11 +179,11 @@ public sealed class NullAIReviewService : IAIReviewService
         Task.FromResult("AI assistance is not available.");
 
     public ValueTask<IReadOnlyList<AiChatMessage>> GetChatHistoryAsync(
-        string prNodeId,
+        string sessionKey,
         CancellationToken ct = default) =>
         ValueTask.FromResult<IReadOnlyList<AiChatMessage>>([]);
 
-    public Task ClearChatHistoryAsync(string prNodeId, CancellationToken ct = default) =>
+    public Task ClearChatHistoryAsync(string sessionKey, CancellationToken ct = default) =>
         Task.CompletedTask;
 
     public Task ClearAiDataAsync(CancellationToken ct = default) => Task.CompletedTask;

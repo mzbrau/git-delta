@@ -36,4 +36,10 @@ public sealed class GitProcessOptions
 
     /// <summary>Overrides the configured executable path for a single call. Used by <see cref="GitEnvironment"/> during detection.</summary>
     public string? ExecutableOverride { get; init; }
+
+    /// <summary>
+    /// Extra environment variables merged over the runner defaults (e.g. <c>GIT_INDEX_FILE</c>
+    /// for a temporary index when snapshotting the working copy).
+    /// </summary>
+    public IReadOnlyDictionary<string, string?>? ExtraEnvironment { get; init; }
 }

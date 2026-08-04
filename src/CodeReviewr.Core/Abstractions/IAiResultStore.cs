@@ -2,11 +2,11 @@ using CodeReviewr.Core.AI;
 
 namespace CodeReviewr.Core.Abstractions;
 
-/// <summary>Durable AI result store (lives in durable.db schema v3).</summary>
+/// <summary>Durable AI result store (lives in durable.db schema v4).</summary>
 public interface IAiResultStore
 {
     Task UpsertRunAsync(AiRunRecord run, CancellationToken ct = default);
-    Task<AiRunRecord?> GetLatestRunAsync(string prNodeId, CancellationToken ct = default);
+    Task<AiRunRecord?> GetLatestRunAsync(string sessionKey, CancellationToken ct = default);
     Task<AiRunRecord?> GetRunAsync(string runId, CancellationToken ct = default);
 
     Task UpsertPrResultAsync(AiPrResultRecord result, CancellationToken ct = default);
@@ -19,22 +19,22 @@ public interface IAiResultStore
 
     Task UpsertAnnotationAsync(AiAnnotationRecord annotation, CancellationToken ct = default);
     Task<IReadOnlyList<AiAnnotationRecord>> ListAnnotationsAsync(
-        string prNodeId,
+        string sessionKey,
         string? path = null,
         bool includeDismissed = false,
         CancellationToken ct = default);
     Task SetAnnotationReadStateAsync(string id, AiAnnotationReadState state, CancellationToken ct = default);
 
-    Task AppendChatMessageAsync(string prNodeId, AiChatMessage message, CancellationToken ct = default);
-    Task<IReadOnlyList<AiChatMessage>> ListChatMessagesAsync(string prNodeId, CancellationToken ct = default);
-    Task ClearChatMessagesAsync(string prNodeId, CancellationToken ct = default);
+    Task AppendChatMessageAsync(string sessionKey, AiChatMessage message, CancellationToken ct = default);
+    Task<IReadOnlyList<AiChatMessage>> ListChatMessagesAsync(string sessionKey, CancellationToken ct = default);
+    Task ClearChatMessagesAsync(string sessionKey, CancellationToken ct = default);
 
     Task ClearAllAsync(CancellationToken ct = default);
 }
 
 public sealed record AiRunRecord(
     string Id,
-    string PrNodeId,
+    string SessionKey,
     string HeadSha,
     string MergeBaseSha,
     string? CopilotSessionId,
@@ -48,14 +48,14 @@ public sealed record AiRunRecord(
 
 public sealed record AiPrResultRecord(
     string RunId,
-    string PrNodeId,
+    string SessionKey,
     string CacheKey,
     string PayloadJson,
     DateTimeOffset UpdatedUtc);
 
 public sealed record AiFileResultRecord(
     string RunId,
-    string PrNodeId,
+    string SessionKey,
     string Path,
     string CacheKey,
     string? Classification,
@@ -67,7 +67,7 @@ public sealed record AiFileResultRecord(
 public sealed record AiAnnotationRecord(
     string Id,
     string RunId,
-    string PrNodeId,
+    string SessionKey,
     string Path,
     string BlobOid,
     int StartLine,

@@ -21,12 +21,27 @@ public sealed class PrFactsAssembler
     {
         var measured = ComputeMeasuredFacts(request);
         var sb = new StringBuilder();
+        var isWorkingCopy = request.Scope != AiReviewScope.PullRequest;
 
-        sb.AppendLine($"Title: {request.Title ?? "(no title)"}");
-        sb.AppendLine($"Author: {request.Author ?? "(unknown)"}");
-        sb.AppendLine($"Branch: {request.HeadBranch ?? "?"} -> {request.BaseBranch ?? "?"}");
-        sb.AppendLine($"Head SHA: {request.HeadSha}");
-        sb.AppendLine($"Merge-base SHA: {request.MergeBaseSha}");
+        if (isWorkingCopy)
+        {
+            sb.AppendLine($"Title: {request.Title ?? "Pending changes"}");
+            if (request.Author is not null)
+                sb.AppendLine($"Author: {request.Author}");
+            if (request.HeadBranch is not null || request.BaseBranch is not null)
+                sb.AppendLine($"Branch: {request.HeadBranch ?? "?"} -> {request.BaseBranch ?? "?"}");
+            sb.AppendLine($"Snapshot tree: {request.HeadSha}");
+            sb.AppendLine($"Base (HEAD): {request.MergeBaseSha}");
+        }
+        else
+        {
+            sb.AppendLine($"Title: {request.Title ?? "(no title)"}");
+            sb.AppendLine($"Author: {request.Author ?? "(unknown)"}");
+            sb.AppendLine($"Branch: {request.HeadBranch ?? "?"} -> {request.BaseBranch ?? "?"}");
+            sb.AppendLine($"Head SHA: {request.HeadSha}");
+            sb.AppendLine($"Merge-base SHA: {request.MergeBaseSha}");
+        }
+
         sb.AppendLine($"Files changed: {measured.FilesChanged} (+{measured.LinesAdded} / -{measured.LinesRemoved})");
 
         if (!string.IsNullOrWhiteSpace(request.Body))

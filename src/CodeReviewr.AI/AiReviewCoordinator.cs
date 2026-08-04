@@ -21,6 +21,7 @@ internal sealed class AiReviewCoordinator(
     IAiResultStore resultStore,
     IAgentClient agentClient,
     ReviewTreeMaterialiser materialiser,
+    WorkingCopyMaterialiser workingCopyMaterialiser,
     AiPromptCatalog prompts,
     PrFactsAssembler factsAssembler,
     ITokenStore tokenStore,
@@ -36,7 +37,7 @@ internal sealed class AiReviewCoordinator(
         Converters = { new JsonStringEnumConverter() },
     };
 
-    private readonly ConcurrentDictionary<string, RunContext> _runsByPr = new();
+    private readonly ConcurrentDictionary<string, RunContext> _runsBySession = new();
     private readonly ConcurrentDictionary<string, RepoObservers> _observersByRepo = new();
     private readonly ConcurrentDictionary<string, List<AiAnnotationResult>> _annotationsByBlob = new();
 
@@ -44,9 +45,9 @@ internal sealed class AiReviewCoordinator(
     // Cache-only reads (never touch the agent).
     // ---------------------------------------------------------------------
 
-    public async ValueTask<AiRunSnapshot?> GetCachedRunAsync(string prNodeId, CancellationToken ct = default)
+    public async ValueTask<AiRunSnapshot?> GetCachedRunAsync(string sessionKey, CancellationToken ct = default)
     {
-        var run = await resultStore.GetLatestRunAsync(prNodeId, ct).ConfigureAwait(false);
+        var run = await resultStore.GetLatestRunAsync(sessionKey, ct).ConfigureAwait(false);
         if (run is null)
             return null;
 
@@ -58,10 +59,10 @@ internal sealed class AiReviewCoordinator(
     public async Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default)
     {
         // Keep an already-live session; attach is only for hydrating after process restart.
-        if (_runsByPr.TryGetValue(request.PrNodeId, out var existing) && existing.Session is not null)
+        if (_runsBySession.TryGetValue(request.SessionKey, out var existing) && existing.Session is not null)
             return;
 
-        var run = await resultStore.GetLatestRunAsync(request.PrNodeId, ct).ConfigureAwait(false);
+        var run = await resultStore.GetLatestRunAsync(request.SessionKey, ct).ConfigureAwait(false);
         if (run is null)
             return;
 
@@ -138,9 +139,9 @@ internal sealed class AiReviewCoordinator(
         return ValueTask.FromResult<IReadOnlyList<IDiffAnnotation>>(results);
     }
 
-    public async ValueTask<AiFileSummaryResult?> GetFileSummaryAsync(string prNodeId, string path, CancellationToken ct = default)
+    public async ValueTask<AiFileSummaryResult?> GetFileSummaryAsync(string sessionKey, string path, CancellationToken ct = default)
     {
-        var run = await resultStore.GetLatestRunAsync(prNodeId, ct).ConfigureAwait(false);
+        var run = await resultStore.GetLatestRunAsync(sessionKey, ct).ConfigureAwait(false);
         if (run is null)
             return null;
 
@@ -150,23 +151,23 @@ internal sealed class AiReviewCoordinator(
     }
 
     public async ValueTask<IReadOnlyList<AiAnnotationResult>> GetFileAnnotationsAsync(
-        string prNodeId,
+        string sessionKey,
         string path,
         bool includeDismissed = false,
         CancellationToken ct = default)
     {
-        var records = await resultStore.ListAnnotationsAsync(prNodeId, path, includeDismissed, ct).ConfigureAwait(false);
+        var records = await resultStore.ListAnnotationsAsync(sessionKey, path, includeDismissed, ct).ConfigureAwait(false);
         return [.. records.Select(ToAnnotationResult)];
     }
 
     public Task SetAnnotationReadStateAsync(string annotationId, AiAnnotationReadState state, CancellationToken ct = default) =>
         resultStore.SetAnnotationReadStateAsync(annotationId, state, ct);
 
-    public async ValueTask<IReadOnlyList<AiChatMessage>> GetChatHistoryAsync(string prNodeId, CancellationToken ct = default) =>
-        await resultStore.ListChatMessagesAsync(prNodeId, ct).ConfigureAwait(false);
+    public async ValueTask<IReadOnlyList<AiChatMessage>> GetChatHistoryAsync(string sessionKey, CancellationToken ct = default) =>
+        await resultStore.ListChatMessagesAsync(sessionKey, ct).ConfigureAwait(false);
 
-    public Task ClearChatHistoryAsync(string prNodeId, CancellationToken ct = default) =>
-        resultStore.ClearChatMessagesAsync(prNodeId, ct);
+    public Task ClearChatHistoryAsync(string sessionKey, CancellationToken ct = default) =>
+        resultStore.ClearChatMessagesAsync(sessionKey, ct);
 
     // ---------------------------------------------------------------------
     // Connectivity.
@@ -188,11 +189,21 @@ internal sealed class AiReviewCoordinator(
         if (gateReason is not null)
             return FailedSnapshot(request, gateReason);
 
+        // Working-copy reviews key the cache on the current staged/all snapshot tree OID.
+        if (IsWorkingCopyScope(request.Scope))
+        {
+            var treeOid = await workingCopyMaterialiser
+                .WriteTreeAsync(request.RepositoryPath, request.Scope, ct)
+                .ConfigureAwait(false);
+            request = request with { HeadSha = treeOid };
+        }
+
         var rulesHash = AiCacheKeys.Hash(EffectiveRules());
         var instructionsHash = AiCacheKeys.Hash(request.AdHocInstructions);
         var model = settingsStore.Current.AiModelOverride;
         var cacheKey = AiCacheKeys.ComputePrTriageKey(
-            request.PrNodeId, request.HeadSha, request.MergeBaseSha, AiPromptCatalog.PromptVersion, model, rulesHash, instructionsHash);
+            request.SessionKey, request.HeadSha, request.MergeBaseSha, request.Scope.ToString(),
+            AiPromptCatalog.PromptVersion, model, rulesHash, instructionsHash);
 
         if (!request.DiscardCached)
         {
@@ -213,7 +224,7 @@ internal sealed class AiReviewCoordinator(
         string? resumeSessionId = null;
         if (request.Resume)
         {
-            var previousRun = await resultStore.GetLatestRunAsync(request.PrNodeId, ct).ConfigureAwait(false);
+            var previousRun = await resultStore.GetLatestRunAsync(request.SessionKey, ct).ConfigureAwait(false);
             resumeSessionId = previousRun?.CopilotSessionId;
         }
 
@@ -233,7 +244,7 @@ internal sealed class AiReviewCoordinator(
             runContext.RunCts.CancelAfter(TimeSpan.FromSeconds(runTimeoutSeconds));
 
         await resultStore.UpsertRunAsync(new AiRunRecord(
-            runId, request.PrNodeId, request.HeadSha, request.MergeBaseSha, CopilotSessionId: resumeSessionId,
+            runId, request.SessionKey, request.HeadSha, request.MergeBaseSha, CopilotSessionId: resumeSessionId,
             AiRunState.Running, TurnsUsed: 0, request.AdHocInstructions, cacheKey, ErrorMessage: null,
             startedUtc, FinishedUtc: null), ct).ConfigureAwait(false);
 
@@ -248,7 +259,7 @@ internal sealed class AiReviewCoordinator(
             }
             catch (TimeoutException ex)
             {
-                logger.LogError(ex, "AI triage timed out waiting for Copilot for PR {PrNodeId}.", request.PrNodeId);
+                logger.LogError(ex, "AI triage timed out waiting for Copilot for session {SessionKey}.", request.SessionKey);
                 var turnTimeout = Math.Max(10, settingsStore.Current.AiTurnTimeoutSeconds);
                 var message =
                     $"AI review timed out after {turnTimeout}s with no Copilot activity (turn idle timeout). {ex.Message}";
@@ -267,7 +278,7 @@ internal sealed class AiReviewCoordinator(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "AI triage failed for PR {PrNodeId}.", request.PrNodeId);
+                logger.LogError(ex, "AI triage failed for session {SessionKey}.", request.SessionKey);
                 NotifyActivityLog(runContext, $"Error: {ex.Message}");
                 var failed = await FinishRunAsync(runContext, AiRunState.Failed, ex.Message, CancellationToken.None).ConfigureAwait(false);
                 completion.TrySetResult(failed);
@@ -280,7 +291,7 @@ internal sealed class AiReviewCoordinator(
     public Task CancelAsync(string repositoryKey, CancellationToken ct = default)
     {
         workQueue.CancelRepository(repositoryKey);
-        foreach (var context in _runsByPr.Values)
+        foreach (var context in _runsBySession.Values)
         {
             if (!string.Equals(context.RepositoryKey, repositoryKey, StringComparison.Ordinal))
                 continue;
@@ -300,7 +311,7 @@ internal sealed class AiReviewCoordinator(
 
     public async Task RequestFileDepthAsync(AiFileDepthRequest request, CancellationToken ct = default)
     {
-        var context = await EnsureLiveSessionAsync(request.PrNodeId, ct).ConfigureAwait(false);
+        var context = await EnsureLiveSessionAsync(request.SessionKey, ct).ConfigureAwait(false);
         var gateReason = CheckGate(context.RepositoryKey);
         if (gateReason is not null)
             throw new InvalidOperationException(gateReason);
@@ -332,7 +343,7 @@ internal sealed class AiReviewCoordinator(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "File-depth review failed for {Path} on PR {PrNodeId}.", request.Path, request.PrNodeId);
+                logger.LogWarning(ex, "File-depth review failed for {Path} on session {SessionKey}.", request.Path, request.SessionKey);
                 completion.TrySetException(ex);
             }
             finally
@@ -345,7 +356,7 @@ internal sealed class AiReviewCoordinator(
     }
 
     public Task<string> AskAsync(AiQuestionRequest request, CancellationToken ct = default) =>
-        RunTurnForTextAsync(request.PrNodeId, BuildExplanationPrompt(request), AiWorkPriority.ExplicitUser, ct);
+        RunTurnForTextAsync(request.SessionKey, BuildExplanationPrompt(request), AiWorkPriority.ExplicitUser, ct);
 
     private const int MaxChatHistoryMessages = 20;
 
@@ -391,28 +402,28 @@ internal sealed class AiReviewCoordinator(
             ["action"] = request.Action,
             ["selection"] = request.SelectedLinesContext,
         };
-        return RunTurnForTextAsync(request.PrNodeId, prompts.GetCommentSuggestionPrompt(placeholders), AiWorkPriority.ExplicitUser, ct);
+        return RunTurnForTextAsync(request.SessionKey, prompts.GetCommentSuggestionPrompt(placeholders), AiWorkPriority.ExplicitUser, ct);
     }
 
     public async Task<string> ChatAsync(AiQuestionRequest request, CancellationToken ct = default)
     {
-        var prior = await resultStore.ListChatMessagesAsync(request.PrNodeId, ct).ConfigureAwait(false);
+        var prior = await resultStore.ListChatMessagesAsync(request.SessionKey, ct).ConfigureAwait(false);
         IReadOnlyList<AiChatMessage> cappedPrior = prior.Count <= MaxChatHistoryMessages
             ? prior
             : prior.Skip(prior.Count - MaxChatHistoryMessages).ToList();
 
         await resultStore.AppendChatMessageAsync(
-            request.PrNodeId, new AiChatMessage("user", request.Question, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+            request.SessionKey, new AiChatMessage("user", request.Question, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
 
         var answer = await RunTurnForTextAsync(
-                request.PrNodeId,
+                request.SessionKey,
                 BuildExplanationPrompt(request, cappedPrior),
                 AiWorkPriority.ExplicitUser,
                 ct)
             .ConfigureAwait(false);
 
         await resultStore.AppendChatMessageAsync(
-            request.PrNodeId, new AiChatMessage("assistant", answer, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+            request.SessionKey, new AiChatMessage("assistant", answer, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
 
         return answer;
     }
@@ -421,13 +432,13 @@ internal sealed class AiReviewCoordinator(
     {
         await resultStore.ClearAllAsync(ct).ConfigureAwait(false);
         await materialiser.ClearAllExportsAsync(ct).ConfigureAwait(false);
-        _runsByPr.Clear();
+        _runsBySession.Clear();
         _annotationsByBlob.Clear();
     }
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var context in _runsByPr.Values)
+        foreach (var context in _runsBySession.Values)
         {
             if (context.Session is not null)
                 await context.Session.DisposeAsync().ConfigureAwait(false);
@@ -487,8 +498,12 @@ internal sealed class AiReviewCoordinator(
     {
         NotifyProgress(context, AiRunStage.Materialising, "Waiting on: materialising working copy");
         NotifyActivityLog(context, "Waiting on: materialising working copy");
-        var materialised = await materialiser.MaterialiseAsync(context.RepositoryPath, context.HeadSha, ct)
-            .ConfigureAwait(false);
+        var materialised = IsWorkingCopyScope(context.Request.Scope)
+            ? await workingCopyMaterialiser
+                .MaterialiseAsync(context.RepositoryPath, context.HeadSha, ct)
+                .ConfigureAwait(false)
+            : await materialiser.MaterialiseAsync(context.RepositoryPath, context.HeadSha, ct)
+                .ConfigureAwait(false);
         context.MaterialisedPath = materialised.Path;
 
         NotifyProgress(context, AiRunStage.Connecting, "Waiting on: connecting to GitHub Copilot");
@@ -704,7 +719,7 @@ internal sealed class AiReviewCoordinator(
         context.FinishedUtc = DateTimeOffset.UtcNow;
 
         await resultStore.UpsertRunAsync(new AiRunRecord(
-            context.RunId!, context.PrNodeId, context.HeadSha, context.MergeBaseSha, context.CopilotSessionId,
+            context.RunId!, context.SessionKey, context.HeadSha, context.MergeBaseSha, context.CopilotSessionId,
             state, context.TurnsUsed, context.AdHocInstructions, context.CacheKey ?? "", errorMessage,
             context.StartedUtc, context.FinishedUtc), ct).ConfigureAwait(false);
 
@@ -715,13 +730,13 @@ internal sealed class AiReviewCoordinator(
             NotifyActivityLog(context, "Review completed.");
 
         return new AiRunSnapshot(
-            context.RunId!, context.PrNodeId, context.HeadSha, context.MergeBaseSha, state, context.CopilotSessionId,
+            context.RunId!, context.SessionKey, context.HeadSha, context.MergeBaseSha, state, context.CopilotSessionId,
             context.TurnsUsed, context.AdHocInstructions, context.Triage, errorMessage, context.StartedUtc, context.FinishedUtc);
     }
 
-    private async Task<string> RunTurnForTextAsync(string prNodeId, string prompt, AiWorkPriority priority, CancellationToken ct)
+    private async Task<string> RunTurnForTextAsync(string sessionKey, string prompt, AiWorkPriority priority, CancellationToken ct)
     {
-        var context = await EnsureLiveSessionAsync(prNodeId, ct).ConfigureAwait(false);
+        var context = await EnsureLiveSessionAsync(sessionKey, ct).ConfigureAwait(false);
         var gateReason = CheckGate(context.RepositoryKey);
         if (gateReason is not null)
             throw new InvalidOperationException(gateReason);
@@ -752,12 +767,12 @@ internal sealed class AiReviewCoordinator(
         return await completion.Task.ConfigureAwait(false);
     }
 
-    private async Task<RunContext> EnsureLiveSessionAsync(string prNodeId, CancellationToken ct)
+    private async Task<RunContext> EnsureLiveSessionAsync(string sessionKey, CancellationToken ct)
     {
-        if (!_runsByPr.TryGetValue(prNodeId, out var context))
+        if (!_runsBySession.TryGetValue(sessionKey, out var context))
         {
             throw new InvalidOperationException(
-                $"No AI review context for PR '{prNodeId}'. Open the pull request after a completed AI review, or start a review first.");
+                $"No AI review context for session '{sessionKey}'. Open the pull request after a completed AI review, or start a review first.");
         }
 
         if (context.Session is not null)
@@ -766,7 +781,7 @@ internal sealed class AiReviewCoordinator(
         if (string.IsNullOrEmpty(context.CopilotSessionId))
         {
             throw new InvalidOperationException(
-                $"The cached AI review for PR '{prNodeId}' has no resumable Copilot session. Start a new review first.");
+                $"The cached AI review for session '{sessionKey}' has no resumable Copilot session. Start a new review first.");
         }
 
         await context.SessionGate.WaitAsync(ct).ConfigureAwait(false);
@@ -787,7 +802,7 @@ internal sealed class AiReviewCoordinator(
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 throw new InvalidOperationException(
-                    $"Failed to resume the Copilot session for PR '{prNodeId}'. The session may have expired. Start a new review. ({ex.Message})",
+                    $"Failed to resume the Copilot session for '{sessionKey}'. The session may have expired. Start a new review. ({ex.Message})",
                     ex);
             }
 
@@ -806,9 +821,9 @@ internal sealed class AiReviewCoordinator(
         AiPrTriageResult? triage,
         AiRunState state)
     {
-        var context = _runsByPr.GetOrAdd(request.PrNodeId, static _ => new RunContext());
+        var context = _runsBySession.GetOrAdd(request.SessionKey, static _ => new RunContext());
         context.Request = request;
-        context.PrNodeId = request.PrNodeId;
+        context.SessionKey = request.SessionKey;
         context.RepositoryKey = request.RepositoryKey;
         context.RepositoryPath = request.RepositoryPath;
         context.HeadSha = request.HeadSha;
@@ -842,6 +857,9 @@ internal sealed class AiReviewCoordinator(
         var stamped = $"[{DateTimeOffset.UtcNow:HH:mm:ss}] {line}";
         observers.NotifyActivityLog(stamped);
     }
+
+    private static bool IsWorkingCopyScope(AiReviewScope scope) =>
+        scope is AiReviewScope.WorkingCopyStaged or AiReviewScope.WorkingCopyAll;
 
     private string? CheckGate(string repositoryKey)
     {
@@ -888,12 +906,12 @@ internal sealed class AiReviewCoordinator(
     {
         var now = DateTimeOffset.UtcNow;
         return new AiRunSnapshot(
-            Guid.NewGuid().ToString("N"), request.PrNodeId, request.HeadSha, request.MergeBaseSha, AiRunState.Failed,
+            Guid.NewGuid().ToString("N"), request.SessionKey, request.HeadSha, request.MergeBaseSha, AiRunState.Failed,
             CopilotSessionId: null, TurnsUsed: 0, request.AdHocInstructions, Triage: null, reason, now, now);
     }
 
     private static AiRunSnapshot ToSnapshot(AiRunRecord run, AiPrTriageResult? triage) => new(
-        run.Id, run.PrNodeId, run.HeadSha, run.MergeBaseSha, run.State, run.CopilotSessionId,
+        run.Id, run.SessionKey, run.HeadSha, run.MergeBaseSha, run.State, run.CopilotSessionId,
         run.TurnsUsed, run.AdHocInstructions, triage, run.ErrorMessage, run.StartedUtc, run.FinishedUtc);
 
     private static AIChecklistSeverity MapSeverity(AiRiskLevel risk) => risk switch
@@ -951,7 +969,7 @@ internal sealed class AiReviewCoordinator(
             capture.Result = triage;
 
             await resultStore.UpsertPrResultAsync(new AiPrResultRecord(
-                context.RunId!, context.PrNodeId, context.CacheKey ?? "", Serialize(triage), DateTimeOffset.UtcNow), ct)
+                context.RunId!, context.SessionKey, context.CacheKey ?? "", Serialize(triage), DateTimeOffset.UtcNow), ct)
                 .ConfigureAwait(false);
 
             foreach (var file in triage.Files)
@@ -962,7 +980,7 @@ internal sealed class AiReviewCoordinator(
                     context.Model, context.RulesHash ?? "", context.InstructionsHash ?? "");
 
                 await resultStore.UpsertFileResultAsync(new AiFileResultRecord(
-                    context.RunId!, context.PrNodeId, file.Path, fileCacheKey, file.Classification.ToString(),
+                    context.RunId!, context.SessionKey, file.Path, fileCacheKey, file.Classification.ToString(),
                     file.PriorityStars, file.Guidance, SummaryJson: null, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
             }
 
@@ -970,7 +988,7 @@ internal sealed class AiReviewCoordinator(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to process submit_pr_triage payload for PR {PrNodeId}.", context.PrNodeId);
+            logger.LogWarning(ex, "Failed to process submit_pr_triage payload for session {SessionKey}.", context.SessionKey);
             return Serialize(new ToolErrorResult(ex.Message));
         }
     }
@@ -990,7 +1008,7 @@ internal sealed class AiReviewCoordinator(
             var existing = await resultStore.GetFileResultByCacheKeyAsync(cacheKey, ct).ConfigureAwait(false);
             var record = new AiFileResultRecord(
                 existing?.RunId ?? context.RunId ?? "",
-                context.PrNodeId,
+                context.SessionKey,
                 summary.Path,
                 cacheKey,
                 existing?.Classification,
@@ -1004,7 +1022,7 @@ internal sealed class AiReviewCoordinator(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to process submit_file_summary payload for PR {PrNodeId}.", context.PrNodeId);
+            logger.LogWarning(ex, "Failed to process submit_file_summary payload for session {SessionKey}.", context.SessionKey);
             return Serialize(new ToolErrorResult(ex.Message));
         }
     }
@@ -1017,7 +1035,7 @@ internal sealed class AiReviewCoordinator(
             var id = Guid.NewGuid().ToString("N");
 
             await resultStore.UpsertAnnotationAsync(new AiAnnotationRecord(
-                id, context.RunId ?? "", context.PrNodeId, args.Path, args.BlobOid, args.StartLine, args.EndLine,
+                id, context.RunId ?? "", context.SessionKey, args.Path, args.BlobOid, args.StartLine, args.EndLine,
                 args.Side.ToString(), args.Severity.ToString(), args.Body, AiAnnotationReadState.Unread, DateTimeOffset.UtcNow), ct)
                 .ConfigureAwait(false);
 
@@ -1032,7 +1050,7 @@ internal sealed class AiReviewCoordinator(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to process add_annotation payload for PR {PrNodeId}.", context.PrNodeId);
+            logger.LogWarning(ex, "Failed to process add_annotation payload for session {SessionKey}.", context.SessionKey);
             return Serialize(new ToolErrorResult(ex.Message));
         }
     }
@@ -1061,7 +1079,7 @@ internal sealed class AiReviewCoordinator(
     private sealed class RunContext
     {
         public AiReviewRequest Request = null!;
-        public string PrNodeId = "";
+        public string SessionKey = "";
         public string RepositoryKey = "";
         public string RepositoryPath = "";
         public string HeadSha = "";

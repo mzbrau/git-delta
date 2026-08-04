@@ -1,0 +1,237 @@
+using CodeReviewr.App.Services;
+using CodeReviewr.App.ViewModels;
+using CodeReviewr.Core;
+using CodeReviewr.Core.Abstractions;
+using CodeReviewr.Core.AI;
+using CodeReviewr.Core.Diff;
+using CodeReviewr.Diff;
+using CodeReviewr.Git;
+using NSubstitute;
+using NUnit.Framework;
+
+namespace CodeReviewr.App.Tests;
+
+public sealed class PendingChangesReviewUxTests
+{
+    private IGitStatusService _status = null!;
+    private IGitDiffService _diff = null!;
+    private IGitBranchService _branches = null!;
+    private IGitStashService _stash = null!;
+    private IGitHistoryService _history = null!;
+    private IGitDiscardService _discard = null!;
+    private ISettingsStore _settings = null!;
+    private NotificationService _notifications = null!;
+    private AlwaysConfirmDialog _confirm = null!;
+    private IRepositoryWatcher _watcher = null!;
+    private ILocalCommentStore _localComments = null!;
+
+    [SetUp]
+    public void SetUp()
+    {
+        _status = Substitute.For<IGitStatusService>();
+        _diff = Substitute.For<IGitDiffService>();
+        _branches = Substitute.For<IGitBranchService>();
+        _stash = Substitute.For<IGitStashService>();
+        _history = Substitute.For<IGitHistoryService>();
+        _discard = Substitute.For<IGitDiscardService>();
+        _settings = Substitute.For<ISettingsStore>();
+        _notifications = new NotificationService();
+        _confirm = new AlwaysConfirmDialog();
+        _watcher = Substitute.For<IRepositoryWatcher>();
+        _localComments = Substitute.For<ILocalCommentStore>();
+        _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([]);
+        _settings.Current.Returns(new AppSettings());
+        _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([]);
+        _stash.ListStashesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([]);
+        _history.ListCommitsAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+        _discard.RecentlyDiscarded.Returns([]);
+    }
+
+    [TearDown]
+    public void TearDown() => _watcher.Dispose();
+
+    private WorkingCopyViewModel CreateVm() =>
+        new(_status, _diff, Substitute.For<IGitStagingService>(), _discard,
+            Substitute.For<IGitObjectReader>(), Substitute.For<IGitCommitService>(),
+            _branches, Substitute.For<IGitRemoteService>(),
+            Substitute.For<IGitConflictService>(), _stash, _history,
+            _settings, _notifications, _confirm,
+            new FakeStashDialog(new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true)),
+            new IntraLineDiffer(), Substitute.For<IFsmonitorService>(), _watcher,
+            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications));
+
+    private static StatusEntry Unstaged(string path, string? worktreeOid = null) =>
+        new(FilePath.From(path), null, ChangeKind.Modified, IsStaged: false, IsUnstaged: true, IsConflicted: false,
+            WorktreeOid: worktreeOid is null ? null : new ContentId(worktreeOid));
+
+    private static RepositoryStatus Status(IReadOnlyList<StatusEntry> unstaged, long epoch = 1) =>
+        new([], unstaged, [], InProgressOperation.None, "main", epoch);
+
+    private static FileDiff SampleDiff(string path = "a.txt")
+    {
+        var patch =
+            $"""
+            diff --git a/{path} b/{path}
+            --- a/{path}
+            +++ b/{path}
+            @@ -1 +1 @@
+            -old
+            +new
+            """;
+        return PatchParser.Parse(patch, DiffTarget.IndexToWorktree);
+    }
+
+    private static string NewRepo()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "codereviewr-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        return repo;
+    }
+
+    [Test]
+    public async Task SelectComments_Clears_File_Selection()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt", "oid1")]));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(SampleDiff());
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+            Assert.That(vm.UnstagedFiles, Is.Not.Empty);
+            vm.SetFileSelection([vm.UnstagedFiles[0]]);
+
+            for (var i = 0; i < 40 && vm.SelectedFile is null; i++)
+                await Task.Delay(25);
+
+            Assert.That(vm.SelectedFile, Is.Not.Null);
+
+            vm.PendingReview.SelectCommentsCommand.Execute(null);
+
+            Assert.That(vm.PendingReview.IsCommentsSelected, Is.True);
+            Assert.That(vm.SelectedFile, Is.Null);
+            Assert.That(vm.DiffEmptyMessage, Is.EqualTo("Pending changes context"));
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task ReapplyTriage_Restores_Stars_After_Refresh()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(
+                    Status([Unstaged("a.txt", "oid1")], epoch: 1),
+                    Status([Unstaged("a.txt", "oid1")], epoch: 2));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+            Assert.That(vm.UnstagedFiles, Is.Not.Empty);
+
+            vm.PendingReview.AiTriage = new AiPrTriageResult(
+                Summary: "ok",
+                Risk: AiRiskLevel.Low,
+                Justifications: [],
+                SuggestedOrder: ["a.txt"],
+                Files:
+                [
+                    new AiFileTriage("a.txt", AiFileClassification.Normal, PriorityStars: 4, Guidance: "look here"),
+                ],
+                Measured: new AiMeasuredFacts(1, 1, 1));
+            vm.PendingReview.ReapplyTriageToFiles();
+
+            Assert.That(vm.UnstagedFiles[0].AiPriorityStars, Is.EqualTo(4));
+
+            await vm.RefreshAsync();
+
+            Assert.That(vm.UnstagedFiles, Is.Not.Empty);
+            Assert.That(vm.UnstagedFiles[0].AiPriorityStars, Is.EqualTo(4));
+            Assert.That(vm.UnstagedFiles[0].AiGuidance, Is.EqualTo("look here"));
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task OnFileSelectionChanged_Raises_AiChatSelectedFileLabel()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("src/Foo.cs", "oid1")]));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(SampleDiff("src/Foo.cs"));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            Assert.That(vm.PendingReview.AiChatSelectedFileLabel, Is.EqualTo("No file selected"));
+
+            var raised = false;
+            vm.PendingReview.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(PendingChangesReviewViewModel.AiChatSelectedFileLabel))
+                    raised = true;
+            };
+
+            vm.SetFileSelection([vm.UnstagedFiles[0]]);
+            for (var i = 0; i < 40 && !raised; i++)
+                await Task.Delay(25);
+
+            Assert.That(raised, Is.True);
+            Assert.That(vm.PendingReview.AiChatSelectedFileLabel, Does.Contain("Foo.cs"));
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task LocalComments_Update_PerFile_Unresolved_Count()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt", "oid1")]));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            vm.PendingReview.LocalComments.Add(new LocalCommentItemViewModel(new LocalCommentRecord(
+                Id: "1",
+                RepositoryKey: "repo",
+                Path: "a.txt",
+                StartLine: 1,
+                EndLine: 1,
+                Side: DiffSide.New,
+                Body: "fix",
+                IsResolved: false,
+                ContentId: null,
+                CreatedUtc: DateTimeOffset.UtcNow,
+                UpdatedUtc: DateTimeOffset.UtcNow)));
+            vm.PendingReview.UpdateFileUnresolvedCommentCounts();
+
+            Assert.That(vm.UnstagedFiles[0].UnresolvedThreadCount, Is.EqualTo(1));
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+}

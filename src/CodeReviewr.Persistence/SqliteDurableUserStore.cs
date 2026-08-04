@@ -4,7 +4,7 @@ namespace CodeReviewr.Persistence;
 
 public sealed class SqliteDurableUserStore : IDurableUserStore
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
 
     private readonly string _connectionString;
     private SqliteConnection? _connection;
@@ -51,6 +51,12 @@ public sealed class SqliteDurableUserStore : IDurableUserStore
         {
             ApplyMigrationV3(connection);
             SchemaVersion = 3;
+        }
+
+        if (SchemaVersion < 4)
+        {
+            ApplyMigrationV4(connection);
+            SchemaVersion = 4;
         }
     }
 
@@ -467,6 +473,51 @@ public sealed class SqliteDurableUserStore : IDurableUserStore
             CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_pr_node_id ON ai_chat_messages(pr_node_id);
 
             INSERT INTO schema_migrations (version) VALUES (3);
+            """;
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void ApplyMigrationV4(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            ALTER TABLE ai_runs RENAME COLUMN pr_node_id TO session_key;
+            DROP INDEX IF EXISTS idx_ai_runs_pr_node_id;
+            CREATE INDEX IF NOT EXISTS idx_ai_runs_session_key ON ai_runs(session_key);
+
+            ALTER TABLE ai_pr_results RENAME COLUMN pr_node_id TO session_key;
+            DROP INDEX IF EXISTS idx_ai_pr_results_pr_node_id;
+            CREATE INDEX IF NOT EXISTS idx_ai_pr_results_session_key ON ai_pr_results(session_key);
+
+            ALTER TABLE ai_file_results RENAME COLUMN pr_node_id TO session_key;
+            DROP INDEX IF EXISTS idx_ai_file_results_pr_node_id;
+            CREATE INDEX IF NOT EXISTS idx_ai_file_results_session_key ON ai_file_results(session_key);
+
+            ALTER TABLE ai_annotations RENAME COLUMN pr_node_id TO session_key;
+            DROP INDEX IF EXISTS idx_ai_annotations_pr_node_id;
+            CREATE INDEX IF NOT EXISTS idx_ai_annotations_session_key ON ai_annotations(session_key);
+
+            ALTER TABLE ai_chat_messages RENAME COLUMN pr_node_id TO session_key;
+            DROP INDEX IF EXISTS idx_ai_chat_messages_pr_node_id;
+            CREATE INDEX IF NOT EXISTS idx_ai_chat_messages_session_key ON ai_chat_messages(session_key);
+
+            CREATE TABLE IF NOT EXISTS local_review_comments (
+              id TEXT NOT NULL PRIMARY KEY,
+              repository_key TEXT NOT NULL,
+              path TEXT NOT NULL,
+              start_line INTEGER NOT NULL,
+              end_line INTEGER NOT NULL,
+              side TEXT NOT NULL,
+              body TEXT NOT NULL,
+              is_resolved INTEGER NOT NULL DEFAULT 0,
+              content_id TEXT,
+              created_utc TEXT NOT NULL,
+              updated_utc TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_local_review_comments_repo ON local_review_comments(repository_key);
+            CREATE INDEX IF NOT EXISTS idx_local_review_comments_repo_unresolved ON local_review_comments(repository_key, is_resolved);
+
+            INSERT INTO schema_migrations (version) VALUES (4);
             """;
         cmd.ExecuteNonQuery();
     }

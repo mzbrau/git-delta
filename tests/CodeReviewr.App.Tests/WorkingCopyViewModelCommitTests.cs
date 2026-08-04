@@ -28,6 +28,7 @@ public sealed class WorkingCopyViewModelCommitTests
     private AlwaysConfirmDialog _confirm = null!;
     private FakeStashDialog _stashDialog = null!;
     private IRepositoryWatcher _watcher = null!;
+    private ILocalCommentStore _localComments = null!;
 
     [SetUp]
     public void SetUp()
@@ -49,6 +50,8 @@ public sealed class WorkingCopyViewModelCommitTests
         _stashDialog = new FakeStashDialog(
             new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true));
         _watcher = Substitute.For<IRepositoryWatcher>();
+        _localComments = Substitute.For<ILocalCommentStore>();
+        _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([]);
 
         _settings.Current.Returns(new AppSettings());
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -66,7 +69,8 @@ public sealed class WorkingCopyViewModelCommitTests
     private WorkingCopyViewModel CreateVm() =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
             _conflicts, _stash, _history, _settings, _notifications, _confirm, _stashDialog,
-            new IntraLineDiffer(), _fsmonitor, _watcher);
+            new IntraLineDiffer(), _fsmonitor, _watcher,
+            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications));
 
     private static StatusEntry Staged(string path) =>
         new(FilePath.From(path), null, ChangeKind.Modified, IsStaged: true, IsUnstaged: false, IsConflicted: false);
@@ -373,6 +377,102 @@ public sealed class WorkingCopyViewModelCommitTests
             Assert.That(clearIndex, Is.GreaterThanOrEqualTo(0), "SelectionClearRequested should fire on rebuild");
             Assert.That(syncIndex, Is.GreaterThanOrEqualTo(0), "SelectionSyncRequested should fire when selection is restored");
             Assert.That(clearIndex, Is.LessThan(syncIndex), "Clear must precede sync restore");
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task Commit_WithUnresolvedComments_Cancelled_DoesNotCommit()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status(staged: [Staged("a.txt")], epoch: 1));
+
+            _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns([
+                    new LocalCommentRecord(
+                        "c1", repo, "a.txt", 1, 1, DiffSide.New, "fix me",
+                        IsResolved: false, ContentId: null,
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+                ]);
+
+            var confirm = new AlwaysConfirmDialog(result: false);
+            var vm = new WorkingCopyViewModel(
+                _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
+                _conflicts, _stash, _history, _settings, _notifications, confirm, _stashDialog,
+                new IntraLineDiffer(), _fsmonitor, _watcher,
+                new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, confirm, _notifications));
+
+            await vm.OpenAsync(repo);
+            await vm.PendingReview.RefreshLocalCommentsAsync();
+            Assert.That(vm.PendingReview.HasUnresolvedComments, Is.True);
+
+            vm.CommitMessage = "should not commit";
+            await vm.CommitCommand.ExecuteAsync(null);
+
+            await _commit.DidNotReceive().CommitAsync(
+                Arg.Any<string>(),
+                Arg.Any<string>(),
+                Arg.Any<bool>(),
+                Arg.Any<bool>(),
+                Arg.Any<IProgress<string>?>(),
+                Arg.Any<CancellationToken>());
+            Assert.That(vm.CommitMessage, Is.EqualTo("should not commit"));
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task Commit_WithUnresolvedComments_Confirmed_Proceeds()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(
+                    Status(staged: [Staged("a.txt")], epoch: 1),
+                    Status(epoch: 2));
+
+            _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+                .Returns([
+                    new LocalCommentRecord(
+                        "c1", repo, "a.txt", 1, 1, DiffSide.New, "fix me",
+                        IsResolved: false, ContentId: null,
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow),
+                ]);
+
+            _commit.CommitAsync(
+                    Arg.Any<string>(),
+                    Arg.Any<string>(),
+                    Arg.Any<bool>(),
+                    Arg.Any<bool>(),
+                    Arg.Any<IProgress<string>?>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(Task.CompletedTask);
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+            await vm.PendingReview.RefreshLocalCommentsAsync();
+            Assert.That(vm.PendingReview.UnresolvedCommentCount, Is.EqualTo(1));
+
+            vm.CommitMessage = "commit anyway";
+            await vm.CommitCommand.ExecuteAsync(null);
+
+            await _commit.Received(1).CommitAsync(
+                repo,
+                "commit anyway",
+                false,
+                false,
+                Arg.Any<IProgress<string>?>(),
+                Arg.Any<CancellationToken>());
         }
         finally
         {
