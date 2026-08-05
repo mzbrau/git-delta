@@ -185,7 +185,7 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private AiChangeBriefingResult? _aiChangeBriefing;
     [ObservableProperty] private AiFileBriefingResult? _aiFileBriefing;
     [ObservableProperty] private bool _isChangeBriefingSelected;
-    [ObservableProperty] private bool _showAiSidePanel;
+    [ObservableProperty] private bool _showAiSidePanel = true;
     [ObservableProperty] private AiSidePanelTab _aiSidePanelTab = AiSidePanelTab.FileBriefing;
     [ObservableProperty] private bool _isGeneratingFileBriefing;
     [ObservableProperty] private FileHistoryCacheEntry? _fileHistory;

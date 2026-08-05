@@ -93,6 +93,8 @@ public static class ChangedLineSearch
         if (string.IsNullOrEmpty(lineText))
             return new FormattedSnippet("", 0, 0);
 
+        radius = Math.Max(0, radius);
+
         var trimOffset = 0;
         while (trimOffset < lineText.Length && char.IsWhiteSpace(lineText[trimOffset]))
             trimOffset++;

@@ -326,7 +326,6 @@ public sealed class FileListRowView : UserControl
 
         if (entry.IsSearchHit)
         {
-            _hitLineNumber.Text = entry.HitLine?.ToString() ?? "";
             ApplyHitSnippet(entry);
         }
 
