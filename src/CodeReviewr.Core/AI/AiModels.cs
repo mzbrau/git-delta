@@ -69,7 +69,9 @@ public sealed record AiChangeBriefingResult(
     IReadOnlyList<string> ReviewFocus,
     AiTestingStatus TestingStatus,
     IReadOnlyList<string> Dependencies,
-    AiMeasuredFacts? Measured = null);
+    AiMeasuredFacts? Measured = null,
+    /// <summary>Optional Mermaid source (no fences). Null/empty when no diagram aids understanding.</summary>
+    string? DiagramMermaid = null);
 
 /// <summary>How well the change appears to be covered by tests.</summary>
 public sealed record AiTestingStatus(

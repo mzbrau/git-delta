@@ -930,7 +930,7 @@ internal sealed class AiReviewCoordinator(
             (argsJson, ct) => HandleSubmitFileBriefing(context, argsJson, ct)),
         new AgentCustomTool(
             "add_annotation",
-            "Add an inline review annotation at a specific location in the file currently being reviewed.",
+            "Add an inline review annotation at a specific location in the file currently being reviewed. Prefer this over burying line-specific issues in findings; call once per location before submit_file_briefing.",
             (argsJson, ct) => HandleAddAnnotation(context, argsJson, ct)),
     ];
 
@@ -950,6 +950,7 @@ internal sealed class AiReviewCoordinator(
                 TestingStatus = payload.TestingStatus ?? new AiTestingStatus("", []),
                 Dependencies = payload.Dependencies ?? [],
                 Measured = measured,
+                DiagramMermaid = MermaidSourceNormalizer.Normalize(payload.DiagramMermaid),
             };
 
             context.ChangeBriefing = briefing;

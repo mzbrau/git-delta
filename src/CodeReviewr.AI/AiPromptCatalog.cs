@@ -11,7 +11,7 @@ namespace CodeReviewr.AI;
 public sealed class AiPromptCatalog
 {
     /// <summary>Bumped whenever prompt wording changes in a way that should invalidate cached results.</summary>
-    public const string PromptVersion = "6";
+    public const string PromptVersion = "8";
 
     private readonly Assembly _assembly = typeof(AiPromptCatalog).Assembly;
     private readonly ConcurrentDictionary<string, string> _resourceCache = new();

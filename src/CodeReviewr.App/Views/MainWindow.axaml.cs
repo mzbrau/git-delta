@@ -832,7 +832,8 @@ public partial class MainWindow : Window
 
     private void OnReviewPropertyChangedForAiChat(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ReviewViewModel.ShowAiSidePanel))
+        if (e.PropertyName is nameof(ReviewViewModel.ShowAiSidePanel)
+            or nameof(ReviewViewModel.IsConversationSelected))
             SyncAiSidePanelWidth();
         else if (e.PropertyName == nameof(ReviewViewModel.IsAiFileBriefingTabSelected))
             ScrollAiChatToEnd();
@@ -845,7 +846,8 @@ public partial class MainWindow : Window
         if (grid.ColumnDefinitions.Count < 3) return;
 
         var column = grid.ColumnDefinitions[2];
-        if (vm.Review.ShowAiSidePanel)
+        var show = vm.Review.ShowAiSidePanel && !vm.Review.IsConversationSelected;
+        if (show)
         {
             var width = Math.Clamp(_prAiSidePanelWidth, 240, 560);
             column.MinWidth = 240;
@@ -900,7 +902,8 @@ public partial class MainWindow : Window
 
     private void OnWcReviewPropertyChangedForAiChat(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(PendingChangesReviewViewModel.ShowAiSidePanel))
+        if (e.PropertyName is nameof(PendingChangesReviewViewModel.ShowAiSidePanel)
+            or nameof(PendingChangesReviewViewModel.IsCommentsSelected))
             SyncWcAiSidePanelWidth();
         else if (e.PropertyName == nameof(PendingChangesReviewViewModel.IsAiFileBriefingTabSelected))
             ScrollWcAiChatToEnd();
@@ -913,7 +916,9 @@ public partial class MainWindow : Window
         if (grid.ColumnDefinitions.Count < 3) return;
 
         var column = grid.ColumnDefinitions[2];
-        if (vm.WorkingCopy.PendingReview.ShowAiSidePanel)
+        var show = vm.WorkingCopy.PendingReview.ShowAiSidePanel
+                   && !vm.WorkingCopy.PendingReview.IsCommentsSelected;
+        if (show)
         {
             var width = Math.Clamp(_wcAiSidePanelWidth, 240, 560);
             column.MinWidth = 240;
@@ -948,21 +953,26 @@ public partial class MainWindow : Window
         if (e.Key != Key.Enter || e.KeyModifiers.HasFlag(KeyModifiers.Shift))
             return;
 
-        if (DataContext is not MainWindowViewModel vm)
-            return;
+        if (DataContext is not MainWindowViewModel vm) return;
+        if (!vm.WorkingCopy.PendingReview.CanSendAiChat) return;
 
-        if (vm.WorkingCopy.PendingReview.SendAiChatCommand.CanExecute(null))
-        {
-            _ = vm.WorkingCopy.PendingReview.SendAiChatCommand.ExecuteAsync(null);
-            e.Handled = true;
-        }
+        e.Handled = true;
+        _ = vm.WorkingCopy.PendingReview.SendAiChatCommand.ExecuteAsync(null);
     }
+
+    private void OnWcDiagramEnlargeClick(object? sender, RoutedEventArgs e) =>
+        this.FindControl<MermaidDiagramView>("WcBriefingDiagram")?.TryExpand();
+
+    private void OnPrDiagramEnlargeClick(object? sender, RoutedEventArgs e) =>
+        this.FindControl<MermaidDiagramView>("PrBriefingDiagram")?.TryExpand();
 
     private void OnOpened(object? sender, EventArgs e)
     {
         if (Vm.WindowWidth >= 640) Width = Vm.WindowWidth;
         if (Vm.WindowHeight >= 480) Height = Vm.WindowHeight;
         ApplyColumnWidths();
+        SyncAiSidePanelWidth();
+        SyncWcAiSidePanelWidth();
 
         if (global::CodeReviewr.App.App.Services.GetService(typeof(AvaloniaConfirmDialog)) is AvaloniaConfirmDialog confirm)
             confirm.Owner = this;

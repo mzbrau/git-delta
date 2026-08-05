@@ -710,6 +710,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     private void RebuildFileLists(RepositoryStatus status)
     {
+        // Preserve AI classifications across VM recreation so file-list icons survive status refresh.
+        var classifications = CaptureAiClassifications();
+
         _allStaged.Clear();
         _allUnstaged.Clear();
         _allConflicted.Clear();
@@ -742,8 +745,34 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         foreach (var e in status.Conflicted)
             _allConflicted.Add(FileItemViewModel.From(e, isStagedList: false));
 
+        ApplyAiClassifications(classifications);
+
         WorkingCopyChangeCount = _allStaged.Count + _allUnstaged.Count + _allConflicted.Count;
         ApplyFileFilter();
+    }
+
+    private Dictionary<string, AiChangeClassification> CaptureAiClassifications()
+    {
+        var map = new Dictionary<string, AiChangeClassification>(StringComparer.Ordinal);
+        foreach (var file in _allStaged.Concat(_allUnstaged).Concat(_allConflicted))
+        {
+            if (file.AiChangeClassification is { } classification)
+                map.TryAdd(file.Path.Value, classification);
+        }
+
+        return map;
+    }
+
+    private void ApplyAiClassifications(Dictionary<string, AiChangeClassification> classifications)
+    {
+        if (classifications.Count == 0)
+            return;
+
+        foreach (var file in _allStaged.Concat(_allUnstaged).Concat(_allConflicted))
+        {
+            if (classifications.TryGetValue(file.Path.Value, out var classification))
+                file.AiChangeClassification = classification;
+        }
     }
 
     private void ApplyFileFilter()

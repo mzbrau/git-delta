@@ -1035,6 +1035,8 @@ public partial class PendingChangesReviewViewModel : ObservableObject
                     return;
 
                 AiFileBriefing = briefing;
+                if (briefing is not null)
+                    file.AiChangeClassification = briefing.Classification;
 
                 foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
                     DiffAnnotations.Remove(stale);
@@ -1085,6 +1087,8 @@ public partial class PendingChangesReviewViewModel : ObservableObject
                     return;
 
                 AiFileBriefing = briefing;
+                if (briefing is not null)
+                    file.AiChangeClassification = briefing.Classification;
 
                 foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
                     DiffAnnotations.Remove(stale);
@@ -1356,6 +1360,12 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         AiFileBriefing = null;
         IsChangeBriefingSelected = false;
         AiLastError = null;
+
+        if (_host is not null)
+        {
+            foreach (var file in _host.PendingFiles)
+                file.AiChangeClassification = null;
+        }
 
         foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
             DiffAnnotations.Remove(stale);

@@ -1398,7 +1398,7 @@
               </StackPanel>
             </ScrollViewer>
 
-            <Grid x:Name="WcDiffChatGrid"
+            <Grid x:Name="WcDiffChatGrid" ClipToBounds="True"
                   IsVisible="{Binding WorkingCopy.PendingReview.IsCommentsSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" MinWidth="200" />
@@ -1407,7 +1407,7 @@
               </Grid.ColumnDefinitions>
 
               <!-- Change Briefing view -->
-              <ScrollViewer Grid.Column="0" Grid.ColumnSpan="3"
+              <ScrollViewer Grid.Column="0"
                             IsVisible="{Binding WorkingCopy.PendingReview.IsChangeBriefingSelected}">
                 <StackPanel Margin="16" Spacing="16">
                   <DockPanel>
@@ -1445,7 +1445,7 @@
                             <DataTemplate x:DataType="x:String">
                               <DockPanel Classes="BriefingListItem">
                                 <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                <SelectableTextBlock Text="{Binding}" Classes="BriefingListText" />
                               </DockPanel>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
@@ -1462,7 +1462,7 @@
                             <DataTemplate x:DataType="x:String">
                               <DockPanel Classes="BriefingListItem">
                                 <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                <SelectableTextBlock Text="{Binding}" Classes="BriefingListText" />
                               </DockPanel>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
@@ -1479,7 +1479,7 @@
                             <DataTemplate x:DataType="x:String">
                               <DockPanel Classes="BriefingListItem">
                                 <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                <SelectableTextBlock Text="{Binding}" Classes="BriefingListText" />
                               </DockPanel>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
@@ -1491,14 +1491,14 @@
                             Background="{DynamicResource ForgeSurfaceContainerBrush}">
                       <StackPanel Spacing="6">
                         <TextBlock Text="TESTING STATUS" Classes="PanelHeader" Opacity="0.7" />
-                        <TextBlock Text="{Binding WorkingCopy.PendingReview.AiChangeBriefing.TestingStatus.Summary}"
+                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiChangeBriefing.TestingStatus.Summary}"
                                    FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" LineHeight="18" />
                         <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChangeBriefing.TestingStatus.Notes}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="x:String">
                               <DockPanel Classes="BriefingListItem">
                                 <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                <TextBlock Text="{Binding}" Classes="BriefingListText"
+                                <SelectableTextBlock Text="{Binding}" Classes="BriefingListText"
                                            Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
                               </DockPanel>
                             </DataTemplate>
@@ -1527,12 +1527,32 @@
                         <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChangeBriefing.Dependencies}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="x:String">
-                              <Border Classes="Chip" Margin="0,0,0,4" HorizontalAlignment="Left">
-                                <TextBlock Text="{Binding}" FontSize="11" />
+                              <Border Classes="Chip" Margin="0,0,0,4" HorizontalAlignment="Stretch">
+                                <SelectableTextBlock Text="{Binding}" FontSize="11" TextWrapping="Wrap" />
                               </Border>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                            IsVisible="{Binding WorkingCopy.PendingReview.AiChangeBriefing.DiagramMermaid, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}">
+                      <StackPanel Spacing="6">
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Classes="Ghost" Padding="4,2" FontSize="10" Opacity="0.75"
+                                  Cursor="Hand" Click="OnWcDiagramEnlargeClick"
+                                  ToolTip.Tip="Click to enlarge">
+                            <TextBlock Text="Click to enlarge" FontSize="10" Opacity="0.85" />
+                          </Button>
+                          <TextBlock Text="DIAGRAM" Classes="PanelHeader" Opacity="0.7" />
+                        </DockPanel>
+                        <controls:MermaidDiagramView x:Name="WcBriefingDiagram"
+                                                     Height="220"
+                                                     Source="{Binding WorkingCopy.PendingReview.AiChangeBriefing.DiagramMermaid}"
+                                                     ExpandOnClick="True"
+                                                     IsInteractive="False" />
                       </StackPanel>
                     </Border>
                   </WrapPanel>
@@ -1794,7 +1814,7 @@
                             <StackPanel Orientation="Horizontal" Spacing="6">
                               <icons:MaterialIcon Width="14" Height="14"
                                                   Kind="{Binding WorkingCopy.PendingReview.AiFileBriefing.Classification, Converter={x:Static conv:ForgeConverters.AiChangeClassificationIcon}}" />
-                              <TextBlock FontSize="11" FontWeight="SemiBold"
+                              <SelectableTextBlock FontSize="11" FontWeight="SemiBold"
                                          Text="{Binding WorkingCopy.PendingReview.AiFileBriefing.Classification, Converter={x:Static conv:ForgeConverters.AiChangeClassificationLabel}}" />
                               <Border Classes="Chip" IsVisible="{Binding WorkingCopy.PendingReview.AiFileBriefing.QualityScore, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                                 <TextBlock FontSize="10">
@@ -1804,7 +1824,7 @@
                             </StackPanel>
                             <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileBriefing.Overview}"
                                                  FontSize="12" TextWrapping="Wrap" LineHeight="18" />
-                            <TextBlock Text="{Binding WorkingCopy.PendingReview.AiFileBriefing.QualityRationale}"
+                            <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileBriefing.QualityRationale}"
                                        FontSize="11" TextWrapping="Wrap" LineHeight="16" Opacity="0.7" FontStyle="Italic"
                                        IsVisible="{Binding WorkingCopy.PendingReview.AiFileBriefing.QualityRationale, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
                           </StackPanel>
@@ -1819,7 +1839,7 @@
                                 <DataTemplate x:DataType="x:String">
                                   <DockPanel Classes="BriefingListItem">
                                     <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                    <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                    <SelectableTextBlock Text="{Binding}" Classes="BriefingListText" />
                                   </DockPanel>
                                 </DataTemplate>
                               </ItemsControl.ItemTemplate>
@@ -1848,7 +1868,7 @@
                                     <TextBlock DockPanel.Dock="Right" Text="{Binding ShortOid}"
                                                FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.6" />
                                     <StackPanel Spacing="1">
-                                      <TextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                      <SelectableTextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
                                       <StackPanel Orientation="Horizontal" Spacing="4">
                                         <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
                                                    FontSize="10" Opacity="0.55" />
@@ -2228,7 +2248,7 @@
                 </Border>
               </StackPanel>
             </ScrollViewer>
-            <Grid x:Name="PrDiffChatGrid"
+            <Grid x:Name="PrDiffChatGrid" ClipToBounds="True"
                   IsVisible="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" MinWidth="200" />
@@ -2237,7 +2257,7 @@
               </Grid.ColumnDefinitions>
 
               <!-- Change Briefing view -->
-              <ScrollViewer Grid.Column="0" Grid.ColumnSpan="3"
+              <ScrollViewer Grid.Column="0"
                             IsVisible="{Binding Review.IsChangeBriefingSelected}">
                 <StackPanel Margin="16" Spacing="16">
                   <DockPanel>
@@ -2275,7 +2295,7 @@
                             <DataTemplate x:DataType="x:String">
                               <DockPanel Classes="BriefingListItem">
                                 <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                <SelectableTextBlock Text="{Binding}" Classes="BriefingListText" />
                               </DockPanel>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
@@ -2292,7 +2312,7 @@
                             <DataTemplate x:DataType="x:String">
                               <DockPanel Classes="BriefingListItem">
                                 <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                <SelectableTextBlock Text="{Binding}" Classes="BriefingListText" />
                               </DockPanel>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
@@ -2309,7 +2329,7 @@
                             <DataTemplate x:DataType="x:String">
                               <DockPanel Classes="BriefingListItem">
                                 <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                <SelectableTextBlock Text="{Binding}" Classes="BriefingListText" />
                               </DockPanel>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
@@ -2321,14 +2341,14 @@
                             Background="{DynamicResource ForgeSurfaceContainerBrush}">
                       <StackPanel Spacing="6">
                         <TextBlock Text="TESTING STATUS" Classes="PanelHeader" Opacity="0.7" />
-                        <TextBlock Text="{Binding Review.AiChangeBriefing.TestingStatus.Summary}"
+                        <SelectableTextBlock Text="{Binding Review.AiChangeBriefing.TestingStatus.Summary}"
                                    FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" LineHeight="18" />
                         <ItemsControl ItemsSource="{Binding Review.AiChangeBriefing.TestingStatus.Notes}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="x:String">
                               <DockPanel Classes="BriefingListItem">
                                 <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                <TextBlock Text="{Binding}" Classes="BriefingListText"
+                                <SelectableTextBlock Text="{Binding}" Classes="BriefingListText"
                                            Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
                               </DockPanel>
                             </DataTemplate>
@@ -2357,12 +2377,32 @@
                         <ItemsControl ItemsSource="{Binding Review.AiChangeBriefing.Dependencies}">
                           <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="x:String">
-                              <Border Classes="Chip" Margin="0,0,0,4" HorizontalAlignment="Left">
-                                <TextBlock Text="{Binding}" FontSize="11" />
+                              <Border Classes="Chip" Margin="0,0,0,4" HorizontalAlignment="Stretch">
+                                <SelectableTextBlock Text="{Binding}" FontSize="11" TextWrapping="Wrap" />
                               </Border>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                            IsVisible="{Binding Review.AiChangeBriefing.DiagramMermaid, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}">
+                      <StackPanel Spacing="6">
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Classes="Ghost" Padding="4,2" FontSize="10" Opacity="0.75"
+                                  Cursor="Hand" Click="OnPrDiagramEnlargeClick"
+                                  ToolTip.Tip="Click to enlarge">
+                            <TextBlock Text="Click to enlarge" FontSize="10" Opacity="0.85" />
+                          </Button>
+                          <TextBlock Text="DIAGRAM" Classes="PanelHeader" Opacity="0.7" />
+                        </DockPanel>
+                        <controls:MermaidDiagramView x:Name="PrBriefingDiagram"
+                                                     Height="220"
+                                                     Source="{Binding Review.AiChangeBriefing.DiagramMermaid}"
+                                                     ExpandOnClick="True"
+                                                     IsInteractive="False" />
                       </StackPanel>
                     </Border>
                   </WrapPanel>
@@ -2738,7 +2778,7 @@
                             <StackPanel Orientation="Horizontal" Spacing="6">
                               <icons:MaterialIcon Width="14" Height="14"
                                                   Kind="{Binding Review.AiFileBriefing.Classification, Converter={x:Static conv:ForgeConverters.AiChangeClassificationIcon}}" />
-                              <TextBlock FontSize="11" FontWeight="SemiBold"
+                              <SelectableTextBlock FontSize="11" FontWeight="SemiBold"
                                          Text="{Binding Review.AiFileBriefing.Classification, Converter={x:Static conv:ForgeConverters.AiChangeClassificationLabel}}" />
                               <Border Classes="Chip" IsVisible="{Binding Review.AiFileBriefing.QualityScore, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                                 <TextBlock FontSize="10">
@@ -2748,7 +2788,7 @@
                             </StackPanel>
                             <SelectableTextBlock Text="{Binding Review.AiFileBriefing.Overview}"
                                                  FontSize="12" TextWrapping="Wrap" LineHeight="18" />
-                            <TextBlock Text="{Binding Review.AiFileBriefing.QualityRationale}"
+                            <SelectableTextBlock Text="{Binding Review.AiFileBriefing.QualityRationale}"
                                        FontSize="11" TextWrapping="Wrap" LineHeight="16" Opacity="0.7" FontStyle="Italic"
                                        IsVisible="{Binding Review.AiFileBriefing.QualityRationale, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
                           </StackPanel>
@@ -2763,7 +2803,7 @@
                                 <DataTemplate x:DataType="x:String">
                                   <DockPanel Classes="BriefingListItem">
                                     <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
-                                    <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                    <SelectableTextBlock Text="{Binding}" Classes="BriefingListText" />
                                   </DockPanel>
                                 </DataTemplate>
                               </ItemsControl.ItemTemplate>
@@ -2792,7 +2832,7 @@
                                     <TextBlock DockPanel.Dock="Right" Text="{Binding ShortOid}"
                                                FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.6" />
                                     <StackPanel Spacing="1">
-                                      <TextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                      <SelectableTextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
                                       <StackPanel Orientation="Horizontal" Spacing="4">
                                         <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
                                                    FontSize="10" Opacity="0.55" />

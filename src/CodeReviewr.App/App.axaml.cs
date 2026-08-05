@@ -9,6 +9,7 @@ using CodeReviewr.App.ViewModels;
 using CodeReviewr.App.Views;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Abstractions;
+using LiveMarkdown.Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CodeReviewr.App;
@@ -17,10 +18,22 @@ public partial class App : Application
 {
     public static IServiceProvider Services { get; private set; } = null!;
     private static IDisposable? _otel;
+    private static bool _liveMarkdownConfigured;
 
     public override void Initialize()
     {
+        ConfigureLiveMarkdown();
         AvaloniaXamlLoader.Load(this);
+    }
+
+    private static void ConfigureLiveMarkdown()
+    {
+        if (_liveMarkdownConfigured)
+            return;
+        _liveMarkdownConfigured = true;
+
+        MarkdownRenderer.ConfigurePipeline += pipeline => pipeline.UseMermaid();
+        MarkdownNode.Register<MermaidBlockNode>();
     }
 
     public override void OnFrameworkInitializationCompleted()

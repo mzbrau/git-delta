@@ -9,6 +9,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using CodeReviewr.Core;
 using CodeReviewr.Core.Diff;
+using LiveMarkdown.Avalonia;
 using Markdig.Syntax;
 
 namespace CodeReviewr.App.Controls;
@@ -16,6 +17,7 @@ namespace CodeReviewr.App.Controls;
 /// <summary>
 /// Renders markdown file content with a source-line gutter and optional PR comment lane.
 /// Each top-level Markdig block is one row anchored to its source line range.
+/// Block content is painted by LiveMarkdown (and MermaidPresenter for mermaid fences).
 /// </summary>
 public sealed class MarkdownFilePreview : UserControl
 {
@@ -203,12 +205,12 @@ public sealed class MarkdownFilePreview : UserControl
         _empty.IsVisible = false;
         _rowsPanel.IsVisible = true;
 
-        var document = Markdig.Markdown.Parse(markdown, MarkdownRenderer.Pipeline);
+        var document = Markdig.Markdown.Parse(markdown, MarkdownDocumentParser.Pipeline);
         var index = 0;
         foreach (Block block in document)
         {
             var (startLine, endLine) = MarkdownBlockLines.GetRange(block, markdown);
-            var row = BuildRow(block, startLine, endLine, index);
+            var row = BuildRow(block, markdown, startLine, endLine, index);
             _rows.Add(row);
             _rowsPanel.Children.Add(row.Root);
             index++;
@@ -225,7 +227,7 @@ public sealed class MarkdownFilePreview : UserControl
         RefreshAnnotations();
     }
 
-    private BlockRow BuildRow(Block block, int startLine, int endLine, int index)
+    private BlockRow BuildRow(Block block, string markdown, int startLine, int endLine, int index)
     {
         var gutterBrush = ThemeBrush("ForgeDiffGutterTextBrush", Brushes.Gray);
         var gutter = new TextBlock
@@ -279,7 +281,7 @@ public sealed class MarkdownFilePreview : UserControl
         addButton.HorizontalAlignment = HorizontalAlignment.Center;
         addButton.VerticalAlignment = VerticalAlignment.Top;
 
-        var content = MarkdownRenderer.CreateBlockControl(block);
+        var content = CreateBlockContent(block, markdown);
         content.HorizontalAlignment = HorizontalAlignment.Stretch;
 
         var rowGrid = new Grid
@@ -313,6 +315,43 @@ public sealed class MarkdownFilePreview : UserControl
             AddCommentButton = addButton,
             AnnotationHost = annotationHost,
         };
+    }
+
+    private static Control CreateBlockContent(Block block, string markdown)
+    {
+        if (block is FencedCodeBlock fence
+            && string.Equals(fence.Info?.Trim(), "mermaid", StringComparison.OrdinalIgnoreCase))
+        {
+            var mermaidSource = fence.Lines.ToString();
+            // Preview is click-to-expand only; pan/zoom lives in the enlarge modal.
+            return new MermaidDiagramView
+            {
+                Source = mermaidSource,
+                IsInteractive = false,
+                ExpandOnClick = true,
+                MinHeight = 160,
+                MaxHeight = 420,
+            };
+        }
+
+        var slice = GetBlockSource(markdown, block);
+        var renderer = new MarkdownRenderer
+        {
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        var builder = new ObservableStringBuilder();
+        builder.Append(slice);
+        renderer.MarkdownBuilder = builder;
+        return renderer;
+    }
+
+    private static string GetBlockSource(string markdown, Block block)
+    {
+        var start = block.Span.Start;
+        var length = block.Span.Length;
+        if (start < 0 || length <= 0 || start + length > markdown.Length)
+            return markdown;
+        return markdown.Substring(start, length);
     }
 
     private void OnRowPointerEntered(object? sender, PointerEventArgs e)

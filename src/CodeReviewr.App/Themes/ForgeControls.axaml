@@ -43,7 +43,17 @@
     <Setter Property="TextWrapping" Value="Wrap" />
     <Setter Property="LineHeight" Value="18" />
   </Style>
+  <Style Selector="SelectableTextBlock.BriefingListText">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="LineHeight" Value="18" />
+  </Style>
   <Style Selector="TextBlock.BriefingBody">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="LineHeight" Value="18" />
+  </Style>
+  <Style Selector="SelectableTextBlock.BriefingBody">
     <Setter Property="FontSize" Value="12" />
     <Setter Property="TextWrapping" Value="Wrap" />
     <Setter Property="LineHeight" Value="18" />

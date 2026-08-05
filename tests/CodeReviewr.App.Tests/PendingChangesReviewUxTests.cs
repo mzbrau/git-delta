@@ -346,4 +346,62 @@ public sealed class PendingChangesReviewUxTests
             try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
         }
     }
+
+    [Test]
+    public async Task Status_Refresh_Preserves_AiChangeClassification_On_File_Rows()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(
+                    Status([Unstaged("a.txt", "oid1")], epoch: 1),
+                    Status([Unstaged("a.txt", "oid2")], epoch: 2));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            var file = vm.UnstagedFiles.Single();
+            file.AiChangeClassification = AiChangeClassification.NewFeature;
+            vm.PendingReview.AiRunState = AiRunState.Complete;
+
+            await vm.RefreshAsync();
+
+            var refreshed = vm.UnstagedFiles.Single(f => f.Path.Value == "a.txt");
+            Assert.That(refreshed.AiChangeClassification, Is.EqualTo(AiChangeClassification.NewFeature));
+            Assert.That(refreshed.HasAiChangeClassification, Is.True);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task SyncReviewState_ClearAi_Clears_File_Classifications()
+    {
+        var repo = NewRepo();
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt", "oid1")], epoch: 1));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            var file = vm.UnstagedFiles.Single();
+            file.AiChangeClassification = AiChangeClassification.BugFix;
+            vm.PendingReview.AiRunState = AiRunState.Complete;
+
+            await vm.PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReview: true);
+
+            Assert.That(vm.PendingReview.AiRunState, Is.EqualTo(AiRunState.Idle));
+            Assert.That(file.AiChangeClassification, Is.Null);
+            Assert.That(file.HasAiChangeClassification, Is.False);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
 }
