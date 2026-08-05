@@ -452,10 +452,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowChangeBriefingRow));
         OnPropertyChanged(nameof(CanGenerateFileBriefing));
         GenerateFileBriefingCommand.NotifyCanExecuteChanged();
-
-        if (HasAiRun)
-            ShowAiSidePanel = true;
-
         NotifyAiButtonStateChanged();
     }
 
@@ -658,7 +654,12 @@ public partial class PendingChangesReviewViewModel : ObservableObject
             var snapshot = await _ai.StartReviewAsync(request, CancellationToken.None).ConfigureAwait(false);
             if (!ReferenceEquals(_host, host)) return;
 
-            await InvokeOnUiAsync(() => ApplyAiRunSnapshot(snapshot)).ConfigureAwait(false);
+            await InvokeOnUiAsync(() =>
+            {
+                ApplyAiRunSnapshot(snapshot);
+                if (snapshot.State == AiRunState.Complete)
+                    ShowAiSidePanel = true;
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

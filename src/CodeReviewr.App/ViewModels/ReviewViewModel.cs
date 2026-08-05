@@ -185,7 +185,7 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private AiChangeBriefingResult? _aiChangeBriefing;
     [ObservableProperty] private AiFileBriefingResult? _aiFileBriefing;
     [ObservableProperty] private bool _isChangeBriefingSelected;
-    [ObservableProperty] private bool _showAiSidePanel = true;
+    [ObservableProperty] private bool _showAiSidePanel;
     [ObservableProperty] private AiSidePanelTab _aiSidePanelTab = AiSidePanelTab.FileBriefing;
     [ObservableProperty] private bool _isGeneratingFileBriefing;
     [ObservableProperty] private FileHistoryCacheEntry? _fileHistory;
@@ -423,12 +423,18 @@ public partial class ReviewViewModel : ObservableObject
     partial void OnSelectedPrFileEntryChanged(FileListEntry? value)
     {
         if (_suppressPrEntrySync) return;
-        if (value is { IsFolder: true, FolderKey: { } key })
+        if (value is { IsExpandable: true, FolderKey: { } key })
         {
             TogglePrFolder(key);
             _suppressPrEntrySync = true;
             try { SyncSelectedPrFileEntry(); }
             finally { _suppressPrEntrySync = false; }
+            return;
+        }
+
+        if (value is { IsSearchHit: true, File: { } hitFile, HitSide: { } side, HitLine: { } line })
+        {
+            SelectSearchHit(hitFile, side, line);
             return;
         }
 
@@ -453,6 +459,8 @@ public partial class ReviewViewModel : ObservableObject
     private void TogglePrFolder(string? folderKey)
     {
         if (string.IsNullOrEmpty(folderKey)) return;
+        if (TryTogglePrSearchGroup(folderKey))
+            return;
         var expanded = FileListLayoutHelper.IsExpanded(_prExpandState, folderKey);
         _prExpandState[folderKey] = !expanded;
         RebuildPrFileEntries();
@@ -493,6 +501,7 @@ public partial class ReviewViewModel : ObservableObject
     partial void OnFileFilterChanged(string value)
     {
         OnPropertyChanged(nameof(HasFileFilter));
+        OnPropertyChanged(nameof(IsPrContentSearchActive));
         ApplyPrFileFilter();
     }
 
@@ -975,7 +984,12 @@ public partial class ReviewViewModel : ObservableObject
             var snapshot = await _ai.StartReviewAsync(request, CancellationToken.None).ConfigureAwait(false);
             if (!ReferenceEquals(_session, session)) return;
 
-            await InvokeOnUiAsync(() => ApplyAiRunSnapshot(snapshot)).ConfigureAwait(false);
+            await InvokeOnUiAsync(() =>
+            {
+                ApplyAiRunSnapshot(snapshot);
+                if (snapshot.State == AiRunState.Complete)
+                    ShowAiSidePanel = true;
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -1037,7 +1051,6 @@ public partial class ReviewViewModel : ObservableObject
         if (snapshot.State == AiRunState.Complete)
         {
             ShowAiProgressDialog = false;
-            ShowAiSidePanel = true;
             AiFileBriefing = null;
             IsChangeBriefingSelected = true;
             _ = RefreshFileClassificationsAsync(snapshot.SessionKey);
@@ -1142,7 +1155,7 @@ public partial class ReviewViewModel : ObservableObject
         ShowAiProgressDialog = false;
         ShowAiInstructionsDialog = false;
         ShowAiChat = false;
-        ShowAiSidePanel = true;
+        ShowAiSidePanel = false;
         AiSidePanelTab = AiSidePanelTab.FileBriefing;
         AiChatInput = "";
         AiChatMessages.Clear();
@@ -1590,6 +1603,15 @@ public partial class ReviewViewModel : ObservableObject
 
     private void ApplyPrFileFilter()
     {
+        if (IsPrContentSearchActive)
+        {
+            SchedulePrContentSearch();
+            return;
+        }
+
+        _prSearchCts?.Cancel();
+        _prSearchResults = [];
+
         InvokeOnUiAsync(() =>
         {
             // Capture path before Clear() — ListBox TwoWay binding nulls SelectedFile when the
@@ -1627,6 +1649,12 @@ public partial class ReviewViewModel : ObservableObject
 
     private void RebuildPrFileEntries()
     {
+        if (IsPrContentSearchActive)
+        {
+            RebuildPrSearchEntries();
+            return;
+        }
+
         // Suppress BEFORE clearing selection: ListBox TwoWay SelectedItem=null would otherwise
         // write SelectedPrFileEntry → SelectedFile=null → LoadDiff(null) and race PrFileEntries.Clear
         // (Avalonia InternalSelectionModel.CopyTo ArgumentException → "Failed to load diff").
@@ -1650,8 +1678,12 @@ public partial class ReviewViewModel : ObservableObject
             }
 
             SelectedPrFileEntry = PrFileEntries.FirstOrDefault(e =>
-                e.File is not null &&
-                string.Equals(e.File.Path.Value, SelectedFile.Path.Value, StringComparison.Ordinal));
+                                     (e.IsFile || e.IsSearchGroup) &&
+                                     e.File is not null &&
+                                     string.Equals(e.File.Path.Value, SelectedFile.Path.Value, StringComparison.Ordinal))
+                                 ?? PrFileEntries.FirstOrDefault(e =>
+                                     e.File is not null &&
+                                     string.Equals(e.File.Path.Value, SelectedFile.Path.Value, StringComparison.Ordinal));
         }
         finally
         {
@@ -1675,8 +1707,12 @@ public partial class ReviewViewModel : ObservableObject
             }
 
             SelectedPrFileEntry = PrFileEntries.FirstOrDefault(e =>
-                e.File is not null &&
-                string.Equals(e.File.Path.Value, SelectedFile.Path.Value, StringComparison.Ordinal));
+                                     (e.IsFile || e.IsSearchGroup) &&
+                                     e.File is not null &&
+                                     string.Equals(e.File.Path.Value, SelectedFile.Path.Value, StringComparison.Ordinal))
+                                 ?? PrFileEntries.FirstOrDefault(e =>
+                                     e.File is not null &&
+                                     string.Equals(e.File.Path.Value, SelectedFile.Path.Value, StringComparison.Ordinal));
         }
         finally
         {
@@ -1686,6 +1722,10 @@ public partial class ReviewViewModel : ObservableObject
 
     private bool MatchesPrFileFilter(FileItemViewModel file, string? stickySelectedPath = null)
     {
+        // Content search ignores path/chip filters and is handled separately.
+        if (IsFileListSearchMode)
+            return true;
+
         if (!string.IsNullOrWhiteSpace(FileFilter))
         {
             if (!file.Path.Value.Contains(FileFilter, StringComparison.OrdinalIgnoreCase) &&
@@ -3197,6 +3237,7 @@ public partial class ReviewViewModel : ObservableObject
                 // Content is on screen; clear spinner before syntax/annotations finish.
                 IsLoadingDiff = false;
                 NotifyMarkdownPreviewStateChanged();
+                RequestPendingDiffScrollIfAny();
             });
 
             loadActivity?.SetTag("diff.row_count", rows.Count);

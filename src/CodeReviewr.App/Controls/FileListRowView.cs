@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Data;
 using Avalonia.Layout;
@@ -41,10 +42,12 @@ public sealed class FileListRowView : UserControl
     private FileItemViewModel? _subscribedFile;
     private readonly Border _folderRow;
     private readonly Border _fileRow;
+    private readonly Border _searchHitRow;
     private readonly MaterialIcon _folderChevron;
     private readonly TextBlock _folderLabel;
     private readonly CheckBox _stageCheck;
     private readonly MaterialIcon _statusIcon;
+    private readonly MaterialIcon _searchGroupChevron;
     private readonly MiddleEllipsisTextBlock _name;
     private readonly MaterialIcon _cacheTick;
     private readonly MaterialIcon _viewedEye;
@@ -55,6 +58,8 @@ public sealed class FileListRowView : UserControl
     private readonly StackPanel _lineStats;
     private readonly TextBlock _linesAdded;
     private readonly TextBlock _linesRemoved;
+    private readonly TextBlock _hitLineNumber;
+    private readonly TextBlock _hitSnippet;
 
     public FileListRowView()
     {
@@ -93,6 +98,8 @@ public sealed class FileListRowView : UserControl
         _stageCheck.Click += OnStageCheckClick;
 
         _statusIcon = Icon(MaterialIconKind.Pencil, 14);
+        _searchGroupChevron = Icon(MaterialIconKind.ChevronRight, 14, 0.7);
+        _searchGroupChevron.IsVisible = false;
         _name = new MiddleEllipsisTextBlock
         {
             VerticalAlignment = VerticalAlignment.Center,
@@ -149,7 +156,7 @@ public sealed class FileListRowView : UserControl
             Orientation = Orientation.Horizontal,
             Spacing = 6,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { _stageCheck, _statusIcon },
+            Children = { _searchGroupChevron, _stageCheck, _statusIcon },
         };
         Grid.SetColumn(leading, 0);
 
@@ -186,18 +193,49 @@ public sealed class FileListRowView : UserControl
             Child = grid,
         };
 
+        _hitLineNumber = new TextBlock
+        {
+            Classes = { "MonoPath" },
+            FontSize = 11,
+            Opacity = 0.7,
+            VerticalAlignment = VerticalAlignment.Center,
+            MinWidth = 28,
+        };
+        _hitSnippet = new TextBlock
+        {
+            Classes = { "MonoPath" },
+            FontSize = 11,
+            Opacity = 0.9,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+        _searchHitRow = new Border
+        {
+            Classes = { "FileListRow" },
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 8,
+                Children = { _hitLineNumber, _hitSnippet },
+            },
+        };
+
         _folderRow[!MarginProperty] = new Binding(nameof(FileListEntry.IndentMargin));
         _fileRow[!MarginProperty] = new Binding(nameof(FileListEntry.IndentMargin));
-        _folderRow[!IsVisibleProperty] = new Binding(nameof(FileListEntry.IsFolder));
-        _fileRow[!IsVisibleProperty] = new Binding(nameof(FileListEntry.IsFile));
+        _searchHitRow[!MarginProperty] = new Binding(nameof(FileListEntry.IndentMargin));
         _folderLabel[!TextBlock.TextProperty] = new Binding(nameof(FileListEntry.Label));
         _name[!MiddleEllipsisTextBlock.TextProperty] = new Binding(nameof(FileListEntry.Label));
         _folderChevron[!MaterialIcon.KindProperty] = new Binding(nameof(FileListEntry.IsExpanded))
         {
             Converter = ForgeConverters.ChevronKind,
         };
+        _searchGroupChevron[!MaterialIcon.KindProperty] = new Binding(nameof(FileListEntry.IsExpanded))
+        {
+            Converter = ForgeConverters.ChevronKind,
+        };
+        _hitLineNumber[!TextBlock.TextProperty] = new Binding(nameof(FileListEntry.HitLine));
 
-        Content = new Panel { Children = { _folderRow, _fileRow } };
+        Content = new Panel { Children = { _folderRow, _fileRow, _searchHitRow } };
         DataContextChanged += (_, _) => OnEntryChanged();
     }
 
@@ -241,7 +279,7 @@ public sealed class FileListRowView : UserControl
     {
         base.OnPropertyChanged(change);
         if (change.Property == ShowStageCheckboxProperty)
-            _stageCheck.IsVisible = ShowStageCheckbox;
+            UpdateStageCheckVisibility();
         else if (change.Property == StageCheckboxCheckedProperty)
         {
             _stageCheck.IsChecked = StageCheckboxChecked;
@@ -263,10 +301,18 @@ public sealed class FileListRowView : UserControl
         if (DataContext is not FileListEntry entry)
         {
             _subscribedFile = null;
+            _folderRow.IsVisible = false;
+            _fileRow.IsVisible = false;
+            _searchHitRow.IsVisible = false;
             return;
         }
 
-        _stageCheck.IsVisible = ShowStageCheckbox;
+        _folderRow.IsVisible = entry.IsFolder;
+        _fileRow.IsVisible = entry.IsFile || entry.IsSearchGroup;
+        _searchHitRow.IsVisible = entry.IsSearchHit;
+        _searchGroupChevron.IsVisible = entry.IsSearchGroup;
+
+        UpdateStageCheckVisibility();
         _stageCheck.IsChecked = StageCheckboxChecked;
         ToolTip.SetTip(_stageCheck, StageCheckboxChecked ? "Unstage file" : "Stage file");
 
@@ -278,7 +324,51 @@ public sealed class FileListRowView : UserControl
             ApplyFile(_subscribedFile);
         }
 
+        if (entry.IsSearchHit)
+        {
+            _hitLineNumber.Text = entry.HitLine?.ToString() ?? "";
+            ApplyHitSnippet(entry);
+        }
+
         UpdateDerivedChrome();
+    }
+
+    private void ApplyHitSnippet(FileListEntry entry)
+    {
+        var snippet = entry.HitSnippet ?? entry.Label;
+        var inlines = _hitSnippet.Inlines;
+        inlines?.Clear();
+        _hitSnippet.Text = null;
+
+        var matchIndex = entry.HitSnippetMatchIndex;
+        var matchLength = entry.HitSnippetMatchLength;
+        if (inlines is null
+            || matchLength <= 0
+            || matchIndex < 0
+            || matchIndex >= snippet.Length
+            || matchIndex + matchLength > snippet.Length)
+        {
+            _hitSnippet.Text = snippet;
+            return;
+        }
+
+        if (matchIndex > 0)
+            inlines.Add(new Run(snippet[..matchIndex]));
+
+        inlines.Add(new Run(snippet[matchIndex..(matchIndex + matchLength)])
+        {
+            FontWeight = FontWeight.Bold,
+        });
+
+        var after = matchIndex + matchLength;
+        if (after < snippet.Length)
+            inlines.Add(new Run(snippet[after..]));
+    }
+
+    private void UpdateStageCheckVisibility()
+    {
+        var isSearchChrome = DataContext is FileListEntry { IsSearchGroup: true } or FileListEntry { IsSearchHit: true };
+        _stageCheck.IsVisible = ShowStageCheckbox && !isSearchChrome;
     }
 
     private void OnFilePropertyChanged(object? sender, PropertyChangedEventArgs e)

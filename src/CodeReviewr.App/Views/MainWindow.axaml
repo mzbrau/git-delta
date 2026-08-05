@@ -339,6 +339,7 @@
                           Padding="28,6,12,6" Command="{Binding SelectWorkspaceFileStatusCommand}">
                     <DockPanel>
                       <Border DockPanel.Dock="Right" Classes="Chip" VerticalAlignment="Center"
+                              Margin="8,0,0,0"
                               IsVisible="{Binding WorkingCopy.WorkingCopyChangeCount, Converter={x:Static conv:ForgeConverters.IsPositive}}">
                         <TextBlock Text="{Binding WorkingCopy.WorkingCopyChangeCount}"
                                    FontFamily="{DynamicResource ForgeCodeFont}"
@@ -647,14 +648,45 @@
                     <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
                   </StackPanel>
                 </Button>
+                <Button DockPanel.Dock="Right" Classes="IconOnly" Width="36" Height="28" Padding="4,2"
+                        Margin="6,0,0,0" VerticalAlignment="Center"
+                        ToolTip.Tip="Filter or search">
+                  <Button.Flyout>
+                    <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="Filter"
+                                Command="{Binding WorkingCopy.SetFileStatusQueryModeCommand}"
+                                CommandParameter="{x:Static core:FileListQueryMode.Filter}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding WorkingCopy.IsFileStatusFilterMode, Mode=OneWay}">
+                        <MenuItem.Icon>
+                          <icons:MaterialIcon Kind="FilterVariant" Width="16" Height="16" />
+                        </MenuItem.Icon>
+                      </MenuItem>
+                      <MenuItem Header="Search"
+                                Command="{Binding WorkingCopy.SetFileStatusQueryModeCommand}"
+                                CommandParameter="{x:Static core:FileListQueryMode.Search}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding WorkingCopy.IsFileStatusSearchMode, Mode=OneWay}">
+                        <MenuItem.Icon>
+                          <icons:MaterialIcon Kind="Magnify" Width="16" Height="16" />
+                        </MenuItem.Icon>
+                      </MenuItem>
+                    </MenuFlyout>
+                  </Button.Flyout>
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <icons:MaterialIcon Kind="{Binding WorkingCopy.FileStatusQueryModeIcon}" Width="16" Height="16" />
+                    <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
+                  </StackPanel>
+                </Button>
                 <Grid>
                   <TextBox Classes="Forge" Text="{Binding WorkingCopy.FileFilter}"
-                           PlaceholderText="Filter files…" Padding="8,6,28,6" />
+                           PlaceholderText="{Binding WorkingCopy.FileStatusQueryPlaceholder}"
+                           Padding="8,6,28,6" />
                   <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
                           HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
                           Command="{Binding WorkingCopy.ClearFileFilterCommand}"
                           IsVisible="{Binding WorkingCopy.HasFileFilter}"
-                          ToolTip.Tip="Clear filter">
+                          ToolTip.Tip="{Binding WorkingCopy.FileStatusQueryClearTip}">
                     <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
                   </Button>
                 </Grid>
@@ -1013,11 +1045,30 @@
                     <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
                   </StackPanel>
                 </Button>
-                <Button DockPanel.Dock="Right" Classes="IconOnly" Width="28" Height="28" Padding="4"
+                <Button DockPanel.Dock="Right" Classes="IconOnly" Width="36" Height="28" Padding="4,2"
                         Margin="4,0,0,0" VerticalAlignment="Center"
-                        ToolTip.Tip="Filter files">
+                        ToolTip.Tip="Filter or search">
                   <Button.Flyout>
                     <MenuFlyout Placement="BottomEdgeAlignedRight">
+                      <MenuItem Header="Filter"
+                                Command="{Binding Review.SetFileListQueryModeCommand}"
+                                CommandParameter="{x:Static core:FileListQueryMode.Filter}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsFileListFilterMode, Mode=OneWay}">
+                        <MenuItem.Icon>
+                          <icons:MaterialIcon Kind="FilterVariant" Width="16" Height="16" />
+                        </MenuItem.Icon>
+                      </MenuItem>
+                      <MenuItem Header="Search"
+                                Command="{Binding Review.SetFileListQueryModeCommand}"
+                                CommandParameter="{x:Static core:FileListQueryMode.Search}"
+                                ToggleType="Radio"
+                                IsChecked="{Binding Review.IsFileListSearchMode, Mode=OneWay}">
+                        <MenuItem.Icon>
+                          <icons:MaterialIcon Kind="Magnify" Width="16" Height="16" />
+                        </MenuItem.Icon>
+                      </MenuItem>
+                      <Separator />
                       <MenuItem Header="All files"
                                 Command="{Binding Review.SetFilterViewedCommand}"
                                 CommandParameter="{x:Static core:ViewedFilter.All}"
@@ -1053,22 +1104,26 @@
                                 IsChecked="{Binding Review.AiShowDismissedAnnotations, Mode=OneWay}" />
                     </MenuFlyout>
                   </Button.Flyout>
-                  <Panel>
-                    <icons:MaterialIcon Kind="FilterVariant" Width="16" Height="16" />
-                    <Ellipse Width="6" Height="6" HorizontalAlignment="Right" VerticalAlignment="Top"
-                             Margin="0,-1,-1,0"
-                             Fill="{DynamicResource ForgePrimaryBrush}"
-                             IsVisible="{Binding Review.HasActivePrFilters}" />
-                  </Panel>
+                  <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Panel>
+                      <icons:MaterialIcon Kind="{Binding Review.FileListQueryModeIcon}" Width="16" Height="16" />
+                      <Ellipse Width="6" Height="6" HorizontalAlignment="Right" VerticalAlignment="Top"
+                               Margin="0,-1,-1,0"
+                               Fill="{DynamicResource ForgePrimaryBrush}"
+                               IsVisible="{Binding Review.HasActivePrFilters}" />
+                    </Panel>
+                    <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
+                  </StackPanel>
                 </Button>
                 <Grid>
                   <TextBox x:Name="PrFileFilterBox" Classes="Forge" Text="{Binding Review.FileFilter}"
-                           PlaceholderText="Filter files…" Padding="8,6,28,6" />
+                           PlaceholderText="{Binding Review.FileListQueryPlaceholder}"
+                           Padding="8,6,28,6" />
                   <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
                           HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
                           Command="{Binding Review.ClearFileFilterCommand}"
                           IsVisible="{Binding Review.HasFileFilter}"
-                          ToolTip.Tip="Clear filter">
+                          ToolTip.Tip="{Binding Review.FileListQueryClearTip}">
                     <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
                   </Button>
                 </Grid>
@@ -1866,9 +1921,12 @@
                     </StackPanel>
                     <DockPanel Grid.Row="2" Margin="10">
                       <Button DockPanel.Dock="Right" Classes="Primary" Content="Send" Margin="6,0,0,0"
+                              VerticalAlignment="Bottom"
                               Command="{Binding WorkingCopy.PendingReview.SendAiChatCommand}"
                               IsEnabled="{Binding WorkingCopy.PendingReview.CanSendAiChat}" />
                       <TextBox Text="{Binding WorkingCopy.PendingReview.AiChatInput}" FontSize="12"
+                               AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60"
+                               HorizontalAlignment="Stretch"
                                PlaceholderText="{Binding WorkingCopy.PendingReview.AiChatPlaceholder}"
                                KeyDown="OnWcAiChatKeyDown" />
                     </DockPanel>
@@ -2807,9 +2865,12 @@
                     </StackPanel>
                     <DockPanel Grid.Row="2" Margin="10">
                       <Button DockPanel.Dock="Right" Classes="Primary" Content="Send" Margin="6,0,0,0"
+                              VerticalAlignment="Bottom"
                               Command="{Binding Review.SendAiChatCommand}"
                               IsEnabled="{Binding Review.CanSendAiChat}" />
                       <TextBox Text="{Binding Review.AiChatInput}" FontSize="12"
+                               AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60"
+                               HorizontalAlignment="Stretch"
                                PlaceholderText="{Binding Review.AiChatPlaceholder}"
                                KeyDown="OnAiChatKeyDown" />
                     </DockPanel>
@@ -3071,14 +3132,45 @@
                         <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
                       </StackPanel>
                     </Button>
+                    <Button DockPanel.Dock="Right" Classes="IconOnly" Width="36" Height="28" Padding="4,2"
+                            Margin="6,0,0,0" VerticalAlignment="Center"
+                            ToolTip.Tip="Filter or search">
+                      <Button.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                          <MenuItem Header="Filter"
+                                    Command="{Binding WorkingCopy.SetHistoryFileQueryModeCommand}"
+                                    CommandParameter="{x:Static core:FileListQueryMode.Filter}"
+                                    ToggleType="Radio"
+                                    IsChecked="{Binding WorkingCopy.IsHistoryFileFilterMode, Mode=OneWay}">
+                            <MenuItem.Icon>
+                              <icons:MaterialIcon Kind="FilterVariant" Width="16" Height="16" />
+                            </MenuItem.Icon>
+                          </MenuItem>
+                          <MenuItem Header="Search"
+                                    Command="{Binding WorkingCopy.SetHistoryFileQueryModeCommand}"
+                                    CommandParameter="{x:Static core:FileListQueryMode.Search}"
+                                    ToggleType="Radio"
+                                    IsChecked="{Binding WorkingCopy.IsHistoryFileSearchMode, Mode=OneWay}">
+                            <MenuItem.Icon>
+                              <icons:MaterialIcon Kind="Magnify" Width="16" Height="16" />
+                            </MenuItem.Icon>
+                          </MenuItem>
+                        </MenuFlyout>
+                      </Button.Flyout>
+                      <StackPanel Orientation="Horizontal" Spacing="2">
+                        <icons:MaterialIcon Kind="{Binding WorkingCopy.HistoryFileQueryModeIcon}" Width="16" Height="16" />
+                        <icons:MaterialIcon Kind="MenuDown" Width="12" Height="12" Opacity="0.7" />
+                      </StackPanel>
+                    </Button>
                     <Grid>
                       <TextBox Classes="Forge" Text="{Binding WorkingCopy.HistoryFileFilter}"
-                               PlaceholderText="Filter files…" Padding="8,6,28,6" />
+                               PlaceholderText="{Binding WorkingCopy.HistoryFileQueryPlaceholder}"
+                               Padding="8,6,28,6" />
                       <Button Classes="IconOnly" Width="22" Height="22" Padding="2"
                               HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,4,0"
                               Command="{Binding WorkingCopy.ClearHistoryFileFilterCommand}"
                               IsVisible="{Binding WorkingCopy.HasHistoryFileFilter}"
-                              ToolTip.Tip="Clear filter">
+                              ToolTip.Tip="{Binding WorkingCopy.HistoryFileQueryClearTip}">
                         <icons:MaterialIcon Kind="Close" Width="14" Height="14" />
                       </Button>
                     </Grid>

@@ -398,7 +398,11 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     void IPendingChangesReviewHost.ClearFileSelection()
     {
-        _skipNextSelectedFileLoad = true;
+        // Only skip the next load when SelectedFile will actually change (nulling it).
+        // If already null, OnSelectedFileChanged never runs and a stuck skip flag would
+        // swallow the next real file selection (first click after AI briefing).
+        if (SelectedFile is not null)
+            _skipNextSelectedFileLoad = true;
         ApplySelectionState([], requestViewSync: true);
         DiffRows.Clear();
         _currentDiff = null;
@@ -513,6 +517,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     partial void OnFileFilterChanged(string value)
     {
         HasFileFilter = !string.IsNullOrWhiteSpace(value);
+        OnPropertyChanged(nameof(IsFileStatusContentSearchActive));
         if (IsStashMode && SelectedStash is not null)
             _ = SelectStashAsync(SelectedStash);
         else
@@ -522,6 +527,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     partial void OnHistoryFileFilterChanged(string value)
     {
         HasHistoryFileFilter = !string.IsNullOrWhiteSpace(value);
+        OnPropertyChanged(nameof(IsHistoryContentSearchActive));
         ApplyHistoryFileFilter();
     }
 
@@ -742,6 +748,17 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     private void ApplyFileFilter()
     {
+        if (IsFileStatusContentSearchActive)
+        {
+            ScheduleFileStatusContentSearch();
+            return;
+        }
+
+        _fileStatusSearchCts?.Cancel();
+        _stagedSearchResults = [];
+        _unstagedSearchResults = [];
+        _conflictedSearchResults = [];
+
         var previousKeys = _selectedFiles
             .Select(f => (Path: f.Path.Value, f.IsStagedList))
             .ToList();
@@ -797,13 +814,20 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         ApplySelectionState(restored, requestViewSync: true);
     }
 
-    private bool MatchesFilter(FileItemViewModel file) => MatchesPathFilter(file, FileFilter);
+    private bool MatchesFilter(FileItemViewModel file) =>
+        IsFileStatusSearchMode || MatchesPathFilter(file, FileFilter);
 
     private bool MatchesHistoryFileFilter(FileItemViewModel file) =>
-        MatchesPathFilter(file, HistoryFileFilter);
+        IsHistoryFileSearchMode || MatchesPathFilter(file, HistoryFileFilter);
 
     private void RebuildFileStatusEntries()
     {
+        if (IsFileStatusContentSearchActive)
+        {
+            RebuildFileStatusSearchEntries();
+            return;
+        }
+
         // Clear ListBox selection before mutating ItemsSource-bound collections to avoid
         // Avalonia InternalSelectionModel.CopyTo racing with Clear (Array.Copy ArgumentException).
         SelectionClearRequested?.Invoke();
@@ -819,6 +843,12 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     private void RebuildHistoryFileEntries()
     {
+        if (IsHistoryContentSearchActive)
+        {
+            RebuildHistorySearchEntries();
+            return;
+        }
+
         FileListLayoutHelper.Rebuild(
             HistoryFileEntries, HistoryFiles, HistoryFileListLayout, flatUsesFullPath: false, _historyExpandState);
     }
@@ -860,6 +890,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private void ToggleFileStatusFolder(string? folderKey)
     {
         if (string.IsNullOrEmpty(folderKey)) return;
+        if (TryToggleFileStatusSearchGroup(folderKey))
+            return;
         var expanded = FileListLayoutHelper.IsExpanded(_fileStatusExpandState, folderKey);
         _fileStatusExpandState[folderKey] = !expanded;
         RebuildFileStatusEntries();
@@ -870,6 +902,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private void ToggleHistoryFolder(string? folderKey)
     {
         if (string.IsNullOrEmpty(folderKey)) return;
+        if (TryToggleHistorySearchGroup(folderKey))
+            return;
         var expanded = FileListLayoutHelper.IsExpanded(_historyExpandState, folderKey);
         _historyExpandState[folderKey] = !expanded;
         RebuildHistoryFileEntries();
@@ -975,6 +1009,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     {
         OnPropertyChanged(nameof(SelectedFileAbsolutePath));
         NotifyMarkdownPreviewStateChanged();
+
+        // Hide change briefing as soon as a file is chosen (don't wait for diff present).
+        if (value is not null && PendingReview.IsChangeBriefingSelected)
+            PendingReview.IsChangeBriefingSelected = false;
 
         if (_skipNextSelectedFileLoad)
         {
@@ -1273,6 +1311,15 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private void ApplyHistoryFileFilter(bool autoSelectFirst = false)
     {
         if (!IsHistoryMode) return;
+
+        if (IsHistoryContentSearchActive)
+        {
+            ScheduleHistoryContentSearch();
+            return;
+        }
+
+        _historySearchCts?.Cancel();
+        _historySearchResults = [];
 
         var previousPath = _selectedFiles.FirstOrDefault()?.Path.Value
                            ?? SelectedFile?.Path.Value;
@@ -2349,6 +2396,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(CanStageLines));
         OnPropertyChanged(nameof(CanUnstageLines));
         OnPropertyChanged(nameof(CanDiscardLines));
+        RequestPendingDiffScrollIfAny();
     }
 
     private async Task LoadMarkdownPreviewTextAsync(
