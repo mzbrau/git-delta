@@ -32,6 +32,7 @@ public sealed class AiPromptCatalogTests
         Assert.That(prompt, Does.Contain("after456"));
         Assert.That(prompt, Does.Contain("42"));
         Assert.That(prompt, Does.Contain("add_annotation"));
+        Assert.That(prompt, Does.Contain("1–5"));
         Assert.That(prompt, Does.Contain("\"blobOid\": \"after456\""));
         Assert.That(prompt, Does.Contain("Never use `New`, `Old`"));
         Assert.That(prompt, Does.Contain("submit_file_briefing"));
@@ -54,6 +55,7 @@ public sealed class AiPromptCatalogTests
         Assert.That(prompt, Does.Contain("FACTS-TEXT"));
         Assert.That(prompt, Does.Contain("ADHOC-TEXT"));
         Assert.That(prompt, Does.Contain("submit_change_briefing"));
+        Assert.That(prompt, Does.Contain("diagramMermaid"));
         Assert.That(prompt, Does.Not.Contain("{{"));
     }
 

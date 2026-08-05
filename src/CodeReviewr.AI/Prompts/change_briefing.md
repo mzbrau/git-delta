@@ -28,7 +28,8 @@ Then call the `submit_change_briefing` tool **exactly once** with a JSON object 
     "summary": "string - overall testing assessment",
     "notes": ["string - concrete observation about tests", "..."]
   },
-  "dependencies": ["string - third-party dependency change, e.g. Newtonsoft.Json 13.0.2 -> 13.0.4", "..."]
+  "dependencies": ["string - third-party dependency change, e.g. Newtonsoft.Json 13.0.2 -> 13.0.4", "..."],
+  "diagramMermaid": "string or null - optional Mermaid diagram source (no markdown fences)"
 }
 ```
 
@@ -38,3 +39,5 @@ Rules:
 - `dependencies` should only include real third-party dependency changes you can observe; use an empty array when none.
 - Prefer short bullets over dense paragraphs in list fields.
 - Do not invent measured file/line counts; measured facts are provided separately.
+- `diagramMermaid` is optional. Include it only when a diagram materially helps the reviewer understand the change (architecture, data flow, call graph, or state of the changed area). Omit the field or set it to null when a diagram would not help.
+- When including a diagram: use Mermaid source only (no ``` fences); prefer flowchart, sequence, class, or state diagrams; keep nodes few; label nodes with real type/module/file names from the change.

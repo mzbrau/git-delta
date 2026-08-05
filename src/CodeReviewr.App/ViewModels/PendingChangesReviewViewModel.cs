@@ -732,6 +732,17 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         NotifyAiFileDetailChanged();
     }
 
+    /// <summary>
+    /// Re-applies file classifications from the latest AI run onto the current pending file rows.
+    /// Call after the file list is rebuilt so icons survive status refresh.
+    /// </summary>
+    public void RequestClassificationRefresh()
+    {
+        if (AiRunState != AiRunState.Complete)
+            return;
+        _ = RefreshFileClassificationsAsync();
+    }
+
     /// <summary>Best-effort refresh of each pending file's <see cref="FileItemViewModel.AiChangeClassification"/> from the latest run.</summary>
     private async Task RefreshFileClassificationsAsync()
     {
@@ -1035,6 +1046,8 @@ public partial class PendingChangesReviewViewModel : ObservableObject
                     return;
 
                 AiFileBriefing = briefing;
+                if (briefing is not null)
+                    file.AiChangeClassification = briefing.Classification;
 
                 foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
                     DiffAnnotations.Remove(stale);
@@ -1085,6 +1098,8 @@ public partial class PendingChangesReviewViewModel : ObservableObject
                     return;
 
                 AiFileBriefing = briefing;
+                if (briefing is not null)
+                    file.AiChangeClassification = briefing.Classification;
 
                 foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
                     DiffAnnotations.Remove(stale);
@@ -1356,6 +1371,12 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         AiFileBriefing = null;
         IsChangeBriefingSelected = false;
         AiLastError = null;
+
+        if (_host is not null)
+        {
+            foreach (var file in _host.PendingFiles)
+                file.AiChangeClassification = null;
+        }
 
         foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
             DiffAnnotations.Remove(stale);
