@@ -69,7 +69,7 @@ public sealed class WorkingCopyViewModelCommitTests
 
     private WorkingCopyViewModel CreateVm() =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
-            _conflicts, _stash, _history, _settings, _notifications, _confirm, _stashDialog,
+            _conflicts, Substitute.For<IGitRebaseService>(), _stash, _history, _settings, _notifications, _confirm, _stashDialog,
             new IntraLineDiffer(), _fsmonitor, _watcher,
             new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications, Substitute.For<IGitHistoryService>()));
 
@@ -405,7 +405,7 @@ public sealed class WorkingCopyViewModelCommitTests
             var confirm = new AlwaysConfirmDialog(result: false);
             var vm = new WorkingCopyViewModel(
                 _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
-                _conflicts, _stash, _history, _settings, _notifications, confirm, _stashDialog,
+                _conflicts, Substitute.For<IGitRebaseService>(), _stash, _history, _settings, _notifications, confirm, _stashDialog,
                 new IntraLineDiffer(), _fsmonitor, _watcher,
                 new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, confirm, _notifications, Substitute.For<IGitHistoryService>()));
 

@@ -38,6 +38,31 @@ public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGateP
             return (IReadOnlyList<CommitInfo>)ParseCommitLog(result.Stdout);
         }, ct);
 
+    public Task<IReadOnlyList<CommitInfo>> ListCommitsRangeAsync(
+        string repositoryPath,
+        string baseRef,
+        string headRef = "HEAD",
+        bool oldestFirst = false,
+        CancellationToken ct = default) =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
+        {
+            if (string.IsNullOrWhiteSpace(baseRef) || string.IsNullOrWhiteSpace(headRef))
+                return (IReadOnlyList<CommitInfo>)Array.Empty<CommitInfo>();
+
+            var args = new List<string>
+            {
+                "log",
+                $"{baseRef}..{headRef}",
+                $"--format={LogFormat}",
+            };
+            if (oldestFirst)
+                args.Add("--reverse");
+
+            var result = await runner.RunAsync(repositoryPath, args, options: null, token)
+                .ConfigureAwait(false);
+            return (IReadOnlyList<CommitInfo>)ParseCommitLog(result.Stdout);
+        }, ct);
+
     public Task<IReadOnlyList<CommitInfo>> ListFileHistoryAsync(
         string repositoryPath,
         string path,
@@ -105,6 +130,21 @@ public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGateP
 
             return (IReadOnlyList<(FilePath Path, ChangeKind Kind)>)
                 GitStashService.ParseNameStatus(result.Stdout);
+        }, ct);
+
+    public Task<CommitStat> GetCommitStatAsync(
+        string repositoryPath,
+        string oid,
+        CancellationToken ct = default) =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
+        {
+            var result = await runner.RunAsync(
+                repositoryPath,
+                ["show", "--numstat", "--format=", oid],
+                options: null,
+                token).ConfigureAwait(false);
+
+            return ParseNumstat(oid, result.Stdout);
         }, ct);
 
     public Task<string> GetCommitPatchAsync(
@@ -197,6 +237,35 @@ public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGateP
         }
 
         return list;
+    }
+
+    internal static CommitStat ParseNumstat(string oid, string stdout)
+    {
+        var fileCount = 0;
+        var insertions = 0;
+        var deletions = 0;
+
+        if (!string.IsNullOrEmpty(stdout))
+        {
+            using var reader = new StringReader(stdout);
+            while (reader.ReadLine() is { } line)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                var parts = line.Split('\t');
+                if (parts.Length < 3)
+                    continue;
+
+                fileCount++;
+                if (int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var added))
+                    insertions += added;
+                if (int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var removed))
+                    deletions += removed;
+            }
+        }
+
+        return new CommitStat(oid, fileCount, insertions, deletions);
     }
 
     private static IReadOnlyList<string> ParseDecorations(string raw)

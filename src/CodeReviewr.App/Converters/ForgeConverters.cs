@@ -28,6 +28,10 @@ public static class ForgeConverters
     public static readonly IValueConverter NullOrEmptyDisplay =
         new FuncValueConverter<string?, string>(v => string.IsNullOrEmpty(v) ? "—" : v!);
 
+    /// <summary>Scales a double by 0.8 (e.g. dialog size as 80% of window bounds).</summary>
+    public static readonly IValueConverter Scale0_8 =
+        new FuncValueConverter<double, double>(v => v * 0.8);
+
     public static readonly IValueConverter CheckStateBadgeBrush =
         new FuncValueConverter<string?, IBrush>(state => CheckStateCategory(state) switch
         {

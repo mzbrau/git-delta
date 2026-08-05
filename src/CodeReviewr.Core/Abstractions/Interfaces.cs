@@ -109,8 +109,26 @@ public interface IGitBranchService
 public interface IGitRemoteService
 {
     Task PushAsync(string repositoryPath, IProgress<string>? progress, CancellationToken ct = default);
+    Task ForcePushWithLeaseAsync(string repositoryPath, IProgress<string>? progress, CancellationToken ct = default);
     Task PullAsync(string repositoryPath, PullMode mode, IProgress<string>? progress, CancellationToken ct = default);
     Task<string?> GetRemoteUrlAsync(string repositoryPath, string remoteName = "origin", CancellationToken ct = default);
+}
+
+/// <summary>Interactive rebase start via prepared todo + <c>GIT_SEQUENCE_EDITOR</c>.</summary>
+public interface IGitRebaseService
+{
+    /// <summary>
+    /// Starts <c>git rebase -i</c> onto <paramref name="ontoRef"/> using the given todo.
+    /// Dropped entries are omitted; reword/squash messages are fed via a custom <c>GIT_EDITOR</c>.
+    /// </summary>
+    Task<RebaseRunResult> StartInteractiveAsync(
+        string repositoryPath,
+        string ontoRef,
+        IReadOnlyList<RebaseTodoEntry> todo,
+        CancellationToken ct = default);
+
+    Task<RebaseRunResult> ContinueAsync(string repositoryPath, CancellationToken ct = default);
+    Task AbortAsync(string repositoryPath, CancellationToken ct = default);
 }
 
 public enum PullMode
@@ -160,6 +178,18 @@ public interface IGitHistoryService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Commits reachable from <paramref name="headRef"/> but not from <paramref name="baseRef"/>
+    /// (<c>base..head</c>). Default order is newest-first; set <paramref name="oldestFirst"/> for
+    /// interactive-rebase todo order.
+    /// </summary>
+    Task<IReadOnlyList<CommitInfo>> ListCommitsRangeAsync(
+        string repositoryPath,
+        string baseRef,
+        string headRef = "HEAD",
+        bool oldestFirst = false,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Recent commits that touched <paramref name="path"/> (follows renames). Newest first.
     /// </summary>
     Task<IReadOnlyList<CommitInfo>> ListFileHistoryAsync(
@@ -175,6 +205,11 @@ public interface IGitHistoryService
         CancellationToken ct = default);
 
     Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetCommitFilesAsync(
+        string repositoryPath,
+        string oid,
+        CancellationToken ct = default);
+
+    Task<CommitStat> GetCommitStatAsync(
         string repositoryPath,
         string oid,
         CancellationToken ct = default);

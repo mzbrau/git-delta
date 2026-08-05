@@ -55,7 +55,7 @@ public sealed class PendingChangesReviewUxTests
         new(_status, _diff, Substitute.For<IGitStagingService>(), _discard,
             Substitute.For<IGitObjectReader>(), Substitute.For<IGitCommitService>(),
             _branches, Substitute.For<IGitRemoteService>(),
-            Substitute.For<IGitConflictService>(), _stash, _history,
+            Substitute.For<IGitConflictService>(), Substitute.For<IGitRebaseService>(), _stash, _history,
             _settings, _notifications, _confirm,
             new FakeStashDialog(new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true)),
             new IntraLineDiffer(), Substitute.For<IFsmonitorService>(), _watcher,

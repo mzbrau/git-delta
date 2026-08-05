@@ -55,6 +55,22 @@ public sealed record CommitInfo(
         Decorations.Count == 0 ? "" : string.Join(", ", Decorations);
 }
 
+/// <summary>Per-commit diffstat from <c>git show --numstat</c>.</summary>
+public sealed record CommitStat(
+    string Oid,
+    int FileCount,
+    int Insertions,
+    int Deletions);
+
+/// <summary>One line of a prepared interactive-rebase todo.</summary>
+public sealed record RebaseTodoEntry(
+    string Oid,
+    RebaseTodoAction Action,
+    string? Message = null);
+
+/// <summary>Result of <c>rebase -i</c> start or continue.</summary>
+public sealed record RebaseRunResult(RebaseRunOutcome Outcome, string? Detail = null);
+
 public sealed record DiscardedEntry(
     FilePath Path,
     ContentId ObjectId,

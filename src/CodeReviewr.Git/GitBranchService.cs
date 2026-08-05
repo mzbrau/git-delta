@@ -55,7 +55,7 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
         gates.For(repositoryPath).RunNetworkAsync(
             token => runner.RunAsync(
                 repositoryPath,
-                ["fetch", "--prune"],
+                ["fetch", "--all", "--prune"],
                 new GitProcessOptions { Timeout = TimeSpan.FromMinutes(2) },
                 token),
             ct);
