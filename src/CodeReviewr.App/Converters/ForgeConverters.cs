@@ -55,7 +55,7 @@ public static class ForgeConverters
     private static int AsInt(object? v) => v switch
     {
         int i => i,
-        long l => (int)l,
+        long l => (int)Math.Clamp(l, int.MinValue, int.MaxValue),
         _ => 0,
     };
 

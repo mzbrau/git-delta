@@ -534,7 +534,8 @@ public sealed class SqliteDurableUserStore : IDurableUserStore
         // SQLite cannot DROP COLUMN in all environments we support; rebuild ai_file_results
         // without priority_stars / guidance.
         cmd.CommandText = """
-            CREATE TABLE IF NOT EXISTS ai_file_results_v5 (
+            DROP TABLE IF EXISTS ai_file_results_v5;
+            CREATE TABLE ai_file_results_v5 (
                 id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
                 run_id TEXT NOT NULL,
                 session_key TEXT NOT NULL,
