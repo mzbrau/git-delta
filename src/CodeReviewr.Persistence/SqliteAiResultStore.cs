@@ -5,9 +5,9 @@ using Microsoft.Data.Sqlite;
 namespace CodeReviewr.Persistence;
 
 /// <summary>
-/// Durable AI result store backed by durable.db (schema v4+). Assumes the
+/// Durable AI result store backed by durable.db (schema v5+). Assumes the
 /// ai_* tables already exist — they are created by <see cref="SqliteDurableUserStore"/>'s
-/// schema migration V3 and renamed to <c>session_key</c> in V4.
+/// schema migration V3, renamed to <c>session_key</c> in V4, and slimmed in V5.
 /// </summary>
 public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
 {
@@ -211,16 +211,14 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 INSERT INTO ai_file_results (
-                    run_id, session_key, path, cache_key, classification, priority_stars, guidance, summary_json, updated_utc)
+                    run_id, session_key, path, cache_key, classification, summary_json, updated_utc)
                 VALUES (
-                    $run, $pr, $path, $cacheKey, $classification, $priority, $guidance, $summary, $updated)
+                    $run, $pr, $path, $cacheKey, $classification, $summary, $updated)
                 ON CONFLICT(cache_key) DO UPDATE SET
                     run_id = excluded.run_id,
                     session_key = excluded.session_key,
                     path = excluded.path,
                     classification = excluded.classification,
-                    priority_stars = excluded.priority_stars,
-                    guidance = excluded.guidance,
                     summary_json = excluded.summary_json,
                     updated_utc = excluded.updated_utc;
                 """;
@@ -229,8 +227,6 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             cmd.Parameters.AddWithValue("$path", result.Path);
             cmd.Parameters.AddWithValue("$cacheKey", result.CacheKey);
             cmd.Parameters.AddWithValue("$classification", (object?)result.Classification ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("$priority", result.PriorityStars);
-            cmd.Parameters.AddWithValue("$guidance", (object?)result.Guidance ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$summary", (object?)result.SummaryJson ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$updated", result.UpdatedUtc.UtcDateTime.ToString("O"));
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -249,7 +245,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT run_id, session_key, path, cache_key, classification, priority_stars, guidance, summary_json, updated_utc
+                SELECT run_id, session_key, path, cache_key, classification, summary_json, updated_utc
                 FROM ai_file_results
                 WHERE cache_key = $cacheKey
                 LIMIT 1;
@@ -272,7 +268,7 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
-                SELECT run_id, session_key, path, cache_key, classification, priority_stars, guidance, summary_json, updated_utc
+                SELECT run_id, session_key, path, cache_key, classification, summary_json, updated_utc
                 FROM ai_file_results
                 WHERE run_id = $run
                 ORDER BY path ASC;
@@ -536,10 +532,8 @@ public sealed class SqliteAiResultStore : IAiResultStore, IDisposable
             reader.GetString(2),
             reader.GetString(3),
             reader.IsDBNull(4) ? null : reader.GetString(4),
-            reader.GetInt32(5),
-            reader.IsDBNull(6) ? null : reader.GetString(6),
-            reader.IsDBNull(7) ? null : reader.GetString(7),
-            DateTimeOffset.Parse(reader.GetString(8)));
+            reader.IsDBNull(5) ? null : reader.GetString(5),
+            DateTimeOffset.Parse(reader.GetString(6)));
 
     private static AiAnnotationRecord ReadAnnotation(SqliteDataReader reader) =>
         new(

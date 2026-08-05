@@ -81,7 +81,19 @@ public sealed record AppSettings
     public string AiReviewRules { get; set; } = "";
 
     /// <summary>Per-review turn budget. Run pauses and asks when reached.</summary>
-    public int AiTurnBudget { get; set; } = 25;
+    public int AiTurnBudget { get; set; } = 100;
+
+    /// <summary>
+    /// Auto-generate a file briefing when the file's change percent is at least this value
+    /// (and <see cref="AiFileBriefingMinLinesChanged"/> is also met).
+    /// </summary>
+    public int AiFileBriefingMinChangePercent { get; set; } = 25;
+
+    /// <summary>
+    /// Auto-generate a file briefing when (lines added + removed) is at least this value
+    /// (and <see cref="AiFileBriefingMinChangePercent"/> is also met).
+    /// </summary>
+    public int AiFileBriefingMinLinesChanged { get; set; } = 10;
 
     /// <summary>
     /// Idle timeout per turn in seconds. The clock resets whenever the agent streams text

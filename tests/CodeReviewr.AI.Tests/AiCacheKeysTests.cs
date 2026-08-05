@@ -5,66 +5,66 @@ namespace CodeReviewr.AI.Tests;
 public sealed class AiCacheKeysTests
 {
     [Test]
-    public void ComputePrTriageKey_SameInputs_AreDeterministic()
+    public void ComputeChangeBriefingKey_SameInputs_AreDeterministic()
     {
-        var key1 = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
-        var key2 = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
+        var key1 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
+        var key2 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
 
         Assert.That(key1, Is.EqualTo(key2));
     }
 
     [Test]
-    public void ComputePrTriageKey_DifferentHeadSha_ProducesDifferentKey()
+    public void ComputeChangeBriefingKey_DifferentHeadSha_ProducesDifferentKey()
     {
-        var key1 = AiCacheKeys.ComputePrTriageKey("PR_1", "head1", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
-        var key2 = AiCacheKeys.ComputePrTriageKey("PR_1", "head2", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
+        var key1 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head1", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
+        var key2 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head2", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
 
         Assert.That(key1, Is.Not.EqualTo(key2));
     }
 
     [Test]
-    public void ComputePrTriageKey_DifferentPrNodeId_ProducesDifferentKey()
+    public void ComputeChangeBriefingKey_DifferentPrNodeId_ProducesDifferentKey()
     {
-        var key1 = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
-        var key2 = AiCacheKeys.ComputePrTriageKey("PR_2", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
+        var key1 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
+        var key2 = AiCacheKeys.ComputeChangeBriefingKey("PR_2", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
 
         Assert.That(key1, Is.Not.EqualTo(key2));
     }
 
     [Test]
-    public void ComputePrTriageKey_DifferentPromptVersion_ProducesDifferentKey()
+    public void ComputeChangeBriefingKey_DifferentPromptVersion_ProducesDifferentKey()
     {
-        var key1 = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
-        var key2 = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "2", "gpt-5", "rules-hash", "instr-hash");
+        var key1 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
+        var key2 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "2", "gpt-5", "rules-hash", "instr-hash");
 
         Assert.That(key1, Is.Not.EqualTo(key2));
     }
 
     [Test]
-    public void ComputePrTriageKey_DifferentModel_ProducesDifferentKey()
+    public void ComputeChangeBriefingKey_DifferentModel_ProducesDifferentKey()
     {
-        var key1 = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
-        var key2 = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", "gpt-4", "rules-hash", "instr-hash");
+        var key1 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash", "instr-hash");
+        var key2 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", "gpt-4", "rules-hash", "instr-hash");
 
         Assert.That(key1, Is.Not.EqualTo(key2));
     }
 
     [Test]
-    public void ComputePrTriageKey_DifferentRulesHash_ProducesDifferentKey()
+    public void ComputeChangeBriefingKey_DifferentRulesHash_ProducesDifferentKey()
     {
-        var key1 = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash-a", "instr-hash");
-        var key2 = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash-b", "instr-hash");
+        var key1 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash-a", "instr-hash");
+        var key2 = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", "gpt-5", "rules-hash-b", "instr-hash");
 
         Assert.That(key1, Is.Not.EqualTo(key2));
     }
 
     [Test]
-    public void ComputePrTriageKey_NullModel_DoesNotThrow_AndDiffersFromEmptyModel()
+    public void ComputeChangeBriefingKey_NullModel_DoesNotThrow_AndDiffersFromEmptyModel()
     {
-        Assert.DoesNotThrow(() => AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", null, "r", "i"));
+        Assert.DoesNotThrow(() => AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", null, "r", "i"));
 
-        var withNull = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", null, "r", "i");
-        var withEmpty = AiCacheKeys.ComputePrTriageKey("PR_1", "head", "base", "PullRequest", "1", "", "r", "i");
+        var withNull = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", null, "r", "i");
+        var withEmpty = AiCacheKeys.ComputeChangeBriefingKey("PR_1", "head", "base", "PullRequest", "1", "", "r", "i");
 
         // Both null and "" are normalised to "" internally, so they collide - this is expected,
         // documented behaviour rather than an accidental collision.
@@ -106,11 +106,11 @@ public sealed class AiCacheKeysTests
     }
 
     [Test]
-    public void PrTriageKey_And_FileKey_WithSameLogicalInputs_NeverCollide()
+    public void ChangeBriefingKey_And_FileKey_WithSameLogicalInputs_NeverCollide()
     {
-        // The "pr-triage" / "file" discriminator prefix must keep the two key spaces disjoint even
+        // The "change-briefing" / "file" discriminator prefix must keep the two key spaces disjoint even
         // when other components happen to line up.
-        var prKey = AiCacheKeys.ComputePrTriageKey("same", "same", "same", "PullRequest", "1", "m", "r", "i");
+        var prKey = AiCacheKeys.ComputeChangeBriefingKey("same", "same", "same", "PullRequest", "1", "m", "r", "i");
         var fileKey = AiCacheKeys.ComputeFileKey("same", "same", "same", "1", "m", "r", "i");
 
         Assert.That(prKey, Is.Not.EqualTo(fileKey));

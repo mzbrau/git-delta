@@ -59,7 +59,7 @@ public sealed class PendingChangesReviewUxTests
             _settings, _notifications, _confirm,
             new FakeStashDialog(new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true)),
             new IntraLineDiffer(), Substitute.For<IFsmonitorService>(), _watcher,
-            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications));
+            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications, Substitute.For<IGitHistoryService>()));
 
     private static StatusEntry Unstaged(string path, string? worktreeOid = null) =>
         new(FilePath.From(path), null, ChangeKind.Modified, IsStaged: false, IsUnstaged: true, IsConflicted: false,

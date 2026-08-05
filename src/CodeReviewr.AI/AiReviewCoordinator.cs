@@ -13,8 +13,8 @@ namespace CodeReviewr.AI;
 
 /// <summary>
 /// Orchestrates Phase 3 AI review: gating on privacy settings, materialising a read-only working
-/// tree, driving an agent session through triage/file-depth/chat turns via custom tools, and
-/// persisting everything through <see cref="IAiResultStore"/> so results survive restarts.
+/// tree, driving an agent session through change-briefing / file-depth / chat turns via custom tools,
+/// and persisting everything through <see cref="IAiResultStore"/> so results survive restarts.
 /// </summary>
 internal sealed class AiReviewCoordinator(
     ISettingsStore settingsStore,
@@ -52,13 +52,12 @@ internal sealed class AiReviewCoordinator(
             return null;
 
         var prResult = await resultStore.GetPrResultForRunAsync(run.Id, ct).ConfigureAwait(false);
-        var triage = prResult is null ? null : Deserialize<AiPrTriageResult>(prResult.PayloadJson);
-        return ToSnapshot(run, triage);
+        var briefing = prResult is null ? null : Deserialize<AiChangeBriefingResult>(prResult.PayloadJson);
+        return ToSnapshot(run, briefing);
     }
 
     public async Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default)
     {
-        // Keep an already-live session; attach is only for hydrating after process restart.
         if (_runsBySession.TryGetValue(request.SessionKey, out var existing) && existing.Session is not null)
             return;
 
@@ -67,24 +66,14 @@ internal sealed class AiReviewCoordinator(
             return;
 
         var prResult = await resultStore.GetPrResultForRunAsync(run.Id, ct).ConfigureAwait(false);
-        var triage = prResult is null ? null : Deserialize<AiPrTriageResult>(prResult.PayloadJson);
-        var context = RegisterRunContext(request, run.Id, run.CopilotSessionId, triage, run.State);
+        var briefing = prResult is null ? null : Deserialize<AiChangeBriefingResult>(prResult.PayloadJson);
+        var context = RegisterRunContext(request, run.Id, run.CopilotSessionId, briefing, run.State);
         context.CacheKey = run.CacheKey;
         context.TurnsUsed = run.TurnsUsed;
         context.StartedUtc = run.StartedUtc;
         context.FinishedUtc = run.FinishedUtc;
         context.ErrorMessage = run.ErrorMessage;
-        // Session intentionally left null — EnsureLiveSessionAsync resumes lazily.
     }
-
-    public ValueTask<IReadOnlyList<FilePath>> SuggestFileOrderAsync(
-        string sessionKey,
-        IReadOnlyList<FilePath> changedFiles,
-        CancellationToken ct = default) =>
-        ValueTask.FromResult(changedFiles);
-
-    public ValueTask<IReadOnlyList<AIChecklistItem>> GetChecklistAsync(string sessionKey, CancellationToken ct = default) =>
-        ValueTask.FromResult<IReadOnlyList<AIChecklistItem>>([]);
 
     public ValueTask<IReadOnlyList<IDiffAnnotation>> GetAnnotationsAsync(FileDiffKey key, CancellationToken ct = default)
     {
@@ -104,7 +93,7 @@ internal sealed class AiReviewCoordinator(
         return ValueTask.FromResult<IReadOnlyList<IDiffAnnotation>>(results);
     }
 
-    public async ValueTask<AiFileSummaryResult?> GetFileSummaryAsync(string sessionKey, string path, CancellationToken ct = default)
+    public async ValueTask<AiFileBriefingResult?> GetFileBriefingAsync(string sessionKey, string path, CancellationToken ct = default)
     {
         var run = await resultStore.GetLatestRunAsync(sessionKey, ct).ConfigureAwait(false);
         if (run is null)
@@ -112,7 +101,7 @@ internal sealed class AiReviewCoordinator(
 
         var files = await resultStore.ListFileResultsForRunAsync(run.Id, ct).ConfigureAwait(false);
         var match = files.FirstOrDefault(f => string.Equals(f.Path, path, StringComparison.Ordinal));
-        return match?.SummaryJson is null ? null : Deserialize<AiFileSummaryResult>(match.SummaryJson);
+        return match?.SummaryJson is null ? null : Deserialize<AiFileBriefingResult>(match.SummaryJson);
     }
 
     public async ValueTask<IReadOnlyList<AiAnnotationResult>> GetFileAnnotationsAsync(
@@ -134,10 +123,6 @@ internal sealed class AiReviewCoordinator(
     public Task ClearChatHistoryAsync(string sessionKey, CancellationToken ct = default) =>
         resultStore.ClearChatMessagesAsync(sessionKey, ct);
 
-    // ---------------------------------------------------------------------
-    // Connectivity.
-    // ---------------------------------------------------------------------
-
     public Task<AiConnectionProbeResult> TestConnectionAsync(CancellationToken ct = default) =>
         agentClient.ProbeAsync(ct);
 
@@ -154,7 +139,6 @@ internal sealed class AiReviewCoordinator(
         if (gateReason is not null)
             return FailedSnapshot(request, gateReason);
 
-        // Working-copy reviews key the cache on the current staged/all snapshot tree OID.
         if (IsWorkingCopyScope(request.Scope))
         {
             var treeOid = await workingCopyMaterialiser
@@ -166,7 +150,7 @@ internal sealed class AiReviewCoordinator(
         var rulesHash = AiCacheKeys.Hash(EffectiveRules());
         var instructionsHash = AiCacheKeys.Hash(request.AdHocInstructions);
         var model = settingsStore.Current.AiModelOverride;
-        var cacheKey = AiCacheKeys.ComputePrTriageKey(
+        var cacheKey = AiCacheKeys.ComputeChangeBriefingKey(
             request.SessionKey, request.HeadSha, request.MergeBaseSha, request.Scope.ToString(),
             AiPromptCatalog.PromptVersion, model, rulesHash, instructionsHash);
 
@@ -178,23 +162,10 @@ internal sealed class AiReviewCoordinator(
                 var cachedRun = await resultStore.GetRunAsync(cachedResult.RunId, ct).ConfigureAwait(false);
                 if (cachedRun is { State: AiRunState.Complete })
                 {
-                    var triage = Deserialize<AiPrTriageResult>(cachedResult.PayloadJson);
-                    var context = RegisterRunContext(request, cachedRun.Id, cachedRun.CopilotSessionId, triage, AiRunState.Complete);
+                    var briefing = Deserialize<AiChangeBriefingResult>(cachedResult.PayloadJson);
+                    var context = RegisterRunContext(request, cachedRun.Id, cachedRun.CopilotSessionId, briefing, AiRunState.Complete);
                     context.CacheKey = cacheKey;
-                    return ToSnapshot(cachedRun, triage);
-                }
-            }
-            else
-            {
-                // Triage no longer writes a PR payload; reuse a complete shell run with the same cache key.
-                var latestRun = await resultStore.GetLatestRunAsync(request.SessionKey, ct).ConfigureAwait(false);
-                if (latestRun is { State: AiRunState.Complete } &&
-                    string.Equals(latestRun.CacheKey, cacheKey, StringComparison.Ordinal))
-                {
-                    var context = RegisterRunContext(
-                        request, latestRun.Id, latestRun.CopilotSessionId, triage: null, AiRunState.Complete);
-                    context.CacheKey = cacheKey;
-                    return ToSnapshot(latestRun, triage: null);
+                    return ToSnapshot(cachedRun, briefing);
                 }
             }
         }
@@ -208,14 +179,13 @@ internal sealed class AiReviewCoordinator(
 
         var runId = Guid.NewGuid().ToString("N");
         var startedUtc = DateTimeOffset.UtcNow;
-        var runContext = RegisterRunContext(request, runId, resumeSessionId, triage: null, AiRunState.Running);
+        var runContext = RegisterRunContext(request, runId, resumeSessionId, briefing: null, AiRunState.Running);
         runContext.CacheKey = cacheKey;
         runContext.StartedUtc = startedUtc;
         runContext.UserCancelled = false;
         runContext.TurnIdleTimedOut = false;
         runContext.RunCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var configuredRunTimeout = settingsStore.Current.AiRunTimeoutSeconds;
-        // 0 = unlimited; when enabled, enforce a small floor so tiny values are not accidental.
         var runTimeoutSeconds = configuredRunTimeout <= 0 ? 0 : Math.Max(30, configuredRunTimeout);
         runContext.RunTimeoutSeconds = runTimeoutSeconds;
         if (runTimeoutSeconds > 0)
@@ -226,10 +196,73 @@ internal sealed class AiReviewCoordinator(
             AiRunState.Running, TurnsUsed: 0, request.AdHocInstructions, cacheKey, ErrorMessage: null,
             startedUtc, FinishedUtc: null), ct).ConfigureAwait(false);
 
-        // Triage was removed; open a durable run shell so file-depth / chat can attach later.
-        runContext.Triage = null;
-        NotifyActivityLog(runContext, "AI review session ready (triage disabled; file-depth available).");
-        return await FinishRunAsync(runContext, AiRunState.Complete, errorMessage: null, ct).ConfigureAwait(false);
+        AgentPermissionPolicy? policy = null;
+        try
+        {
+            var workCt = runContext.RunCts.Token;
+            policy = await OpenOrResumeSessionAsync(runContext, resumeSessionId, workCt).ConfigureAwait(false);
+
+            await resultStore.UpsertRunAsync(new AiRunRecord(
+                runId, request.SessionKey, request.HeadSha, request.MergeBaseSha, runContext.CopilotSessionId,
+                AiRunState.Running, runContext.TurnsUsed, request.AdHocInstructions, cacheKey, ErrorMessage: null,
+                startedUtc, FinishedUtc: null), workCt).ConfigureAwait(false);
+
+            await RunChangeBriefingTurnAsync(runContext, workCt).ConfigureAwait(false);
+
+            var settings = settingsStore.Current;
+            var eligible = request.ChangedFiles
+                .Where(f => FileBriefingEligibility.IsEligible(f, settings))
+                .ToList();
+            runContext.FilesTotal = eligible.Count;
+            runContext.FilesCompleted = 0;
+            NotifyProgress(runContext, AiRunStage.FileDepth,
+                eligible.Count == 0
+                    ? "Change briefing complete"
+                    : $"Waiting on: file briefings (0/{eligible.Count})");
+
+            foreach (var file in eligible)
+            {
+                workCt.ThrowIfCancellationRequested();
+                await RunFileBriefingTurnAsync(
+                        runContext,
+                        new AiFileDepthRequest(
+                            request.SessionKey,
+                            file.Path,
+                            file.BeforeBlobOid,
+                            file.AfterBlobOid,
+                            IncludeAnnotations: true,
+                            file.ChangePercent,
+                            file.LinesAdded,
+                            file.LinesRemoved),
+                        workCt)
+                    .ConfigureAwait(false);
+                runContext.FilesCompleted++;
+                NotifyProgress(runContext, AiRunStage.FileDepth,
+                    $"Waiting on: file briefings ({runContext.FilesCompleted}/{runContext.FilesTotal})");
+            }
+
+            LogPermissionDenials(runContext, policy);
+            return await FinishRunAsync(runContext, AiRunState.Complete, errorMessage: null, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (runContext.UserCancelled || ct.IsCancellationRequested || runContext.RunCts.IsCancellationRequested)
+        {
+            LogPermissionDenials(runContext, policy);
+            return await FinishRunAsync(runContext, AiRunState.Incomplete, ClassifyCancellation(runContext), CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("turn budget", StringComparison.OrdinalIgnoreCase))
+        {
+            LogPermissionDenials(runContext, policy);
+            return await FinishRunAsync(runContext, AiRunState.PausedBudget, ex.Message, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "AI review failed for session {SessionKey}.", request.SessionKey);
+            LogPermissionDenials(runContext, policy);
+            return await FinishRunAsync(runContext, AiRunState.Failed, ex.Message, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
     }
 
     public Task CancelAsync(string repositoryKey, CancellationToken ct = default)
@@ -263,36 +296,15 @@ internal sealed class AiReviewCoordinator(
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         workQueue.Enqueue(new AiWorkItem(context.RepositoryKey, AiWorkPriority.OpenFile, request.Path, async workCt =>
         {
-            context.CurrentFileRequest = new FileDepthContext(request.Path, request.BeforeBlobOid, request.AfterBlobOid);
             try
             {
-                NotifyProgress(context, AiRunStage.FileDepth, $"Waiting on: reviewing {request.Path}");
-                NotifyActivityLog(context, $"Waiting on: reviewing {request.Path}");
-
-                var placeholders = new Dictionary<string, string>
-                {
-                    ["rules"] = EffectiveRules(),
-                    ["adhoc_instructions"] = context.AdHocInstructions ?? "(none)",
-                    ["path"] = request.Path,
-                    ["before_oid"] = request.BeforeBlobOid ?? "(new file)",
-                    ["after_oid"] = request.AfterBlobOid ?? "(deleted)",
-                };
-                var prompt = request.IncludeAnnotations
-                    ? prompts.GetFileSummaryPrompt(placeholders)
-                    : prompts.GetFileSummaryPrompt(placeholders);
-
-                context.TurnsUsed++;
-                await SendTurnWithBudgetAsync(context, prompt, workCt).ConfigureAwait(false);
+                await RunFileBriefingTurnAsync(context, request, workCt).ConfigureAwait(false);
                 completion.TrySetResult();
             }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "File-depth review failed for {Path} on session {SessionKey}.", request.Path, request.SessionKey);
                 completion.TrySetException(ex);
-            }
-            finally
-            {
-                context.CurrentFileRequest = null;
             }
         }));
 
@@ -393,9 +405,70 @@ internal sealed class AiReviewCoordinator(
     // Run implementation.
     // ---------------------------------------------------------------------
 
-    /// <summary>
-    /// Materialises the review tree and creates or resumes a Copilot session on <paramref name="context"/>.
-    /// </summary>
+    private async Task RunChangeBriefingTurnAsync(RunContext context, CancellationToken ct)
+    {
+        NotifyProgress(context, AiRunStage.ChangeBriefing, "Waiting on: change briefing");
+        NotifyActivityLog(context, "Waiting on: change briefing");
+
+        var facts = factsAssembler.BuildFactsBlock(context.Request);
+        var prompt = prompts.GetChangeBriefingPrompt(new Dictionary<string, string>
+        {
+            ["rules"] = EffectiveRules(),
+            ["facts"] = facts,
+            ["adhoc_instructions"] = context.AdHocInstructions ?? "(none)",
+        });
+
+        context.AwaitingChangeBriefing = true;
+        try
+        {
+            context.TurnsUsed++;
+            await SendTurnWithBudgetAsync(context, prompt, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            context.AwaitingChangeBriefing = false;
+        }
+
+        if (context.ChangeBriefing is null)
+            throw new InvalidOperationException("The agent did not submit a change briefing.");
+    }
+
+    private async Task RunFileBriefingTurnAsync(RunContext context, AiFileDepthRequest request, CancellationToken ct)
+    {
+        context.CurrentFileRequest = new FileDepthContext(
+            request.Path,
+            request.BeforeBlobOid,
+            request.AfterBlobOid,
+            request.ChangePercent,
+            request.LinesAdded,
+            request.LinesRemoved);
+        try
+        {
+            NotifyProgress(context, AiRunStage.FileDepth, $"Waiting on: reviewing {request.Path}");
+            NotifyActivityLog(context, $"Waiting on: reviewing {request.Path}");
+
+            var placeholders = new Dictionary<string, string>
+            {
+                ["rules"] = EffectiveRules(),
+                ["adhoc_instructions"] = context.AdHocInstructions ?? "(none)",
+                ["path"] = request.Path,
+                ["before_oid"] = request.BeforeBlobOid ?? "(new file)",
+                ["after_oid"] = request.AfterBlobOid ?? "(deleted)",
+                ["change_percent"] = request.ChangePercent?.ToString() ?? "unknown",
+                ["lines_added"] = (request.LinesAdded ?? 0).ToString(),
+                ["lines_removed"] = (request.LinesRemoved ?? 0).ToString(),
+            };
+            var prompt = prompts.GetFileBriefingPrompt(placeholders);
+
+            context.TurnsUsed++;
+            await SendTurnWithBudgetAsync(context, prompt, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            context.CurrentFileRequest = null;
+        }
+    }
+
     private async Task<AgentPermissionPolicy> OpenOrResumeSessionAsync(
         RunContext context,
         string? resumeSessionId,
@@ -442,9 +515,6 @@ internal sealed class AiReviewCoordinator(
         return policy;
     }
 
-    /// <summary>
-    /// SDK treats null timeout as 60s; idle watchdog owns cancellation, so pass a large ceiling.
-    /// </summary>
     private static readonly TimeSpan SdkTurnWaitCeiling = TimeSpan.FromDays(1);
 
     private async Task SendTurnWithBudgetAsync(RunContext context, string prompt, CancellationToken ct)
@@ -581,7 +651,11 @@ internal sealed class AiReviewCoordinator(
     }
 
     private static AiRunStage GuessStage(RunContext context) =>
-        context.CurrentFileRequest is not null ? AiRunStage.FileDepth : AiRunStage.Triaging;
+        context.CurrentFileRequest is not null
+            ? AiRunStage.FileDepth
+            : context.AwaitingChangeBriefing
+                ? AiRunStage.ChangeBriefing
+                : AiRunStage.ChangeBriefing;
 
     private string ClassifyCancellation(RunContext context)
     {
@@ -636,7 +710,7 @@ internal sealed class AiReviewCoordinator(
 
         return new AiRunSnapshot(
             context.RunId!, context.SessionKey, context.HeadSha, context.MergeBaseSha, state, context.CopilotSessionId,
-            context.TurnsUsed, context.AdHocInstructions, context.Triage, errorMessage, context.StartedUtc, context.FinishedUtc);
+            context.TurnsUsed, context.AdHocInstructions, context.ChangeBriefing, errorMessage, context.StartedUtc, context.FinishedUtc);
     }
 
     private async Task<string> RunTurnForTextAsync(string sessionKey, string prompt, AiWorkPriority priority, CancellationToken ct)
@@ -691,8 +765,6 @@ internal sealed class AiReviewCoordinator(
 
             try
             {
-                // StartReview no longer opens a Copilot session; create one lazily for file-depth / chat,
-                // or resume when a prior CopilotSessionId was persisted.
                 await OpenOrResumeSessionAsync(
                         context,
                         resumeSessionId: context.CopilotSessionId,
@@ -728,7 +800,7 @@ internal sealed class AiReviewCoordinator(
         AiReviewRequest request,
         string runId,
         string? copilotSessionId,
-        AiPrTriageResult? triage,
+        AiChangeBriefingResult? briefing,
         AiRunState state)
     {
         var context = _runsBySession.GetOrAdd(request.SessionKey, static _ => new RunContext());
@@ -741,7 +813,7 @@ internal sealed class AiReviewCoordinator(
         context.AdHocInstructions = request.AdHocInstructions;
         context.RunId = runId;
         context.CopilotSessionId = copilotSessionId;
-        context.Triage = triage;
+        context.ChangeBriefing = briefing;
         context.State = state;
         context.Model = settingsStore.Current.AiModelOverride;
         context.RulesHash = AiCacheKeys.Hash(EffectiveRules());
@@ -756,7 +828,8 @@ internal sealed class AiReviewCoordinator(
 
         var elapsed = DateTimeOffset.UtcNow - context.StartedUtc;
         observers.NotifyProgress(new AiRunProgress(
-            stage, context.TurnsUsed, settingsStore.Current.AiTurnBudget, FilesCompleted: 0, FilesTotal: 0, elapsed, message));
+            stage, context.TurnsUsed, settingsStore.Current.AiTurnBudget,
+            context.FilesCompleted, context.FilesTotal, elapsed, message));
     }
 
     private void NotifyActivityLog(RunContext context, string line)
@@ -817,21 +890,12 @@ internal sealed class AiReviewCoordinator(
         var now = DateTimeOffset.UtcNow;
         return new AiRunSnapshot(
             Guid.NewGuid().ToString("N"), request.SessionKey, request.HeadSha, request.MergeBaseSha, AiRunState.Failed,
-            CopilotSessionId: null, TurnsUsed: 0, request.AdHocInstructions, Triage: null, reason, now, now);
+            CopilotSessionId: null, TurnsUsed: 0, request.AdHocInstructions, ChangeBriefing: null, reason, now, now);
     }
 
-    private static AiRunSnapshot ToSnapshot(AiRunRecord run, AiPrTriageResult? triage) => new(
+    private static AiRunSnapshot ToSnapshot(AiRunRecord run, AiChangeBriefingResult? briefing) => new(
         run.Id, run.SessionKey, run.HeadSha, run.MergeBaseSha, run.State, run.CopilotSessionId,
-        run.TurnsUsed, run.AdHocInstructions, triage, run.ErrorMessage, run.StartedUtc, run.FinishedUtc);
-
-    private static AIChecklistSeverity MapSeverity(AiRiskLevel risk) => risk switch
-    {
-        AiRiskLevel.Low => AIChecklistSeverity.Info,
-        AiRiskLevel.Medium => AIChecklistSeverity.Suggestion,
-        AiRiskLevel.High => AIChecklistSeverity.Warning,
-        AiRiskLevel.Critical => AIChecklistSeverity.Risk,
-        _ => AIChecklistSeverity.Info,
-    };
+        run.TurnsUsed, run.AdHocInstructions, briefing, run.ErrorMessage, run.StartedUtc, run.FinishedUtc);
 
     private static IDiffAnnotation ToDiffAnnotation(AiAnnotationResult result)
     {
@@ -857,38 +921,81 @@ internal sealed class AiReviewCoordinator(
     private IReadOnlyList<AgentCustomTool> BuildTools(RunContext context) =>
     [
         new AgentCustomTool(
-            "submit_file_summary",
-            "Submit the summary for the file currently being reviewed in depth.",
-            (argsJson, ct) => HandleSubmitFileSummary(context, argsJson, ct)),
+            "submit_change_briefing",
+            "Submit the change-level briefing for this review (executive summary, risk, focus, testing, dependencies).",
+            (argsJson, ct) => HandleSubmitChangeBriefing(context, argsJson, ct)),
+        new AgentCustomTool(
+            "submit_file_briefing",
+            "Submit the briefing for the file currently being reviewed in depth.",
+            (argsJson, ct) => HandleSubmitFileBriefing(context, argsJson, ct)),
         new AgentCustomTool(
             "add_annotation",
             "Add an inline review annotation at a specific location in the file currently being reviewed.",
             (argsJson, ct) => HandleAddAnnotation(context, argsJson, ct)),
     ];
 
-
-    private async Task<string> HandleSubmitFileSummary(RunContext context, string argsJson, CancellationToken ct)
+    private async Task<string> HandleSubmitChangeBriefing(RunContext context, string argsJson, CancellationToken ct)
     {
         try
         {
-            var summary = Deserialize<AiFileSummaryResult>(argsJson) ?? throw new InvalidOperationException("Empty file summary payload.");
+            var payload = Deserialize<AiChangeBriefingResult>(argsJson)
+                ?? throw new InvalidOperationException("Empty change briefing payload.");
+
+            var measured = factsAssembler.ComputeMeasuredFacts(context.Request);
+            var briefing = payload with
+            {
+                RiskDrivers = payload.RiskDrivers ?? [],
+                WhatChanged = payload.WhatChanged ?? [],
+                ReviewFocus = payload.ReviewFocus ?? [],
+                TestingStatus = payload.TestingStatus ?? new AiTestingStatus("", []),
+                Dependencies = payload.Dependencies ?? [],
+                Measured = measured,
+            };
+
+            context.ChangeBriefing = briefing;
+
+            await resultStore.UpsertPrResultAsync(new AiPrResultRecord(
+                context.RunId ?? "",
+                context.SessionKey,
+                context.CacheKey ?? "",
+                Serialize(briefing),
+                DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+
+            return """{"status":"ok"}""";
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to process submit_change_briefing payload for session {SessionKey}.", context.SessionKey);
+            return Serialize(new ToolErrorResult(ex.Message));
+        }
+    }
+
+    private async Task<string> HandleSubmitFileBriefing(RunContext context, string argsJson, CancellationToken ct)
+    {
+        try
+        {
+            var briefing = Deserialize<AiFileBriefingResult>(argsJson)
+                ?? throw new InvalidOperationException("Empty file briefing payload.");
             var fileContext = context.CurrentFileRequest
                 ?? throw new InvalidOperationException("No file-depth request is currently in progress.");
+
+            // Drop quality when change percent is not above 50.
+            if (fileContext.ChangePercent is null or <= 50)
+                briefing = briefing with { QualityScore = null, QualityRationale = null };
+
+            briefing = briefing with { Findings = briefing.Findings ?? [] };
 
             var cacheKey = AiCacheKeys.ComputeFileKey(
                 fileContext.Path, fileContext.BeforeOid, fileContext.AfterOid, AiPromptCatalog.PromptVersion,
                 context.Model, context.RulesHash ?? "", context.InstructionsHash ?? "");
 
-            var existing = await resultStore.GetFileResultByCacheKeyAsync(cacheKey, ct).ConfigureAwait(false);
             var record = new AiFileResultRecord(
-                existing?.RunId ?? context.RunId ?? "",
+                context.RunId ?? "",
                 context.SessionKey,
-                summary.Path,
+                briefing.Path,
                 cacheKey,
-                existing?.Classification,
-                existing?.PriorityStars ?? 0,
-                existing?.Guidance,
-                Serialize(summary),
+                briefing.Classification.ToString(),
+                Serialize(briefing),
                 DateTimeOffset.UtcNow);
 
             await resultStore.UpsertFileResultAsync(record, ct).ConfigureAwait(false);
@@ -896,7 +1003,7 @@ internal sealed class AiReviewCoordinator(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to process submit_file_summary payload for session {SessionKey}.", context.SessionKey);
+            logger.LogWarning(ex, "Failed to process submit_file_briefing payload for session {SessionKey}.", context.SessionKey);
             return Serialize(new ToolErrorResult(ex.Message));
         }
     }
@@ -906,17 +1013,24 @@ internal sealed class AiReviewCoordinator(
         try
         {
             var args = Deserialize<AddAnnotationArgs>(argsJson) ?? throw new InvalidOperationException("Empty annotation payload.");
+            var blobOid = ResolveAnnotationBlobOid(args.BlobOid, args.Side, context.CurrentFileRequest);
+            if (string.IsNullOrWhiteSpace(blobOid))
+            {
+                return Serialize(new ToolErrorResult(
+                    "blobOid is required. For side=New use the After blob from the File header; for side=Old use Before. Do not use 'New', 'Old', or '(new file)' as blobOid."));
+            }
+
             var id = Guid.NewGuid().ToString("N");
 
             await resultStore.UpsertAnnotationAsync(new AiAnnotationRecord(
-                id, context.RunId ?? "", context.SessionKey, args.Path, args.BlobOid, args.StartLine, args.EndLine,
+                id, context.RunId ?? "", context.SessionKey, args.Path, blobOid, args.StartLine, args.EndLine,
                 args.Side.ToString(), args.Severity.ToString(), args.Body, AiAnnotationReadState.Unread, DateTimeOffset.UtcNow), ct)
                 .ConfigureAwait(false);
 
             var result = new AiAnnotationResult(
-                id, args.Path, args.BlobOid, args.StartLine, args.EndLine, args.Side, args.Severity, args.Body, AiAnnotationReadState.Unread);
+                id, args.Path, blobOid, args.StartLine, args.EndLine, args.Side, args.Severity, args.Body, AiAnnotationReadState.Unread);
 
-            var list = _annotationsByBlob.GetOrAdd(args.BlobOid, static _ => []);
+            var list = _annotationsByBlob.GetOrAdd(blobOid, static _ => []);
             lock (list)
                 list.Add(result);
 
@@ -929,6 +1043,32 @@ internal sealed class AiReviewCoordinator(
         }
     }
 
+    /// <summary>
+    /// Maps side labels / placeholders the model sometimes sends as <c>blobOid</c> to the real
+    /// before/after OID from the current file turn. Returns null when no usable OID is available.
+    /// </summary>
+    internal static string? ResolveAnnotationBlobOid(string? blobOid, DiffSide side, FileDepthContext? file)
+    {
+        if (!IsMissingOrPlaceholderBlobOid(blobOid))
+            return blobOid;
+
+        if (file is null)
+            return null;
+
+        return side == DiffSide.Old ? file.BeforeOid : file.AfterOid;
+    }
+
+    private static bool IsMissingOrPlaceholderBlobOid(string? blobOid)
+    {
+        if (string.IsNullOrWhiteSpace(blobOid))
+            return true;
+
+        return blobOid.Equals("New", StringComparison.OrdinalIgnoreCase)
+               || blobOid.Equals("Old", StringComparison.OrdinalIgnoreCase)
+               || blobOid.Equals("(new file)", StringComparison.OrdinalIgnoreCase)
+               || blobOid.Equals("(deleted)", StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed record ToolErrorResult(string Message)
     {
         public string Status => "error";
@@ -936,14 +1076,20 @@ internal sealed class AiReviewCoordinator(
 
     private sealed record AddAnnotationArgs(
         string Path,
-        string BlobOid,
+        string? BlobOid,
         int StartLine,
         int EndLine,
         DiffSide Side,
         AiAnnotationSeverity Severity,
         string Body);
 
-    private sealed record FileDepthContext(string Path, string? BeforeOid, string? AfterOid);
+    internal sealed record FileDepthContext(
+        string Path,
+        string? BeforeOid,
+        string? AfterOid,
+        int? ChangePercent,
+        int? LinesAdded,
+        int? LinesRemoved);
 
     private sealed class RunContext
     {
@@ -965,10 +1111,13 @@ internal sealed class AiReviewCoordinator(
         public string? AdHocInstructions;
         public int TurnsUsed;
         public int RunTimeoutSeconds;
+        public int FilesCompleted;
+        public int FilesTotal;
         public bool UserCancelled;
         public bool TurnIdleTimedOut;
+        public bool AwaitingChangeBriefing;
         public AiRunState State = AiRunState.Idle;
-        public AiPrTriageResult? Triage;
+        public AiChangeBriefingResult? ChangeBriefing;
         public string? ErrorMessage;
         public DateTimeOffset StartedUtc;
         public DateTimeOffset? FinishedUtc;

@@ -8,13 +8,12 @@ namespace CodeReviewr.Persistence.Tests;
 public sealed class AiResultStoreTests
 {
     [Test]
-    public void EnsureSchema_ReachesVersion4()
+    public void EnsureSchema_ReachesVersion5()
     {
         var path = CreateDbPath();
         using var durable = new SqliteDurableUserStore(path);
         durable.EnsureSchema();
-        Assert.That(durable.SchemaVersion, Is.EqualTo(4));
-        Assert.That(SqliteDurableUserStore.CurrentSchemaVersion, Is.EqualTo(4));
+        Assert.That(durable.SchemaVersion, Is.EqualTo(5));
     }
 
     [Test]
@@ -122,25 +121,24 @@ public sealed class AiResultStoreTests
 
         await store.UpsertRunAsync(CreateRun("run-1", "PR_1"));
         var file1 = new AiFileResultRecord(
-            "run-1", "PR_1", "src/a.cs", "file-cache-1", "ReviewCarefully", 3, "Check null checks", null, DateTimeOffset.UtcNow);
+            "run-1", "PR_1", "src/a.cs", "file-cache-1", "BugFix", null, DateTimeOffset.UtcNow);
         var file2 = new AiFileResultRecord(
-            "run-1", "PR_1", "src/b.cs", "file-cache-2", "Normal", 1, null, """{"purpose":"x"}""", DateTimeOffset.UtcNow);
+            "run-1", "PR_1", "src/b.cs", "file-cache-2", "RefactorOnly", """{"purpose":"x"}""", DateTimeOffset.UtcNow);
         await store.UpsertFileResultAsync(file1);
         await store.UpsertFileResultAsync(file2);
 
         var byCacheKey = await store.GetFileResultByCacheKeyAsync("file-cache-1");
         Assert.That(byCacheKey, Is.Not.Null);
         Assert.That(byCacheKey!.Path, Is.EqualTo("src/a.cs"));
-        Assert.That(byCacheKey.PriorityStars, Is.EqualTo(3));
+        Assert.That(byCacheKey.Classification, Is.EqualTo("BugFix"));
 
         var forRun = await store.ListFileResultsForRunAsync("run-1");
         Assert.That(forRun, Has.Count.EqualTo(2));
 
-        var updated = file1 with { Classification = "Skip", PriorityStars = 5 };
+        var updated = file1 with { Classification = "Skip" };
         await store.UpsertFileResultAsync(updated);
         var reread = await store.GetFileResultByCacheKeyAsync("file-cache-1");
         Assert.That(reread!.Classification, Is.EqualTo("Skip"));
-        Assert.That(reread.PriorityStars, Is.EqualTo(5));
         Assert.That(await store.ListFileResultsForRunAsync("run-1"), Has.Count.EqualTo(2));
     }
 
@@ -221,7 +219,7 @@ public sealed class AiResultStoreTests
         await store.UpsertRunAsync(CreateRun("run-1", "PR_1"));
         await store.UpsertPrResultAsync(new AiPrResultRecord("run-1", "PR_1", "cache-key-1", "{}", DateTimeOffset.UtcNow));
         await store.UpsertFileResultAsync(new AiFileResultRecord(
-            "run-1", "PR_1", "src/a.cs", "file-cache-1", "Normal", 1, null, null, DateTimeOffset.UtcNow));
+            "run-1", "PR_1", "src/a.cs", "file-cache-1", "RefactorOnly", null, DateTimeOffset.UtcNow));
         await store.UpsertAnnotationAsync(new AiAnnotationRecord(
             "ann-1", "run-1", "PR_1", "src/a.cs", "blob-oid", 1, 2, "New", "Info", "note",
             AiAnnotationReadState.Unread, DateTimeOffset.UtcNow));

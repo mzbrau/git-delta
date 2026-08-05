@@ -8,7 +8,7 @@ public enum AiWorkPriority
 {
     ExplicitUser = 0,
     OpenFile = 1,
-    Triage = 2,
+    ChangeBriefing = 2,
     BackgroundFile = 3,
 }
 

@@ -10,15 +10,6 @@ namespace CodeReviewr.Core.Abstractions;
 /// </summary>
 public interface IAIReviewService
 {
-    ValueTask<IReadOnlyList<FilePath>> SuggestFileOrderAsync(
-        string sessionKey,
-        IReadOnlyList<FilePath> changedFiles,
-        CancellationToken ct = default);
-
-    ValueTask<IReadOnlyList<AIChecklistItem>> GetChecklistAsync(
-        string sessionKey,
-        CancellationToken ct = default);
-
     ValueTask<IReadOnlyList<IDiffAnnotation>> GetAnnotationsAsync(
         FileDiffKey key,
         CancellationToken ct = default);
@@ -46,7 +37,7 @@ public interface IAIReviewService
 
     Task RequestFileDepthAsync(AiFileDepthRequest request, CancellationToken ct = default);
 
-    ValueTask<AiFileSummaryResult?> GetFileSummaryAsync(
+    ValueTask<AiFileBriefingResult?> GetFileBriefingAsync(
         string sessionKey,
         string path,
         CancellationToken ct = default);
@@ -77,35 +68,10 @@ public interface IAIReviewService
     Task ClearAiDataAsync(CancellationToken ct = default);
 }
 
-public sealed record AIChecklistItem(
-    string Id,
-    string Title,
-    string? Detail,
-    AIChecklistSeverity Severity);
-
-public enum AIChecklistSeverity
-{
-    Info,
-    Suggestion,
-    Warning,
-    Risk,
-}
-
 /// <summary>No-op AI service used when AI is disabled or unavailable.</summary>
 public sealed class NullAIReviewService : IAIReviewService
 {
     public static NullAIReviewService Instance { get; } = new();
-
-    public ValueTask<IReadOnlyList<FilePath>> SuggestFileOrderAsync(
-        string sessionKey,
-        IReadOnlyList<FilePath> changedFiles,
-        CancellationToken ct = default) =>
-        ValueTask.FromResult(changedFiles);
-
-    public ValueTask<IReadOnlyList<AIChecklistItem>> GetChecklistAsync(
-        string sessionKey,
-        CancellationToken ct = default) =>
-        ValueTask.FromResult<IReadOnlyList<AIChecklistItem>>([]);
 
     public ValueTask<IReadOnlyList<IDiffAnnotation>> GetAnnotationsAsync(
         FileDiffKey key,
@@ -128,7 +94,7 @@ public sealed class NullAIReviewService : IAIReviewService
             CopilotSessionId: null,
             TurnsUsed: 0,
             AdHocInstructions: request.AdHocInstructions,
-            Triage: null,
+            ChangeBriefing: null,
             ErrorMessage: "AI assistance is not available.",
             StartedUtc: DateTimeOffset.UtcNow,
             FinishedUtc: DateTimeOffset.UtcNow));
@@ -150,11 +116,11 @@ public sealed class NullAIReviewService : IAIReviewService
     public Task RequestFileDepthAsync(AiFileDepthRequest request, CancellationToken ct = default) =>
         Task.CompletedTask;
 
-    public ValueTask<AiFileSummaryResult?> GetFileSummaryAsync(
+    public ValueTask<AiFileBriefingResult?> GetFileBriefingAsync(
         string sessionKey,
         string path,
         CancellationToken ct = default) =>
-        ValueTask.FromResult<AiFileSummaryResult?>(null);
+        ValueTask.FromResult<AiFileBriefingResult?>(null);
 
     public ValueTask<IReadOnlyList<AiAnnotationResult>> GetFileAnnotationsAsync(
         string sessionKey,

@@ -31,9 +31,9 @@ public sealed class AiWorkQueueTests
             done.TrySetResult();
             return Task.CompletedTask;
         }));
-        queue.Enqueue(new AiWorkItem("repo", AiWorkPriority.Triage, null, _ =>
+        queue.Enqueue(new AiWorkItem("repo", AiWorkPriority.ChangeBriefing, null, _ =>
         {
-            order.Add("triage");
+            order.Add("change-briefing");
             return Task.CompletedTask;
         }));
         queue.Enqueue(new AiWorkItem("repo", AiWorkPriority.ExplicitUser, null, _ =>
@@ -45,7 +45,7 @@ public sealed class AiWorkQueueTests
         gate.TrySetResult();
         await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.That(order, Is.EqualTo(new[] { "blocker", "explicit", "triage", "background" }));
+        Assert.That(order, Is.EqualTo(new[] { "blocker", "explicit", "change-briefing", "background" }));
     }
 
     [Test]
@@ -90,7 +90,7 @@ public sealed class AiWorkQueueTests
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var observedCancellation = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        queue.Enqueue(new AiWorkItem("repo", AiWorkPriority.Triage, null, async ct =>
+        queue.Enqueue(new AiWorkItem("repo", AiWorkPriority.ChangeBriefing, null, async ct =>
         {
             started.TrySetResult();
             try

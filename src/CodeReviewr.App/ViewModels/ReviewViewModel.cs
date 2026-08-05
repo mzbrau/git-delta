@@ -3,6 +3,7 @@ using System.Diagnostics;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CodeReviewr.AI;
 using CodeReviewr.App.Collections;
 using CodeReviewr.App.Controls;
 using CodeReviewr.App.Services;
@@ -34,6 +35,8 @@ public partial class ReviewViewModel : ObservableObject
     private readonly IGitObjectReader _objects;
     private readonly ISyntaxTokenService? _syntaxTokens;
     private readonly IAIReviewService _ai;
+    private readonly IGitHistoryService _history;
+    private readonly FileHistoryCache _fileHistoryCache = new();
     private readonly List<PendingReviewMutation> _pending = [];
     private CancellationTokenSource? _diffCts;
     private CancellationTokenSource? _openCts;
@@ -66,6 +69,7 @@ public partial class ReviewViewModel : ObservableObject
         NotificationService notifications,
         IIntraLineDiffer intraLine,
         IGitObjectReader objects,
+        IGitHistoryService history,
         ISyntaxTokenService? syntaxTokens = null,
         IAIReviewService? ai = null)
     {
@@ -81,6 +85,7 @@ public partial class ReviewViewModel : ObservableObject
         _notifications = notifications;
         _intraLine = intraLine;
         _objects = objects;
+        _history = history;
         _syntaxTokens = syntaxTokens;
         _ai = ai ?? NullAIReviewService.Instance;
         ViewMode = settings.Current.DefaultDiffMode;
@@ -177,10 +182,13 @@ public partial class ReviewViewModel : ObservableObject
     [ObservableProperty] private string _aiAdHocInstructions = "";
     [ObservableProperty] private bool _showAiProgressDialog;
     [ObservableProperty] private bool _showAiInstructionsDialog;
-    [ObservableProperty] private AiFileSummaryResult? _aiFileSummary;
-    [ObservableProperty] private bool _aiFileBandExpanded = true;
-    [ObservableProperty] private string _aiFileQuestion = "";
-    [ObservableProperty] private string? _aiFileAnswer;
+    [ObservableProperty] private AiChangeBriefingResult? _aiChangeBriefing;
+    [ObservableProperty] private AiFileBriefingResult? _aiFileBriefing;
+    [ObservableProperty] private bool _isChangeBriefingSelected;
+    [ObservableProperty] private bool _showAiSidePanel = true;
+    [ObservableProperty] private AiSidePanelTab _aiSidePanelTab = AiSidePanelTab.FileBriefing;
+    [ObservableProperty] private bool _isGeneratingFileBriefing;
+    [ObservableProperty] private FileHistoryCacheEntry? _fileHistory;
     [ObservableProperty] private string _aiChatInput = "";
     [ObservableProperty] private bool _showAiChat;
     [ObservableProperty] private bool _isAiChatBusy;
@@ -397,10 +405,14 @@ public partial class ReviewViewModel : ObservableObject
         IsFileCommentsSectionExpanded = false;
         ForceSideThreadPanel = false;
         if (value is not null)
+        {
             IsConversationSelected = false;
+            IsChangeBriefingSelected = false;
+        }
         SyncSelectedPrFileEntry();
         NotifyMarkdownPreviewStateChanged();
-        NotifyAiFileBandChanged();
+        OnPropertyChanged(nameof(CanGenerateFileBriefing));
+        GenerateFileBriefingCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(AiChatSelectedFileLabel));
         OnPropertyChanged(nameof(AiChatPlaceholder));
         _ = LoadDiffForSelectionAsync(value);
@@ -451,11 +463,28 @@ public partial class ReviewViewModel : ObservableObject
         if (value)
         {
             ClearDraftCommentAnchor();
+            IsChangeBriefingSelected = false;
             SelectedFile = null;
             DiffRows.Clear();
             _currentDiff = null;
             MarkdownPreviewText = null;
             DiffEmptyMessage = "Pull request context";
+        }
+
+        NotifyMarkdownPreviewStateChanged();
+    }
+
+    partial void OnIsChangeBriefingSelectedChanged(bool value)
+    {
+        if (value)
+        {
+            ClearDraftCommentAnchor();
+            IsConversationSelected = false;
+            SelectedFile = null;
+            DiffRows.Clear();
+            _currentDiff = null;
+            MarkdownPreviewText = null;
+            DiffEmptyMessage = "Change briefing";
         }
 
         NotifyMarkdownPreviewStateChanged();
@@ -532,6 +561,8 @@ public partial class ReviewViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSelectedThreadPendingSync));
         OnPropertyChanged(nameof(CanMutateSelectedThreadComments));
         OnPropertyChanged(nameof(CanReplyToSelectedThread));
+        if (ShowSideThreadPanel)
+            OpenCommentsInAiSidePanel();
         ExpandedThreadChanged?.Invoke();
     }
 
@@ -548,7 +579,15 @@ public partial class ReviewViewModel : ObservableObject
         OnPropertyChanged(nameof(HasExpandedInlineThread));
         OnPropertyChanged(nameof(HasExpandedAiAnnotation));
         OnPropertyChanged(nameof(ShowSideThreadPanel));
+        if (ShowSideThreadPanel)
+            OpenCommentsInAiSidePanel();
         ExpandedThreadChanged?.Invoke();
+    }
+
+    private void OpenCommentsInAiSidePanel()
+    {
+        ShowAiSidePanel = true;
+        AiSidePanelTab = AiSidePanelTab.Comments;
     }
 
     partial void OnIsEditingCommentChanged(bool value)
@@ -575,9 +614,19 @@ public partial class ReviewViewModel : ObservableObject
     public bool IsAiRunActive => AiRunState == AiRunState.Running;
     public bool CanResumeAiReview => AiRunState is AiRunState.Incomplete or AiRunState.PausedBudget;
     public bool CanRerunAiReview => AiRunState is AiRunState.Complete or AiRunState.Failed;
-    public bool HasAiFileSummary => AiFileSummary is not null;
-    public bool ShowAiFileBand => AiFileSummary is not null;
-    public bool HasAiFileAnswer => !string.IsNullOrWhiteSpace(AiFileAnswer);
+    public bool HasAiChangeBriefing => AiChangeBriefing is not null;
+    public bool ShowChangeBriefingRow => HasAiRun;
+    public bool HasAiFileBriefing => AiFileBriefing is not null;
+    public bool CanGenerateFileBriefing =>
+        HasAiRun && SelectedFile is not null && !HasAiFileBriefing && !IsGeneratingFileBriefing;
+    public bool IsAiFileBriefingTabSelected => AiSidePanelTab == AiSidePanelTab.FileBriefing;
+    public bool IsAiChatTabSelected => AiSidePanelTab == AiSidePanelTab.Chat;
+    public bool IsAiCommentsTabSelected => AiSidePanelTab == AiSidePanelTab.Comments;
+    public bool ShowConversationRow =>
+        !string.IsNullOrWhiteSpace(PullRequestBody) ||
+        Timeline.Count > 0 ||
+        HasReviewers ||
+        !string.IsNullOrWhiteSpace(CheckRollupState);
     public bool CanSendAiChat =>
         !string.IsNullOrWhiteSpace(AiChatInput) && !IsAiRunActive && !IsAiChatBusy;
 
@@ -590,11 +639,6 @@ public partial class ReviewViewModel : ObservableObject
         SelectedFile is null
             ? "Ask about this pull request…"
             : $"Ask about {SelectedFile.Name}…";
-
-    public Material.Icons.MaterialIconKind AiFileBandChevron =>
-        AiFileBandExpanded
-            ? Material.Icons.MaterialIconKind.ChevronDown
-            : Material.Icons.MaterialIconKind.ChevronRight;
 
     public bool IsRepositoryExcludedFromAi =>
         _session is not null &&
@@ -734,6 +778,9 @@ public partial class ReviewViewModel : ObservableObject
         OnPropertyChanged(nameof(CanSendAiChat));
         OnPropertyChanged(nameof(AiStatusDialogTitle));
         OnPropertyChanged(nameof(HasAiDiagnostics));
+        OnPropertyChanged(nameof(ShowChangeBriefingRow));
+        OnPropertyChanged(nameof(CanGenerateFileBriefing));
+        GenerateFileBriefingCommand.NotifyCanExecuteChanged();
         NotifyAiButtonStateChanged();
     }
 
@@ -758,16 +805,30 @@ public partial class ReviewViewModel : ObservableObject
 
     partial void OnAiCopilotSessionIdChanged(string? value) => OnPropertyChanged(nameof(AiDiagnosticsText));
 
-    partial void OnAiFileSummaryChanged(AiFileSummaryResult? value)
+    partial void OnAiChangeBriefingChanged(AiChangeBriefingResult? value) =>
+        OnPropertyChanged(nameof(HasAiChangeBriefing));
+
+    partial void OnAiFileBriefingChanged(AiFileBriefingResult? value)
     {
-        OnPropertyChanged(nameof(HasAiFileSummary));
-        NotifyAiFileBandChanged();
+        OnPropertyChanged(nameof(HasAiFileBriefing));
+        OnPropertyChanged(nameof(CanGenerateFileBriefing));
+        GenerateFileBriefingCommand.NotifyCanExecuteChanged();
     }
 
-    partial void OnAiFileBandExpandedChanged(bool value) =>
-        OnPropertyChanged(nameof(AiFileBandChevron));
+    partial void OnIsGeneratingFileBriefingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanGenerateFileBriefing));
+        GenerateFileBriefingCommand.NotifyCanExecuteChanged();
+    }
 
-    partial void OnAiFileAnswerChanged(string? value) => OnPropertyChanged(nameof(HasAiFileAnswer));
+    partial void OnAiSidePanelTabChanged(AiSidePanelTab value)
+    {
+        OnPropertyChanged(nameof(IsAiFileBriefingTabSelected));
+        OnPropertyChanged(nameof(IsAiChatTabSelected));
+        OnPropertyChanged(nameof(IsAiCommentsTabSelected));
+    }
+
+    partial void OnPullRequestBodyChanged(string? value) => OnPropertyChanged(nameof(ShowConversationRow));
 
     partial void OnAiChatInputChanged(string value) => OnPropertyChanged(nameof(CanSendAiChat));
 
@@ -777,7 +838,19 @@ public partial class ReviewViewModel : ObservableObject
     private void ToggleAiReviewSection() => AiReviewSectionExpanded = !AiReviewSectionExpanded;
 
     [RelayCommand]
-    private void ToggleAiFileBand() => AiFileBandExpanded = !AiFileBandExpanded;
+    private void ToggleAiSidePanel() => ShowAiSidePanel = !ShowAiSidePanel;
+
+    [RelayCommand]
+    private void SelectAiFileBriefingTab() => AiSidePanelTab = AiSidePanelTab.FileBriefing;
+
+    [RelayCommand]
+    private void SelectAiChatTab() => AiSidePanelTab = AiSidePanelTab.Chat;
+
+    [RelayCommand]
+    private void SelectAiCommentsTab() => AiSidePanelTab = AiSidePanelTab.Comments;
+
+    [RelayCommand]
+    private void SelectChangeBriefing() => IsChangeBriefingSelected = true;
 
     [RelayCommand(CanExecute = nameof(AiButtonEnabled))]
     private async Task RequestAiReviewAsync()
@@ -931,7 +1004,9 @@ public partial class ReviewViewModel : ObservableObject
                 BeforeBlobOid: null,
                 AfterBlobOid: null,
                 LinesAdded: f.Additions,
-                LinesRemoved: f.Deletions))
+                LinesRemoved: f.Deletions,
+                ChangePercent: PrFiles.FirstOrDefault(p =>
+                    string.Equals(p.Path.Value, f.Path, StringComparison.Ordinal))?.ChangePercent))
             .ToList();
 
         return new AiReviewRequest(
@@ -957,9 +1032,16 @@ public partial class ReviewViewModel : ObservableObject
         AiCopilotSessionId = snapshot.CopilotSessionId;
         AiLastError = snapshot.ErrorMessage;
         AiReviewFinishedUtc = snapshot.FinishedUtc ?? snapshot.StartedUtc;
+        AiChangeBriefing = snapshot.ChangeBriefing;
 
         if (snapshot.State == AiRunState.Complete)
+        {
             ShowAiProgressDialog = false;
+            ShowAiSidePanel = true;
+            AiFileBriefing = null;
+            IsChangeBriefingSelected = true;
+            _ = RefreshFileClassificationsAsync(snapshot.SessionKey);
+        }
         else if (snapshot.State is AiRunState.Failed or AiRunState.Incomplete)
             ShowAiProgressDialog = true;
 
@@ -971,13 +1053,40 @@ public partial class ReviewViewModel : ObservableObject
                 detail: AiDiagnosticsText);
         }
 
-        NotifyAiFileBandChanged();
+        OnPropertyChanged(nameof(ShowChangeBriefingRow));
+        OnPropertyChanged(nameof(HasAiChangeBriefing));
     }
 
-    private void NotifyAiFileBandChanged()
+    /// <summary>Best-effort: applies each file's AI classification to <see cref="PrFiles"/> after a completed run.</summary>
+    private async Task RefreshFileClassificationsAsync(string sessionKey)
     {
-        OnPropertyChanged(nameof(ShowAiFileBand));
-        OnPropertyChanged(nameof(HasAiFileSummary));
+        var session = _session;
+        if (session is null || !string.Equals(session.Detail.Summary.NodeId, sessionKey, StringComparison.Ordinal))
+            return;
+
+        List<FileItemViewModel> files = [];
+        await InvokeOnUiAsync(() => files = [.. PrFiles]).ConfigureAwait(false);
+
+        foreach (var file in files)
+        {
+            if (!ReferenceEquals(_session, session))
+                return;
+
+            AiFileBriefingResult? briefing;
+            try
+            {
+                briefing = await _ai.GetFileBriefingAsync(sessionKey, file.Path.Value).ConfigureAwait(false);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (!ReferenceEquals(_session, session))
+                return;
+
+            await InvokeOnUiAsync(() => file.AiChangeClassification = briefing?.Classification).ConfigureAwait(false);
+        }
     }
 
     private async Task LoadCachedAiRunAsync(ReviewSession session, CancellationToken ct)
@@ -1020,10 +1129,11 @@ public partial class ReviewViewModel : ObservableObject
         _aiFileCts = null;
         AiRunState = AiRunState.Idle;
         AiProgress = null;
-        AiFileSummary = null;
-        AiFileBandExpanded = true;
-        AiFileQuestion = "";
-        AiFileAnswer = null;
+        AiChangeBriefing = null;
+        AiFileBriefing = null;
+        FileHistory = null;
+        IsChangeBriefingSelected = false;
+        IsGeneratingFileBriefing = false;
         AiAdHocInstructions = "";
         AiLastError = null;
         AiActivityLog = "";
@@ -1032,29 +1142,13 @@ public partial class ReviewViewModel : ObservableObject
         ShowAiProgressDialog = false;
         ShowAiInstructionsDialog = false;
         ShowAiChat = false;
+        ShowAiSidePanel = true;
+        AiSidePanelTab = AiSidePanelTab.FileBriefing;
         AiChatInput = "";
         AiChatMessages.Clear();
+        if (_session is not null)
+            _fileHistoryCache.ClearSession(_session.Detail.Summary.NodeId);
         OnPropertyChanged(nameof(CanClearAiChat));
-    }
-
-    [RelayCommand]
-    private async Task AskFileQuestionAsync()
-    {
-        if (_session is null || SelectedFile is null || string.IsNullOrWhiteSpace(AiFileQuestion))
-            return;
-
-        var question = AiFileQuestion.Trim();
-        try
-        {
-            var answer = await _ai.AskAsync(new AiQuestionRequest(
-                    _session.Detail.Summary.NodeId, SelectedFile.Path.Value, question))
-                .ConfigureAwait(false);
-            await InvokeOnUiAsync(() => AiFileAnswer = answer).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            await InvokeOnUiAsync(() => AiFileAnswer = $"Error: {ex.Message}").ConfigureAwait(false);
-        }
     }
 
     [RelayCommand]
@@ -1152,8 +1246,10 @@ public partial class ReviewViewModel : ObservableObject
     [RelayCommand]
     private async Task ToggleAiChatAsync()
     {
-        ShowAiChat = !ShowAiChat;
-        if (!ShowAiChat || _session is null || AiChatMessages.Count > 0)
+        ShowAiSidePanel = true;
+        ShowAiChat = true;
+        AiSidePanelTab = AiSidePanelTab.Chat;
+        if (_session is null || AiChatMessages.Count > 0)
             return;
 
         try
@@ -1240,13 +1336,27 @@ public partial class ReviewViewModel : ObservableObject
         var prNodeId = _session.Detail.Summary.NodeId;
         try
         {
-            var summary = await _ai.GetFileSummaryAsync(prNodeId, file.Path.Value, ct).ConfigureAwait(false);
-            if (summary is null)
+            var briefing = await _ai.GetFileBriefingAsync(prNodeId, file.Path.Value, ct).ConfigureAwait(false);
+
+            // Under-threshold files never get an eager briefing — the user opts in via the
+            // "Generate" button (GenerateFileBriefingAsync). Only auto-request depth here for
+            // files that were eligible but somehow missed the eager run during the active review.
+            if (briefing is null && HasAiRun && FileBriefingEligibility.IsEligible(
+                    file.ChangePercent, file.LinesAdded ?? 0, file.LinesRemoved ?? 0,
+                    _settings.Current.AiFileBriefingMinChangePercent,
+                    _settings.Current.AiFileBriefingMinLinesChanged))
             {
                 var beforeOid = diff.OldContent.IsEmpty ? null : diff.OldContent.Value;
                 var afterOid = diff.NewContent.IsEmpty ? null : diff.NewContent.Value;
                 _ = _ai.RequestFileDepthAsync(
-                    new AiFileDepthRequest(prNodeId, file.Path.Value, beforeOid, afterOid),
+                    new AiFileDepthRequest(
+                        prNodeId,
+                        file.Path.Value,
+                        beforeOid,
+                        afterOid,
+                        ChangePercent: file.ChangePercent,
+                        LinesAdded: file.LinesAdded,
+                        LinesRemoved: file.LinesRemoved),
                     CancellationToken.None);
             }
 
@@ -1261,7 +1371,10 @@ public partial class ReviewViewModel : ObservableObject
                 if (!ReferenceEquals(SelectedFile, file) || !ReferenceEquals(_currentDiff, diff))
                     return;
 
-                AiFileSummary = summary;
+                AiFileBriefing = briefing;
+                FileHistory = _fileHistoryCache.GetOrCreate(prNodeId, file.Path.Value);
+                if (briefing is not null)
+                    file.AiChangeClassification = briefing.Classification;
 
                 foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
                     DiffAnnotations.Remove(stale);
@@ -1281,6 +1394,85 @@ public partial class ReviewViewModel : ObservableObject
         catch
         {
             // AI file overlay is best-effort and must never block the diff view.
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanGenerateFileBriefing))]
+    private async Task GenerateFileBriefingAsync()
+    {
+        if (_session is null || SelectedFile is null || _currentDiff is null || !CanGenerateFileBriefing)
+            return;
+
+        var prNodeId = _session.Detail.Summary.NodeId;
+        var file = SelectedFile;
+        var diff = _currentDiff;
+        var beforeOid = diff.OldContent.IsEmpty ? null : diff.OldContent.Value;
+        var afterOid = diff.NewContent.IsEmpty ? null : diff.NewContent.Value;
+
+        IsGeneratingFileBriefing = true;
+        try
+        {
+            await _ai.RequestFileDepthAsync(
+                    new AiFileDepthRequest(
+                        prNodeId,
+                        file.Path.Value,
+                        beforeOid,
+                        afterOid,
+                        ChangePercent: file.ChangePercent,
+                        LinesAdded: file.LinesAdded,
+                        LinesRemoved: file.LinesRemoved))
+                .ConfigureAwait(false);
+
+            if (!ReferenceEquals(SelectedFile, file))
+                return;
+
+            var briefing = await _ai.GetFileBriefingAsync(prNodeId, file.Path.Value).ConfigureAwait(false);
+            await InvokeOnUiAsync(() =>
+            {
+                if (!ReferenceEquals(SelectedFile, file))
+                    return;
+
+                AiFileBriefing = briefing;
+                if (briefing is not null)
+                    file.AiChangeClassification = briefing.Classification;
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to generate file briefing: {ex.Message}", exception: ex);
+        }
+        finally
+        {
+            await InvokeOnUiAsync(() => IsGeneratingFileBriefing = false).ConfigureAwait(false);
+        }
+    }
+
+    [RelayCommand]
+    private async Task LoadFileHistoryAsync()
+    {
+        if (_session is null || SelectedFile is null)
+            return;
+
+        var prNodeId = _session.Detail.Summary.NodeId;
+        var file = SelectedFile;
+        var entry = _fileHistoryCache.GetOrCreate(prNodeId, file.Path.Value);
+        if (entry.State is not (FileHistoryLoadState.NotLoaded or FileHistoryLoadState.Failed))
+            return;
+
+        var repositoryPath = _session.RepositoryPath;
+        entry.State = FileHistoryLoadState.Loading;
+        try
+        {
+            var recentTask = _history.ListFileHistoryAsync(repositoryPath, file.Path.Value, 5);
+            var createdTask = _history.GetFileCreatedCommitAsync(repositoryPath, file.Path.Value);
+            await Task.WhenAll(recentTask, createdTask).ConfigureAwait(false);
+
+            var timeline = FileHistoryCacheEntry.BuildTimeline(createdTask.Result, recentTask.Result);
+            await InvokeOnUiAsync(() => entry.ApplyResult(timeline)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await InvokeOnUiAsync(() => entry.ApplyFailure(ex.Message)).ConfigureAwait(false);
         }
     }
 
@@ -1561,6 +1753,7 @@ public partial class ReviewViewModel : ObservableObject
         Timeline = detail.Timeline ?? [];
         OnPropertyChanged(nameof(StatusChecks));
         OnPropertyChanged(nameof(Timeline));
+        OnPropertyChanged(nameof(ShowConversationRow));
 
         MergeStateSummary = FormatMergeState(detail.Mergeable, detail.MergeStateStatus);
         UpdateHeadMovedState(session, detail.Summary.HeadOid);
@@ -1585,7 +1778,10 @@ public partial class ReviewViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(HasReviewers));
+        OnPropertyChanged(nameof(ShowConversationRow));
     }
+
+    partial void OnCheckRollupStateChanged(string? value) => OnPropertyChanged(nameof(ShowConversationRow));
 
     private static string? FormatMergeState(bool? mergeable, string? mergeStateStatus)
     {
@@ -1703,6 +1899,7 @@ public partial class ReviewViewModel : ObservableObject
             return;
 
         ForceSideThreadPanel = true;
+        OpenCommentsInAiSidePanel();
     }
 
     [RelayCommand]
@@ -2791,6 +2988,8 @@ public partial class ReviewViewModel : ObservableObject
         WorkspaceMode = WorkspaceMode.FileStatus;
         SelectedPullRequest = null;
         SelectedFile = null;
+        if (_session is not null)
+            _fileHistoryCache.ClearSession(_session.Detail.Summary.NodeId);
         _session = null;
         ResetAiState();
         NotifyAiButtonStateChanged();
@@ -2816,6 +3015,7 @@ public partial class ReviewViewModel : ObservableObject
         HeadHasMoved = false;
         HeadMovedBanner = null;
         IsConversationSelected = false;
+        IsChangeBriefingSelected = false;
         FileFilter = "";
         FilterViewed = ViewedFilter.All;
         FilterStale = false;
@@ -2823,6 +3023,7 @@ public partial class ReviewViewModel : ObservableObject
         FilterUnresolved = false;
         OnPropertyChanged(nameof(StatusChecks));
         OnPropertyChanged(nameof(Timeline));
+        OnPropertyChanged(nameof(ShowConversationRow));
         FileThreadSummary = string.Empty;
         ConversationThreadSummary = string.Empty;
         PendingCommentCount = 0;
@@ -2926,9 +3127,8 @@ public partial class ReviewViewModel : ObservableObject
 
         await InvokeOnUiAsync(() =>
         {
-            AiFileSummary = null;
-            AiFileQuestion = "";
-            AiFileAnswer = null;
+            AiFileBriefing = null;
+            FileHistory = null;
         });
 
         if (file is null || _session is null)

@@ -11,17 +11,16 @@ namespace CodeReviewr.AI;
 public sealed class AiPromptCatalog
 {
     /// <summary>Bumped whenever prompt wording changes in a way that should invalidate cached results.</summary>
-    public const string PromptVersion = "4";
+    public const string PromptVersion = "6";
 
     private readonly Assembly _assembly = typeof(AiPromptCatalog).Assembly;
     private readonly ConcurrentDictionary<string, string> _resourceCache = new();
 
+    public string GetChangeBriefingPrompt(IReadOnlyDictionary<string, string> placeholders) =>
+        Render("change_briefing.md", placeholders);
 
-    public string GetFileSummaryPrompt(IReadOnlyDictionary<string, string> placeholders) =>
-        Render("file_summary.md", placeholders);
-
-    public string GetAnnotationPrompt(IReadOnlyDictionary<string, string> placeholders) =>
-        Render("annotation.md", placeholders);
+    public string GetFileBriefingPrompt(IReadOnlyDictionary<string, string> placeholders) =>
+        Render("file_briefing.md", placeholders);
 
     public string GetExplanationPrompt(IReadOnlyDictionary<string, string> placeholders) =>
         Render("explanation.md", placeholders);

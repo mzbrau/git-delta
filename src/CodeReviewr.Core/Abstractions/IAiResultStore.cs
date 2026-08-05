@@ -2,7 +2,7 @@ using CodeReviewr.Core.AI;
 
 namespace CodeReviewr.Core.Abstractions;
 
-/// <summary>Durable AI result store (lives in durable.db schema v4).</summary>
+/// <summary>Durable AI result store (lives in durable.db schema v5).</summary>
 public interface IAiResultStore
 {
     Task UpsertRunAsync(AiRunRecord run, CancellationToken ct = default);
@@ -59,8 +59,6 @@ public sealed record AiFileResultRecord(
     string Path,
     string CacheKey,
     string? Classification,
-    int PriorityStars,
-    string? Guidance,
     string? SummaryJson,
     DateTimeOffset UpdatedUtc);
 

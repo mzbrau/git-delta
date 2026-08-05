@@ -117,6 +117,8 @@ public partial class MainWindowViewModel : ObservableObject
         _aiReasoningEffort = _settings.Current.AiReasoningEffort ?? "";
         _aiReviewRules = _settings.Current.AiReviewRules;
         _aiTurnBudget = _settings.Current.AiTurnBudget;
+        _aiFileBriefingMinChangePercent = _settings.Current.AiFileBriefingMinChangePercent;
+        _aiFileBriefingMinLinesChanged = _settings.Current.AiFileBriefingMinLinesChanged;
         _aiTurnTimeoutSeconds = _settings.Current.AiTurnTimeoutSeconds;
         _aiRunTimeoutSeconds = _settings.Current.AiRunTimeoutSeconds;
         _aiPathDenylistText = string.Join('\n', _settings.Current.AiPathDenylist);
@@ -170,7 +172,9 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _aiModelOverride = "";
     [ObservableProperty] private string _aiReasoningEffort = "";
     [ObservableProperty] private string _aiReviewRules = "";
-    [ObservableProperty] private int _aiTurnBudget = 25;
+    [ObservableProperty] private int _aiTurnBudget = 100;
+    [ObservableProperty] private int _aiFileBriefingMinChangePercent = 25;
+    [ObservableProperty] private int _aiFileBriefingMinLinesChanged = 10;
     [ObservableProperty] private int _aiTurnTimeoutSeconds = 180;
     [ObservableProperty] private int _aiRunTimeoutSeconds = 1800;
     [ObservableProperty] private string _aiPathDenylistText = "";
@@ -742,6 +746,18 @@ public partial class MainWindowViewModel : ObservableObject
     partial void OnAiTurnBudgetChanged(int value)
     {
         _settings.Update(s => s.AiTurnBudget = Math.Max(1, value));
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiFileBriefingMinChangePercentChanged(int value)
+    {
+        _settings.Update(s => s.AiFileBriefingMinChangePercent = Math.Clamp(value, 0, 100));
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnAiFileBriefingMinLinesChangedChanged(int value)
+    {
+        _settings.Update(s => s.AiFileBriefingMinLinesChanged = Math.Max(0, value));
         _ = _settings.SaveAsync();
     }
 

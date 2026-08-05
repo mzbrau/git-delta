@@ -124,6 +124,8 @@ public sealed class JsonSettingsStore : ISettingsStore
         AiReasoningEffort = s.AiReasoningEffort,
         AiReviewRules = s.AiReviewRules,
         AiTurnBudget = s.AiTurnBudget,
+        AiFileBriefingMinChangePercent = s.AiFileBriefingMinChangePercent,
+        AiFileBriefingMinLinesChanged = s.AiFileBriefingMinLinesChanged,
         AiTurnTimeoutSeconds = s.AiTurnTimeoutSeconds,
         AiRunTimeoutSeconds = s.AiRunTimeoutSeconds,
         AiPathDenylist = [.. s.AiPathDenylist],
