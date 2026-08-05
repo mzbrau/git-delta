@@ -1234,9 +1234,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         IsPushing = true;
         try
         {
-            var sw = Stopwatch.StartNew();
             await _remotes.ForcePushWithLeaseAsync(_repoPath, null);
-            CodeReviewrMeters.PushMs.Record(sw.Elapsed.TotalMilliseconds);
             _notifications.Info("Force-with-lease push completed");
             await RefreshAsync();
         }

@@ -7,7 +7,7 @@ namespace CodeReviewr.Git.Tests;
 public sealed class GitRebaseServiceTests
 {
     [Test]
-    public void BuildTodoFile_Omits_Drop_And_Uses_Verbs()
+    public void BuildTodoFile_Uses_Verbs()
     {
         var todo = new[]
         {
@@ -20,6 +20,42 @@ public sealed class GitRebaseServiceTests
         var text = GitRebaseService.BuildTodoFile(todo);
         Assert.That(text, Is.EqualTo(
             "pick aaa\nreword bbb\nsquash ccc\nfixup ddd\n"));
+    }
+
+    [Test]
+    public void FilterDropped_Omits_Drop_Entries()
+    {
+        var todo = new[]
+        {
+            new RebaseTodoEntry("aaa", RebaseTodoAction.Pick),
+            new RebaseTodoEntry("bbb", RebaseTodoAction.Drop),
+            new RebaseTodoEntry("ccc", RebaseTodoAction.Reword, "msg"),
+        };
+
+        var kept = GitRebaseService.FilterDropped(todo);
+        Assert.That(kept.Select(t => t.Oid), Is.EqualTo(new[] { "aaa", "ccc" }));
+        Assert.That(
+            GitRebaseService.BuildTodoFile(kept),
+            Is.EqualTo("pick aaa\nreword ccc\n"));
+    }
+
+    [Test]
+    public void BuildTodoFile_Throws_On_Drop()
+    {
+        var todo = new[]
+        {
+            new RebaseTodoEntry("aaa", RebaseTodoAction.Drop),
+        };
+
+        Assert.Throws<GitException>(() => GitRebaseService.BuildTodoFile(todo));
+    }
+
+    [Test]
+    public void QuoteEditorCommand_Wraps_Path_In_Double_Quotes()
+    {
+        Assert.That(
+            GitRebaseService.QuoteEditorCommand(@"C:\Users\Some Name\Temp\editor.cmd"),
+            Is.EqualTo("\"C:\\Users\\Some Name\\Temp\\editor.cmd\""));
     }
 
     [Test]
