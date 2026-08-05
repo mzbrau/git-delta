@@ -252,7 +252,7 @@ public sealed class ReviewViewModelTests
         settings.Current.Returns(new AppSettings { AiAssistanceEnabled = true });
 
         var ai = Substitute.For<IAIReviewService>();
-        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+        ai.TryGetMatchingCachedRunAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
 
         var vm = CreateViewModel(
@@ -266,7 +266,7 @@ public sealed class ReviewViewModelTests
 
         await vm.SelectPullRequestCommand.ExecuteAsync(summary);
 
-        await ai.Received(1).GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>());
+        await ai.Received(1).TryGetMatchingCachedRunAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>());
         await ai.DidNotReceive().StartReviewAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>());
     }
 
@@ -317,7 +317,7 @@ public sealed class ReviewViewModelTests
         });
 
         var ai = Substitute.For<IAIReviewService>();
-        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+        ai.TryGetMatchingCachedRunAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
             .Returns(Substitute.For<IDisposable>());
@@ -409,7 +409,7 @@ public sealed class ReviewViewModelTests
             now, now);
 
         var ai = Substitute.For<IAIReviewService>();
-        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+        ai.TryGetMatchingCachedRunAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
             .Returns(Substitute.For<IDisposable>());
@@ -1801,7 +1801,7 @@ public sealed class ReviewViewModelTests
 
         var ai = Substitute.For<IAIReviewService>();
         var gate = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+        ai.TryGetMatchingCachedRunAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ChatAsync(Arg.Any<AiQuestionRequest>(), Arg.Any<CancellationToken>())
             .Returns(_ => gate.Task);
@@ -1875,7 +1875,7 @@ public sealed class ReviewViewModelTests
         settings.Current.Returns(new AppSettings { AiAssistanceEnabled = true });
 
         var ai = Substitute.For<IAIReviewService>();
-        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+        ai.TryGetMatchingCachedRunAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ClearChatHistoryAsync(summary.NodeId, Arg.Any<CancellationToken>())
             .Returns(Task.CompletedTask);
@@ -2067,7 +2067,7 @@ public sealed class ReviewViewModelTests
             ErrorMessage: null, finished.AddMinutes(-2), finished);
 
         var ai = Substitute.For<IAIReviewService>();
-        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+        ai.TryGetMatchingCachedRunAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
             .Returns(Substitute.For<IDisposable>());
@@ -2170,7 +2170,7 @@ public sealed class ReviewViewModelTests
             ErrorMessage: null, started, finished);
 
         var ai = Substitute.For<IAIReviewService>();
-        ai.GetCachedRunAsync(summary.NodeId, Arg.Any<CancellationToken>())
+        ai.TryGetMatchingCachedRunAsync(Arg.Any<AiReviewRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<AiRunSnapshot?>((AiRunSnapshot?)null));
         ai.ObserveProgress(Arg.Any<string>(), Arg.Any<Action<AiRunProgress>>())
             .Returns(Substitute.For<IDisposable>());

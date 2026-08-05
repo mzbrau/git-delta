@@ -17,8 +17,20 @@ public interface IAIReviewService
     ValueTask<AiRunSnapshot?> GetCachedRunAsync(string sessionKey, CancellationToken ct = default);
 
     /// <summary>
-    /// Hydrates in-memory run context from a durable cached run (no live agent session yet).
-    /// Call after opening a PR that already has a completed AI review so chat/ask can lazily resume.
+    /// Returns the latest durable run for <paramref name="request"/>'s session only when it still
+    /// describes the same snapshot (<see cref="AiReviewRequest.HeadSha"/> /
+    /// <see cref="AiReviewRequest.MergeBaseSha"/>). Working-copy scopes materialise a tree OID into
+    /// <c>HeadSha</c> before comparing. On match, also hydrates in-memory run context (no live agent).
+    /// Returns null when missing or stale — durable rows are left intact for later History use.
+    /// </summary>
+    ValueTask<AiRunSnapshot?> TryGetMatchingCachedRunAsync(
+        AiReviewRequest request,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Hydrates in-memory run context from a durable cached run (no live agent session yet),
+    /// but only when the run still matches <paramref name="request"/>'s snapshot identity.
+    /// Call after opening a PR / working copy that already has a completed AI review so chat/ask can lazily resume.
     /// </summary>
     Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default);
 
@@ -37,9 +49,16 @@ public interface IAIReviewService
 
     Task RequestFileDepthAsync(AiFileDepthRequest request, CancellationToken ct = default);
 
+    /// <summary>
+    /// Returns a file briefing only when it was produced for the same path + before/after blob OIDs
+    /// (content-addressed cache key). Mismatched or missing OIDs yield null — never a path-only hit
+    /// from an unrelated change on the same file.
+    /// </summary>
     ValueTask<AiFileBriefingResult?> GetFileBriefingAsync(
         string sessionKey,
         string path,
+        string? beforeBlobOid = null,
+        string? afterBlobOid = null,
         CancellationToken ct = default);
 
     ValueTask<IReadOnlyList<AiAnnotationResult>> GetFileAnnotationsAsync(
@@ -81,6 +100,11 @@ public sealed class NullAIReviewService : IAIReviewService
     public ValueTask<AiRunSnapshot?> GetCachedRunAsync(string sessionKey, CancellationToken ct = default) =>
         ValueTask.FromResult<AiRunSnapshot?>(null);
 
+    public ValueTask<AiRunSnapshot?> TryGetMatchingCachedRunAsync(
+        AiReviewRequest request,
+        CancellationToken ct = default) =>
+        ValueTask.FromResult<AiRunSnapshot?>(null);
+
     public Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default) =>
         Task.CompletedTask;
 
@@ -119,6 +143,8 @@ public sealed class NullAIReviewService : IAIReviewService
     public ValueTask<AiFileBriefingResult?> GetFileBriefingAsync(
         string sessionKey,
         string path,
+        string? beforeBlobOid = null,
+        string? afterBlobOid = null,
         CancellationToken ct = default) =>
         ValueTask.FromResult<AiFileBriefingResult?>(null);
 

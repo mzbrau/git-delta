@@ -740,6 +740,8 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
         var host = _host;
         var sessionKey = SessionKey;
+        var factsByPath = host.BuildChangedFileFacts(SelectedReviewScope)
+            .ToDictionary(f => f.Path, StringComparer.Ordinal);
         var files = host.PendingFiles;
 
         foreach (var file in files)
@@ -749,7 +751,13 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
             try
             {
-                var briefing = await _ai.GetFileBriefingAsync(sessionKey, file.Path.Value).ConfigureAwait(false);
+                factsByPath.TryGetValue(file.Path.Value, out var fact);
+                var briefing = await _ai.GetFileBriefingAsync(
+                        sessionKey,
+                        file.Path.Value,
+                        fact?.BeforeBlobOid,
+                        fact?.AfterBlobOid)
+                    .ConfigureAwait(false);
                 if (briefing is not null && ReferenceEquals(_host, host))
                     await InvokeOnUiAsync(() => file.AiChangeClassification = briefing.Classification).ConfigureAwait(false);
             }
@@ -800,15 +808,10 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         var host = _host;
         try
         {
-            var cached = await _ai.GetCachedRunAsync(SessionKey, ct).ConfigureAwait(false);
-            if (cached is null || ct.IsCancellationRequested || !ReferenceEquals(_host, host))
-                return;
-
             var request = await BuildAiReviewRequestAsync(host, discardCached: false, resume: false)
                 .ConfigureAwait(false);
-            await _ai.AttachCachedRunAsync(request, ct).ConfigureAwait(false);
-
-            if (ct.IsCancellationRequested || !ReferenceEquals(_host, host))
+            var cached = await _ai.TryGetMatchingCachedRunAsync(request, ct).ConfigureAwait(false);
+            if (cached is null || ct.IsCancellationRequested || !ReferenceEquals(_host, host))
                 return;
 
             await InvokeOnUiAsync(() => ApplyAiRunSnapshot(cached)).ConfigureAwait(false);
@@ -1006,9 +1009,13 @@ public partial class PendingChangesReviewViewModel : ObservableObject
             return;
 
         var sessionKey = SessionKey;
+        var beforeOid = diff.OldContent.IsEmpty ? null : diff.OldContent.Value;
+        var afterOid = diff.NewContent.IsEmpty ? null : diff.NewContent.Value;
         try
         {
-            var briefing = await _ai.GetFileBriefingAsync(sessionKey, file.Path.Value, ct).ConfigureAwait(false);
+            var briefing = await _ai.GetFileBriefingAsync(
+                    sessionKey, file.Path.Value, beforeOid, afterOid, ct)
+                .ConfigureAwait(false);
             if (briefing is null && FileBriefingEligibility.IsEligible(
                     file.ChangePercent, file.LinesAdded ?? 0, file.LinesRemoved ?? 0,
                     _settings.Current.AiFileBriefingMinChangePercent, _settings.Current.AiFileBriefingMinLinesChanged))
@@ -1016,8 +1023,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
                 // Eligible files are briefed automatically during the run; if it is still missing
                 // (e.g. the run was resumed after this file was added), request it now. Files below
                 // the threshold are left for the reviewer to request explicitly via GenerateFileBriefingAsync.
-                var beforeOid = diff.OldContent.IsEmpty ? null : diff.OldContent.Value;
-                var afterOid = diff.NewContent.IsEmpty ? null : diff.NewContent.Value;
                 _ = _ai.RequestFileDepthAsync(
                     new AiFileDepthRequest(sessionKey, file.Path.Value, beforeOid, afterOid),
                     CancellationToken.None);
@@ -1043,6 +1048,9 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
                 foreach (var annotation in annotations)
                 {
+                    if (!AnnotationMatchesDiffSide(annotation, diff))
+                        continue;
+
                     var content = annotation.Side == DiffSide.Old ? diff.OldContent : diff.NewContent;
                     var start = new DiffAnchor(annotation.Side, content, annotation.StartLine);
                     var end = new DiffAnchor(annotation.Side, content, annotation.EndLine);
@@ -1076,7 +1084,9 @@ public partial class PendingChangesReviewViewModel : ObservableObject
                 new AiFileDepthRequest(sessionKey, file.Path.Value, beforeOid, afterOid),
                 CancellationToken.None).ConfigureAwait(false);
 
-            var briefing = await _ai.GetFileBriefingAsync(sessionKey, file.Path.Value).ConfigureAwait(false);
+            var briefing = await _ai.GetFileBriefingAsync(
+                    sessionKey, file.Path.Value, beforeOid, afterOid)
+                .ConfigureAwait(false);
             var annotations = await _ai
                 .GetFileAnnotationsAsync(sessionKey, file.Path.Value, AiShowDismissedAnnotations)
                 .ConfigureAwait(false);
@@ -1095,6 +1105,9 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
                 foreach (var annotation in annotations)
                 {
+                    if (!AnnotationMatchesDiffSide(annotation, diff))
+                        continue;
+
                     var content = annotation.Side == DiffSide.Old ? diff.OldContent : diff.NewContent;
                     var start = new DiffAnchor(annotation.Side, content, annotation.StartLine);
                     var end = new DiffAnchor(annotation.Side, content, annotation.EndLine);
@@ -1110,6 +1123,18 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         {
             await InvokeOnUiAsync(() => IsGeneratingFileBriefing = false).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// True when the annotation's stored blob OID matches the current diff side's content id,
+    /// so overlays from an older change on the same path are not shown.
+    /// </summary>
+    private static bool AnnotationMatchesDiffSide(AiAnnotationResult annotation, FileDiff diff)
+    {
+        var content = annotation.Side == DiffSide.Old ? diff.OldContent : diff.NewContent;
+        if (content.IsEmpty)
+            return string.IsNullOrEmpty(annotation.BlobOid);
+        return string.Equals(annotation.BlobOid, content.Value, StringComparison.Ordinal);
     }
 
     /// <summary>Loads the on-demand commit-history timeline for the currently selected file into <see cref="FileHistory"/>.</summary>

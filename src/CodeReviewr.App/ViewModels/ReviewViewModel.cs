@@ -1088,7 +1088,10 @@ public partial class ReviewViewModel : ObservableObject
             AiFileBriefingResult? briefing;
             try
             {
-                briefing = await _ai.GetFileBriefingAsync(sessionKey, file.Path.Value).ConfigureAwait(false);
+                // PR changed-file facts omit blob OIDs; eager briefings are keyed with null OIDs.
+                briefing = await _ai.GetFileBriefingAsync(
+                        sessionKey, file.Path.Value, beforeBlobOid: null, afterBlobOid: null)
+                    .ConfigureAwait(false);
             }
             catch
             {
@@ -1109,16 +1112,9 @@ public partial class ReviewViewModel : ObservableObject
 
         try
         {
-            var cached = await _ai.GetCachedRunAsync(session.Detail.Summary.NodeId, ct).ConfigureAwait(false);
+            var request = BuildAiReviewRequest(session, discardCached: false, resume: false);
+            var cached = await _ai.TryGetMatchingCachedRunAsync(request, ct).ConfigureAwait(false);
             if (cached is null || ct.IsCancellationRequested || !ReferenceEquals(_session, session))
-                return;
-
-            // Hydrate coordinator memory so chat/ask can lazily ResumeSessionAsync after restart.
-            await _ai.AttachCachedRunAsync(
-                    BuildAiReviewRequest(session, discardCached: false, resume: false), ct)
-                .ConfigureAwait(false);
-
-            if (ct.IsCancellationRequested || !ReferenceEquals(_session, session))
                 return;
 
             await InvokeOnUiAsync(() => ApplyAiRunSnapshot(cached)).ConfigureAwait(false);
@@ -1347,9 +1343,13 @@ public partial class ReviewViewModel : ObservableObject
             return;
 
         var prNodeId = _session.Detail.Summary.NodeId;
+        var beforeOid = diff.OldContent.IsEmpty ? null : diff.OldContent.Value;
+        var afterOid = diff.NewContent.IsEmpty ? null : diff.NewContent.Value;
         try
         {
-            var briefing = await _ai.GetFileBriefingAsync(prNodeId, file.Path.Value, ct).ConfigureAwait(false);
+            var briefing = await _ai.GetFileBriefingAsync(
+                    prNodeId, file.Path.Value, beforeOid, afterOid, ct)
+                .ConfigureAwait(false);
 
             // Under-threshold files never get an eager briefing — the user opts in via the
             // "Generate" button (GenerateFileBriefingAsync). Only auto-request depth here for
@@ -1359,8 +1359,6 @@ public partial class ReviewViewModel : ObservableObject
                     _settings.Current.AiFileBriefingMinChangePercent,
                     _settings.Current.AiFileBriefingMinLinesChanged))
             {
-                var beforeOid = diff.OldContent.IsEmpty ? null : diff.OldContent.Value;
-                var afterOid = diff.NewContent.IsEmpty ? null : diff.NewContent.Value;
                 _ = _ai.RequestFileDepthAsync(
                     new AiFileDepthRequest(
                         prNodeId,
@@ -1394,6 +1392,9 @@ public partial class ReviewViewModel : ObservableObject
 
                 foreach (var annotation in annotations)
                 {
+                    if (!AnnotationMatchesDiffSide(annotation, diff))
+                        continue;
+
                     var content = annotation.Side == DiffSide.Old ? diff.OldContent : diff.NewContent;
                     var start = new DiffAnchor(annotation.Side, content, annotation.StartLine);
                     var end = new DiffAnchor(annotation.Side, content, annotation.EndLine);
@@ -1408,6 +1409,18 @@ public partial class ReviewViewModel : ObservableObject
         {
             // AI file overlay is best-effort and must never block the diff view.
         }
+    }
+
+    /// <summary>
+    /// True when the annotation's stored blob OID matches the current diff side's content id,
+    /// so overlays from an older change on the same path are not shown.
+    /// </summary>
+    private static bool AnnotationMatchesDiffSide(AiAnnotationResult annotation, FileDiff diff)
+    {
+        var content = annotation.Side == DiffSide.Old ? diff.OldContent : diff.NewContent;
+        if (content.IsEmpty)
+            return string.IsNullOrEmpty(annotation.BlobOid);
+        return string.Equals(annotation.BlobOid, content.Value, StringComparison.Ordinal);
     }
 
     [RelayCommand(CanExecute = nameof(CanGenerateFileBriefing))]
@@ -1439,7 +1452,9 @@ public partial class ReviewViewModel : ObservableObject
             if (!ReferenceEquals(SelectedFile, file))
                 return;
 
-            var briefing = await _ai.GetFileBriefingAsync(prNodeId, file.Path.Value).ConfigureAwait(false);
+            var briefing = await _ai.GetFileBriefingAsync(
+                    prNodeId, file.Path.Value, beforeOid, afterOid)
+                .ConfigureAwait(false);
             await InvokeOnUiAsync(() =>
             {
                 if (!ReferenceEquals(SelectedFile, file))

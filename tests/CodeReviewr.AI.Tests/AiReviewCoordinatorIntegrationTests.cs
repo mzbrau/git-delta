@@ -100,6 +100,111 @@ public sealed class AiReviewCoordinatorIntegrationTests
     }
 
     [Test]
+    public async Task TryGetMatchingCachedRunAsync_ReturnsRun_WhenHeadAndMergeBaseMatch()
+    {
+        await using var harness = await Harness.CreateAsync(_ => new FakeAgentScript().OnTurn(ChangeBriefingTurn));
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var request = harness.BuildRequest("PR_MATCH", head, head, [ChangedFile("src/App.cs", 2, 0)]);
+        var started = await harness.Service.StartReviewAsync(request);
+
+        var matched = await harness.Service.TryGetMatchingCachedRunAsync(request);
+
+        Assert.That(matched, Is.Not.Null);
+        Assert.That(matched!.RunId, Is.EqualTo(started.RunId));
+        Assert.That(matched.ChangeBriefing, Is.Not.Null);
+        Assert.That(await harness.Store.GetRunAsync(started.RunId), Is.Not.Null,
+            "Matching hydrate must not delete durable rows.");
+    }
+
+    [Test]
+    public async Task TryGetMatchingCachedRunAsync_ReturnsNull_WhenHeadShaChanged_KeepsDurableRun()
+    {
+        await using var harness = await Harness.CreateAsync(
+            _ => new FakeAgentScript().OnTurn(ChangeBriefingTurn),
+            addSecondCommit: true);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var parent = harness.Repo.RunGit("rev-parse", "HEAD^").Trim();
+        var request = harness.BuildRequest("PR_STALE", head, parent, [ChangedFile("src/App.cs", 2, 0)]);
+        var started = await harness.Service.StartReviewAsync(request);
+        Assert.That(started.State, Is.EqualTo(AiRunState.Complete));
+
+        // Simulate a new push: same merge-base, different head.
+        var staleRequest = request with { HeadSha = parent };
+        var matched = await harness.Service.TryGetMatchingCachedRunAsync(staleRequest);
+
+        Assert.That(matched, Is.Null);
+        Assert.That(await harness.Service.GetCachedRunAsync("PR_STALE"), Is.Not.Null,
+            "Raw latest-run lookup still finds the row for History.");
+        Assert.That(await harness.Store.GetRunAsync(started.RunId), Is.Not.Null);
+    }
+
+    [Test]
+    public async Task GetFileBriefingAsync_ReturnsNull_WhenAfterOidDoesNotMatchStoredKey()
+    {
+        var fileBriefing = new AiFileBriefingResult(
+            "src/App.cs", "Entry point of the app.", AiChangeClassification.BugFix, ["Added a null guard."]);
+        var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
+            .OnTurn(t => t.Call("submit_file_briefing", ToJson(fileBriefing)));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        await harness.Service.StartReviewAsync(
+            harness.BuildRequest("PR_OID", head, head, [ChangedFile("src/App.cs", 5, 1, "after-oid-1")]));
+        await harness.Service.RequestFileDepthAsync(
+            new AiFileDepthRequest("PR_OID", "src/App.cs", "before-oid", "after-oid-1"));
+
+        Assert.That(
+            await harness.Service.GetFileBriefingAsync("PR_OID", "src/App.cs", "before-oid", "after-oid-1"),
+            Is.Not.Null);
+
+        Assert.That(
+            await harness.Service.GetFileBriefingAsync("PR_OID", "src/App.cs", "before-oid", "after-oid-DIFFERENT"),
+            Is.Null,
+            "A different after OID must not reuse the briefing for an older change on the same path.");
+    }
+
+    [Test]
+    public async Task TryGetMatchingCachedRunAsync_WorkingCopy_ReturnsNull_AfterContentChanges_KeepsDurableRun()
+    {
+        await using var harness = await Harness.CreateAsync(_ => new FakeAgentScript().OnTurn(ChangeBriefingTurn));
+
+        var appPath = Path.Combine(harness.RepoPath, "src", "App.cs");
+        await File.WriteAllTextAsync(appPath, "class App { void A() {} }\n");
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        var sessionKey = $"local:{harness.RepoPath}";
+        var request = harness.BuildRequest(
+                sessionKey,
+                headSha: "",
+                mergeBaseSha: head,
+                [ChangedFile("src/App.cs", 2, 0)]) with
+            {
+                Scope = AiReviewScope.WorkingCopyAll,
+                Title = "Pending changes",
+                Body = null,
+                Author = null,
+                BaseBranch = null,
+                HeadBranch = null,
+            };
+
+        var started = await harness.Service.StartReviewAsync(request);
+        Assert.That(started.State, Is.EqualTo(AiRunState.Complete));
+        Assert.That(started.HeadSha, Is.Not.Null.And.Not.Empty);
+
+        Assert.That(await harness.Service.TryGetMatchingCachedRunAsync(request), Is.Not.Null,
+            "Unchanged working copy should still match the cached run.");
+
+        await File.WriteAllTextAsync(appPath, "class App { void B() {} }\n");
+        Assert.That(await harness.Service.TryGetMatchingCachedRunAsync(request), Is.Null,
+            "A different working-copy tree must not revive the prior AI briefing.");
+        Assert.That(await harness.Store.GetRunAsync(started.RunId), Is.Not.Null,
+            "Durable AI rows must remain for later History use.");
+        Assert.That(await harness.Service.GetCachedRunAsync(sessionKey), Is.Not.Null);
+    }
+
+    [Test]
     public async Task StartReviewAsync_SecondCallWithUnchangedRequest_ReturnsCachedResult_WithoutNewAgentSession()
     {
         var sessionCreations = 0;
@@ -278,7 +383,8 @@ public sealed class AiReviewCoordinatorIntegrationTests
         await harness.Service.RequestFileDepthAsync(
             new AiFileDepthRequest("PR_IDLE_RESET", "src/App.cs", "before-oid", "after-oid"));
 
-        var briefing = await harness.Service.GetFileBriefingAsync("PR_IDLE_RESET", "src/App.cs");
+        var briefing = await harness.Service.GetFileBriefingAsync(
+            "PR_IDLE_RESET", "src/App.cs", "before-oid", "after-oid");
         Assert.That(briefing, Is.Not.Null);
         Assert.That(briefing!.Overview, Is.EqualTo("Entry point."));
     }
@@ -311,7 +417,8 @@ public sealed class AiReviewCoordinatorIntegrationTests
 
         await harness.Service.RequestFileDepthAsync(new AiFileDepthRequest("PR_1", "src/App.cs", "before-oid", "after-oid-1"));
 
-        var briefing = await harness.Service.GetFileBriefingAsync("PR_1", "src/App.cs");
+        var briefing = await harness.Service.GetFileBriefingAsync(
+            "PR_1", "src/App.cs", "before-oid", "after-oid-1");
         Assert.That(briefing, Is.Not.Null);
         Assert.That(briefing!.Overview, Is.EqualTo("Entry point of the app."));
         Assert.That(briefing.Classification, Is.EqualTo(AiChangeClassification.BugFix));
