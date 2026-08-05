@@ -751,71 +751,71 @@
               </StackPanel>
             </Border>
 
-            <ScrollViewer>
-              <StackPanel Spacing="16" Margin="8,8,8,12">
-                <!-- Stash files -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsStashMode}">
-                  <TextBlock Text="STASHED FILES" Classes="SectionLabel" Margin="8,0,8,4" />
-                  <ListBox x:Name="StashFileList"
-                           ItemsSource="{Binding WorkingCopy.StashFileEntries}"
-                           SelectionMode="Single"
-                           SelectionChanged="OnStashFileSelectionChanged"
-                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                           Classes="FileList">
-                    <ListBox.ItemsPanel>
-                      <ItemsPanelTemplate>
-                        <StackPanel />
-                      </ItemsPanelTemplate>
-                    </ListBox.ItemsPanel>
-                    <ListBox.ItemTemplate>
-                      <DataTemplate x:DataType="vm:FileListEntry">
-                        <ctrl:FileListRowView />
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                    <ListBox.Styles>
-                      <Style Selector="ListBoxItem">
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="24" />
-                      </Style>
-                    </ListBox.Styles>
+            <!-- Stash files -->
+            <ScrollViewer IsVisible="{Binding WorkingCopy.IsStashMode}" Margin="8,8,8,12">
+              <StackPanel>
+                <TextBlock Text="STASHED FILES" Classes="SectionLabel" Margin="8,0,8,4" />
+                <ListBox x:Name="StashFileList"
+                         ItemsSource="{Binding WorkingCopy.StashFileEntries}"
+                         SelectionMode="Single"
+                         SelectionChanged="OnStashFileSelectionChanged"
+                         ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         Classes="FileList">
+                  <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <StackPanel />
+                    </ItemsPanelTemplate>
+                  </ListBox.ItemsPanel>
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FileListEntry">
+                      <ctrl:FileListRowView />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                  <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                      <Setter Property="Padding" Value="0" />
+                      <Setter Property="MinHeight" Value="24" />
+                    </Style>
+                  </ListBox.Styles>
+                </ListBox>
+              </StackPanel>
+            </ScrollViewer>
 
-                  </ListBox>
-                </StackPanel>
+            <!-- File Status: briefing + staged | unstaged split -->
+            <DockPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}" Margin="8,8,8,0">
+              <!-- Change Briefing / Comments -->
+              <StackPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                <Button Classes="Ghost" Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsChangeBriefingSelected}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="12,8"
+                        IsVisible="{Binding WorkingCopy.PendingReview.ShowChangeBriefingRow}"
+                        Command="{Binding WorkingCopy.PendingReview.SelectChangeBriefingCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <icons:MaterialIcon Kind="Creation" Width="16" Height="16"
+                                        Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                    <TextBlock Text="Change Briefing"
+                               FontWeight="{Binding WorkingCopy.PendingReview.IsChangeBriefingSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                  </StackPanel>
+                </Button>
 
-                <!-- Change Briefing / Comments (only relevant to File Status mode) -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}" Margin="0,0,0,-8">
-                  <Button Classes="Ghost" Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsChangeBriefingSelected}"
-                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                          Padding="12,8"
-                          IsVisible="{Binding WorkingCopy.PendingReview.ShowChangeBriefingRow}"
-                          Command="{Binding WorkingCopy.PendingReview.SelectChangeBriefingCommand}">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                      <icons:MaterialIcon Kind="Creation" Width="16" Height="16"
-                                          Foreground="{DynamicResource ForgeAiAccentBrush}" />
-                      <TextBlock Text="Change Briefing"
-                                 FontWeight="{Binding WorkingCopy.PendingReview.IsChangeBriefingSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
-                    </StackPanel>
-                  </Button>
+                <Button Classes="Ghost" Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsCommentsSelected}"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="12,8"
+                        IsVisible="{Binding WorkingCopy.PendingReview.ShowCommentsRow}"
+                        Command="{Binding WorkingCopy.PendingReview.SelectCommentsCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <icons:MaterialIcon Kind="ForumOutline" Width="16" Height="16" />
+                    <TextBlock Text="Comments"
+                               FontWeight="{Binding WorkingCopy.PendingReview.IsCommentsSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                  </StackPanel>
+                </Button>
+              </StackPanel>
 
-                  <!-- Comments (local-only review comments on pending changes) -->
-                  <Button Classes="Ghost" Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsCommentsSelected}"
-                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                          Padding="12,8"
-                          IsVisible="{Binding WorkingCopy.PendingReview.ShowCommentsRow}"
-                          Command="{Binding WorkingCopy.PendingReview.SelectCommentsCommand}">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                      <icons:MaterialIcon Kind="ForumOutline" Width="16" Height="16" />
-                      <TextBlock Text="Comments"
-                                 FontWeight="{Binding WorkingCopy.PendingReview.IsCommentsSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
-                    </StackPanel>
-                  </Button>
-                </StackPanel>
-
-
+              <Grid RowDefinitions="*,4,*">
                 <!-- Staged -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
-                  <DockPanel Margin="8,0,8,4">
+                <DockPanel Grid.Row="0" MinHeight="80">
+                  <DockPanel DockPanel.Dock="Top" Margin="8,0,8,4">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
                       <Button Classes="Link" Content="Unstage Selected"
                               Command="{Binding WorkingCopy.UnstageSelectedCommand}"
@@ -839,7 +839,7 @@
                            SelectionMode="Multiple"
                            SelectionChanged="OnFileSelectionChanged"
                            PointerPressed="OnFileListPointerPressed"
-                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                           ScrollViewer.VerticalScrollBarVisibility="Auto"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                            IsVisible="{Binding WorkingCopy.StagedExpanded}"
                            Classes="FileList">
@@ -872,114 +872,115 @@
                         <Setter Property="MinHeight" Value="24" />
                       </Style>
                     </ListBox.Styles>
-
                   </ListBox>
-                </StackPanel>
+                </DockPanel>
 
-                <!-- Unstaged -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
-                  <DockPanel Margin="8,0,8,4">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-                      <Button Classes="Link" Content="Stage Selected"
-                              Command="{Binding WorkingCopy.StageSelectedCommand}"
-                              IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
-                      <Button Classes="Link" Content="Stage All"
-                              Command="{Binding WorkingCopy.StageAllCommand}" />
-                    </StackPanel>
-                    <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnToggleUnstaged">
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <icons:MaterialIcon Kind="{Binding WorkingCopy.UnstagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                            Width="14" Height="14" />
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                          <TextBlock Text="UNSTAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
-                          <TextBlock Text="{Binding WorkingCopy.UnstagedFileCount, StringFormat=({0})}" Classes="SectionLabel" VerticalAlignment="Center" />
-                        </StackPanel>
+                <GridSplitter Grid.Row="1" Height="4" ResizeDirection="Rows"
+                              Background="{DynamicResource ForgeOutlineVariantBrush}" />
+
+                <!-- Unstaged + Conflicted -->
+                <ScrollViewer Grid.Row="2" MinHeight="80"
+                              HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel Margin="0,0,0,12">
+                    <DockPanel Margin="8,8,8,4">
+                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                        <Button Classes="Link" Content="Stage Selected"
+                                Command="{Binding WorkingCopy.StageSelectedCommand}"
+                                IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
+                        <Button Classes="Link" Content="Stage All"
+                                Command="{Binding WorkingCopy.StageAllCommand}" />
                       </StackPanel>
-                    </Button>
-                  </DockPanel>
-                  <ListBox x:Name="UnstagedFileList"
-                           ItemsSource="{Binding WorkingCopy.UnstagedFileEntries}"
-                           SelectionMode="Multiple"
-                           SelectionChanged="OnFileSelectionChanged"
-                           PointerPressed="OnFileListPointerPressed"
-                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                           IsVisible="{Binding WorkingCopy.UnstagedExpanded}"
-                           Classes="FileList">
-                    <ListBox.ContextMenu>
-                      <ContextMenu>
-                        <MenuItem Header="Stage"
-                                  Command="{Binding WorkingCopy.StageSelectedCommand}" />
-                        <MenuItem Header="Discard"
-                                  Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
-                        <Separator />
-                        <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
-                                  Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
-                      </ContextMenu>
-                    </ListBox.ContextMenu>
-                    <ListBox.ItemsPanel>
-                      <ItemsPanelTemplate>
-                        <StackPanel />
-                      </ItemsPanelTemplate>
-                    </ListBox.ItemsPanel>
-                    <ListBox.ItemTemplate>
-                      <DataTemplate x:DataType="vm:FileListEntry">
-                        <ctrl:FileListRowView
-                            ShowStageCheckbox="True"
-                            StageCheckboxChecked="false" />
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                    <ListBox.Styles>
-                      <Style Selector="ListBoxItem">
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="24" />
-                      </Style>
-                    </ListBox.Styles>
+                      <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnToggleUnstaged">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                          <icons:MaterialIcon Kind="{Binding WorkingCopy.UnstagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                              Width="14" Height="14" />
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock Text="UNSTAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding WorkingCopy.UnstagedFileCount, StringFormat=({0})}" Classes="SectionLabel" VerticalAlignment="Center" />
+                          </StackPanel>
+                        </StackPanel>
+                      </Button>
+                    </DockPanel>
+                    <ListBox x:Name="UnstagedFileList"
+                             ItemsSource="{Binding WorkingCopy.UnstagedFileEntries}"
+                             SelectionMode="Multiple"
+                             SelectionChanged="OnFileSelectionChanged"
+                             PointerPressed="OnFileListPointerPressed"
+                             ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             IsVisible="{Binding WorkingCopy.UnstagedExpanded}"
+                             Classes="FileList">
+                      <ListBox.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="Stage"
+                                    Command="{Binding WorkingCopy.StageSelectedCommand}" />
+                          <MenuItem Header="Discard"
+                                    Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
+                          <Separator />
+                          <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                    Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
+                        </ContextMenu>
+                      </ListBox.ContextMenu>
+                      <ListBox.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <StackPanel />
+                        </ItemsPanelTemplate>
+                      </ListBox.ItemsPanel>
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:FileListEntry">
+                          <ctrl:FileListRowView
+                              ShowStageCheckbox="True"
+                              StageCheckboxChecked="false" />
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                      <ListBox.Styles>
+                        <Style Selector="ListBoxItem">
+                          <Setter Property="Padding" Value="0" />
+                          <Setter Property="MinHeight" Value="24" />
+                        </Style>
+                      </ListBox.Styles>
+                    </ListBox>
 
-                  </ListBox>
-                </StackPanel>
-
-                <!-- Conflicted -->
-                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}">
-                  <StackPanel IsVisible="{Binding WorkingCopy.HasConflictedFiles}">
-                  <TextBlock Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
-                             Foreground="{DynamicResource ForgeErrorBrush}" />
-                  <ListBox x:Name="ConflictedFileList"
-                           ItemsSource="{Binding WorkingCopy.ConflictedFileEntries}"
-                           SelectionMode="Multiple"
-                           SelectionChanged="OnFileSelectionChanged"
-                           PointerPressed="OnFileListPointerPressed"
-                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                           Classes="FileList">
-                    <ListBox.ContextMenu>
-                      <ContextMenu>
-                        <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
-                                  Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
-                      </ContextMenu>
-                    </ListBox.ContextMenu>
-                    <ListBox.ItemsPanel>
-                      <ItemsPanelTemplate>
-                        <StackPanel />
-                      </ItemsPanelTemplate>
-                    </ListBox.ItemsPanel>
-                    <ListBox.ItemTemplate>
-                      <DataTemplate x:DataType="vm:FileListEntry">
-                        <ctrl:FileListRowView />
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
-                    <ListBox.Styles>
-                      <Style Selector="ListBoxItem">
-                        <Setter Property="Padding" Value="0" />
-                        <Setter Property="MinHeight" Value="24" />
-                      </Style>
-                    </ListBox.Styles>
-
-                  </ListBox>
+                    <!-- Conflicted -->
+                    <StackPanel IsVisible="{Binding WorkingCopy.HasConflictedFiles}" Margin="0,16,0,0">
+                      <TextBlock Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
+                                 Foreground="{DynamicResource ForgeErrorBrush}" />
+                      <ListBox x:Name="ConflictedFileList"
+                               ItemsSource="{Binding WorkingCopy.ConflictedFileEntries}"
+                               SelectionMode="Multiple"
+                               SelectionChanged="OnFileSelectionChanged"
+                               PointerPressed="OnFileListPointerPressed"
+                               ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                               Classes="FileList">
+                        <ListBox.ContextMenu>
+                          <ContextMenu>
+                            <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                      Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
+                          </ContextMenu>
+                        </ListBox.ContextMenu>
+                        <ListBox.ItemsPanel>
+                          <ItemsPanelTemplate>
+                            <StackPanel />
+                          </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                          <DataTemplate x:DataType="vm:FileListEntry">
+                            <ctrl:FileListRowView />
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                        <ListBox.Styles>
+                          <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="MinHeight" Value="24" />
+                          </Style>
+                        </ListBox.Styles>
+                      </ListBox>
+                    </StackPanel>
                   </StackPanel>
-                </StackPanel>
-              </StackPanel>
-            </ScrollViewer>
+                </ScrollViewer>
+              </Grid>
+            </DockPanel>
           </DockPanel>
         </Border>
 

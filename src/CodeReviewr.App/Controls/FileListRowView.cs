@@ -94,8 +94,16 @@ public sealed class FileListRowView : UserControl
         {
             Margin = new Thickness(0, 0, 2, 0),
             VerticalAlignment = VerticalAlignment.Center,
+            Padding = new Thickness(0),
+            MinWidth = 0,
         };
         _stageCheck.Click += OnStageCheckClick;
+        var stageCheckHost = new LayoutTransformControl
+        {
+            LayoutTransform = new ScaleTransform(0.7, 0.7),
+            Child = _stageCheck,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
 
         _statusIcon = Icon(MaterialIconKind.Pencil, 14);
         _searchGroupChevron = Icon(MaterialIconKind.ChevronRight, 14, 0.7);
@@ -156,7 +164,7 @@ public sealed class FileListRowView : UserControl
             Orientation = Orientation.Horizontal,
             Spacing = 6,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { _searchGroupChevron, _stageCheck, _statusIcon },
+            Children = { _searchGroupChevron, stageCheckHost, _statusIcon },
         };
         Grid.SetColumn(leading, 0);
 
