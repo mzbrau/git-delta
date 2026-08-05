@@ -58,7 +58,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
             .Returns([]);
         _stash.ListStashesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns([]);
-        _history.ListCommitsAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        _history.ListCommitsAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns([]);
         _history.GetCommitFilesAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns([]);
@@ -94,7 +94,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
         try
         {
             var commit = Commit("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "one");
-            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns([commit]);
             _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
                 .Returns(Status([Unstaged("MainWindow.axaml"), Unstaged("WorkingCopyViewModel.cs")]));
@@ -157,7 +157,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
         try
         {
             var commits = new List<CommitInfo> { Commit("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "one") };
-            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(commits);
 
             var vm = CreateVm();
@@ -171,7 +171,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
             _history.ClearReceivedCalls();
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(async _ci =>
                 {
                     started.TrySetResult();
@@ -197,7 +197,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
             await Task.Delay(100);
             Assert.That(vm.IsHistoryRefreshing, Is.False);
             Assert.That(vm.HistoryCommits.Count, Is.EqualTo(1));
-            await _history.Received().ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+            await _history.Received().ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         }
         finally
         {
@@ -219,7 +219,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
                 Commit("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "old tip"),
             };
 
-            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(first);
 
             var vm = CreateVm();
@@ -230,7 +230,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
 
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            _history.ListCommitsAsync(repo, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(async _ci =>
                 {
                     started.TrySetResult();
@@ -265,7 +265,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
         Directory.CreateDirectory(repo2);
         try
         {
-            _history.ListCommitsAsync(repo1, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            _history.ListCommitsAsync(repo1, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns([Commit("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "one")]);
             _status.GetStatusAsync(repo1, Arg.Any<CancellationToken>())
                 .Returns(new RepositoryStatus([], [], [], InProgressOperation.None, "main", 1));
@@ -278,7 +278,7 @@ public sealed class WorkingCopyViewModelHistoryCacheTests
             await Task.Delay(100);
             Assert.That(vm.HistoryCommits.Count, Is.EqualTo(1));
 
-            _history.ListCommitsAsync(repo2, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            _history.ListCommitsAsync(repo2, Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
                 .Returns(Array.Empty<CommitInfo>());
             await vm.OpenAsync(repo2);
 

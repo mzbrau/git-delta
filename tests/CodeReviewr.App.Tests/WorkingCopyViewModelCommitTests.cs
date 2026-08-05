@@ -59,7 +59,7 @@ public sealed class WorkingCopyViewModelCommitTests
             .Returns([]);
         _stash.ListStashesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns([]);
-        _history.ListCommitsAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+        _history.ListCommitsAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns([]);
         _discard.RecentlyDiscarded.Returns([]);
     }

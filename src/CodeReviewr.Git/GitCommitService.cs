@@ -42,4 +42,20 @@ public sealed class GitCommitService(IGitProcessRunner runner, IRepositoryGatePr
             CodeReviewrMeters.CommitMs.Record(sw.Elapsed.TotalMilliseconds);
         }, ct);
     }
+
+    public Task CherryPickAsync(string repositoryPath, string oid, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(oid);
+        return gates.For(repositoryPath).RunWorktreeWriteAsync(
+            token => runner.RunAsync(repositoryPath, ["cherry-pick", oid], options: null, token),
+            ct);
+    }
+
+    public Task RevertAsync(string repositoryPath, string oid, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(oid);
+        return gates.For(repositoryPath).RunWorktreeWriteAsync(
+            token => runner.RunAsync(repositoryPath, ["revert", "--no-edit", oid], options: null, token),
+            ct);
+    }
 }

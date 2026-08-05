@@ -18,16 +18,18 @@ public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGateP
         string repositoryPath,
         int skip,
         int take,
+        string revision = "HEAD",
         CancellationToken ct = default) =>
         gates.For(repositoryPath).RunReadAsync(async token =>
         {
             if (take <= 0)
                 return (IReadOnlyList<CommitInfo>)Array.Empty<CommitInfo>();
 
+            var rev = string.IsNullOrWhiteSpace(revision) ? "HEAD" : revision;
             var args = new List<string>
             {
                 "log",
-                "HEAD",
+                rev,
                 $"--skip={Math.Max(0, skip)}",
                 $"--max-count={take}",
                 $"--format={LogFormat}",

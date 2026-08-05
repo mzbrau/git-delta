@@ -99,6 +99,81 @@ public sealed class HistoryBrowseTests
     }
 
     [Test]
+    public async Task ListCommits_For_Other_Branch_Does_Not_Include_Current_Only_Commits()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "1\n")
+            .WithInitialCommit("root")
+            .WithFile("a.txt", "2\n")
+            .WithCommit("on-main");
+        var path = repo.Build();
+        repo.RunGit("checkout", "-b", "feature");
+        File.WriteAllText(Path.Combine(path, "a.txt"), "3\n");
+        repo.RunGit("add", "-A");
+        repo.RunGit("-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "on-feature");
+        repo.RunGit("checkout", "main");
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var history = sp.GetRequiredService<IGitHistoryService>();
+
+        var head = await history.ListCommitsAsync(path, skip: 0, take: 10);
+        var feature = await history.ListCommitsAsync(path, skip: 0, take: 10, revision: "feature");
+
+        Assert.That(head.Select(c => c.Subject), Is.EqualTo(new[] { "on-main", "root" }));
+        Assert.That(feature.Select(c => c.Subject), Is.EqualTo(new[] { "on-feature", "on-main", "root" }));
+    }
+
+    [Test]
+    public async Task CherryPick_Applies_Commit_Onto_Current_Branch()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "1\n")
+            .WithInitialCommit("root");
+        var path = repo.Build();
+        repo.RunGit("checkout", "-b", "feature");
+        File.WriteAllText(Path.Combine(path, "b.txt"), "feature-only\n");
+        repo.RunGit("add", "-A");
+        repo.RunGit("-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "add-b");
+        var featureOid = repo.RunGit("rev-parse", "HEAD").Trim();
+        repo.RunGit("checkout", "main");
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var commit = sp.GetRequiredService<IGitCommitService>();
+        var history = sp.GetRequiredService<IGitHistoryService>();
+
+        await commit.CherryPickAsync(path, featureOid);
+
+        var commits = await history.ListCommitsAsync(path, skip: 0, take: 5);
+        Assert.That(commits[0].Subject, Is.EqualTo("add-b"));
+        Assert.That(File.ReadAllText(Path.Combine(path, "b.txt")), Does.Contain("feature-only"));
+    }
+
+    [Test]
+    public async Task Revert_Creates_Reversing_Commit()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "one\n")
+            .WithInitialCommit("root")
+            .WithFile("a.txt", "two\n")
+            .WithCommit("change");
+        var path = repo.Build();
+        var changeOid = repo.RunGit("rev-parse", "HEAD").Trim();
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var commit = sp.GetRequiredService<IGitCommitService>();
+        var history = sp.GetRequiredService<IGitHistoryService>();
+
+        await commit.RevertAsync(path, changeOid);
+
+        var commits = await history.ListCommitsAsync(path, skip: 0, take: 5);
+        Assert.That(commits[0].Subject, Does.Contain("Revert").Or.Contain("change"));
+        Assert.That(File.ReadAllText(Path.Combine(path, "a.txt")).Trim(), Is.EqualTo("one"));
+    }
+
+    [Test]
     public void ParseCommitLog_Handles_Multiline_Body()
     {
         // Use \u001f / concatenation so \x escapes cannot eat following hex digits (e.g. year "2026").

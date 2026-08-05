@@ -1001,6 +1001,21 @@ public partial class MainWindow : Window
         _ = Vm.SelectRepositoryCommand.ExecuteAsync(path);
     }
 
+    private void OnHistoryBranchSwitcherFlyoutOpened(object? sender, EventArgs e) =>
+        Vm.WorkingCopy.HistoryBranchFilter = "";
+
+    private void OnHistoryBranchEntryClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: BranchInfo branch })
+            return;
+
+        if (HistoryBranchSwitcherButton.Flyout is FlyoutBase flyout)
+            flyout.Hide();
+
+        if (Vm.WorkingCopy.SelectHistoryBranchCommand.CanExecute(branch))
+            Vm.WorkingCopy.SelectHistoryBranchCommand.Execute(branch);
+    }
+
     private void ApplyColumnWidths()
     {
         if (MainColumns.ColumnDefinitions.Count < 5) return;

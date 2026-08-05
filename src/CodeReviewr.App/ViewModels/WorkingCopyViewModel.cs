@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input.Platform;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -46,6 +49,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private CancellationTokenSource? _commitFilesCts;
     private CancellationTokenSource? _markdownCts;
     private string? _cachedHistorySelectedPath;
+    private bool _suppressHistoryBranchReload;
     private string? _repoPath;
     private RepositoryStatus? _lastStatus;
     private readonly DiffWarmStore _warmStore;
@@ -176,6 +180,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     public ObservableCollection<CommitInfo> HistoryCommits { get; } = [];
     public ResettableObservableCollection<DiffRow> DiffRows { get; } = new();
     public ObservableCollection<BranchInfo> Branches { get; } = [];
+    /// <summary>Local and remote branches available for the history branch filter.</summary>
+    public ObservableCollection<BranchInfo> HistoryBranches { get; } = [];
+    /// <summary>HistoryBranches filtered by <see cref="HistoryBranchFilter"/>.</summary>
+    public ObservableCollection<BranchInfo> FilteredHistoryBranches { get; } = [];
     public ObservableCollection<StashInfo> Stashes { get; } = [];
 
     [ObservableProperty] private string? _repositoryPath;
@@ -213,6 +221,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [ObservableProperty] private WorkspaceMode _workspaceMode = WorkspaceMode.FileStatus;
     [ObservableProperty] private StashInfo? _selectedStash;
     [ObservableProperty] private CommitInfo? _selectedCommit;
+    [ObservableProperty] private BranchInfo? _selectedHistoryBranch;
+    [ObservableProperty] private string _historyBranchFilter = "";
     [ObservableProperty] private bool _isStashing;
     [ObservableProperty] private string _fileFilter = "";
     [ObservableProperty] private bool _hasFileFilter;
@@ -386,7 +396,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
         try
         {
-            var commits = await _history.ListCommitsAsync(_repoPath, 0, 1, ct).ConfigureAwait(false);
+            var commits = await _history.ListCommitsAsync(_repoPath, 0, 1, ct: ct).ConfigureAwait(false);
             return commits.Count > 0 ? commits[0].Oid : null;
         }
         catch
@@ -495,6 +505,18 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         !IsCommitting && HasStagedFiles && !string.IsNullOrWhiteSpace(CommitMessage);
     public bool ShowCommitDock => IsFileStatusMode && HasStagedFiles;
     public bool ShowCommitDetailsDock => IsHistoryMode && SelectedCommit is not null;
+
+    /// <summary>
+    /// Cherry-pick is only useful when browsing a branch other than the checked-out one.
+    /// </summary>
+    public bool CanCherryPickHistoryCommit =>
+        SelectedHistoryBranch is { Name: { Length: > 0 } selected }
+        && (CurrentBranch is null
+            || !string.Equals(selected, CurrentBranch, StringComparison.Ordinal));
+
+    public bool ShowHistoryBranchFilterEmpty =>
+        !string.IsNullOrWhiteSpace(HistoryBranchFilter) && FilteredHistoryBranches.Count == 0;
+
     public bool ShowStashDetailsDock => IsStashMode && SelectedStash is not null;
 
     public bool IsFileStatusFlatLayout => FileStatusListLayout == FileListLayoutMode.Flat;
@@ -531,7 +553,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(CommitButtonLabel));
         OnPropertyChanged(nameof(CanRebase));
         OnPropertyChanged(nameof(RebaseDisabledReason));
+        OnPropertyChanged(nameof(CanCherryPickHistoryCommit));
         OpenRebaseWizardCommand.NotifyCanExecuteChanged();
+        CherryPickCommitCommand.NotifyCanExecuteChanged();
+        SyncSelectedHistoryBranchToCurrent();
     }
 
     partial void OnShowRebaseWizardChanged(bool value) =>
@@ -585,6 +610,22 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         ApplyHistoryFilter();
     }
 
+    partial void OnHistoryBranchFilterChanged(string value)
+    {
+        RebuildFilteredHistoryBranches();
+        OnPropertyChanged(nameof(ShowHistoryBranchFilterEmpty));
+    }
+
+    partial void OnSelectedHistoryBranchChanged(BranchInfo? value)
+    {
+        OnPropertyChanged(nameof(CanCherryPickHistoryCommit));
+        CherryPickCommitCommand.NotifyCanExecuteChanged();
+        if (_suppressHistoryBranchReload || !IsHistoryMode)
+            return;
+
+        _ = ReloadHistoryForSelectedBranchAsync();
+    }
+
     partial void OnIsHistoryLoadingChanged(bool value) => OnPropertyChanged(nameof(CanLoadMoreHistory));
     partial void OnIsHistoryRefreshingChanged(bool value) => OnPropertyChanged(nameof(CanLoadMoreHistory));
     partial void OnHasMoreHistoryChanged(bool value) => OnPropertyChanged(nameof(CanLoadMoreHistory));
@@ -597,6 +638,15 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     [RelayCommand]
     private void ClearHistorySearch() => HistorySearchText = "";
+
+    [RelayCommand]
+    private void SelectHistoryBranch(BranchInfo? branch)
+    {
+        if (branch is null)
+            return;
+        SelectedHistoryBranch = branch;
+    }
+
     partial void OnIsPushingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsPullingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
     partial void OnIsFetchingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
@@ -1297,6 +1347,13 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(DiffFooterText));
         OnPropertyChanged(nameof(ShowCommitDetailsDock));
 
+        _ = EnterHistoryAsync();
+    }
+
+    private async Task EnterHistoryAsync()
+    {
+        await LoadHistoryBranchesAsync(preferCurrentBranch: true).ConfigureAwait(true);
+
         if (_allHistoryCommits.Count > 0)
         {
             ApplyHistoryFilter(preserveSelection: true);
@@ -1318,6 +1375,26 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         DiffEmptyMessage = "Select a commit";
         DiffOverlayMessage = null;
         _ = LoadHistoryAsync(reset: true);
+    }
+
+    private async Task ReloadHistoryForSelectedBranchAsync()
+    {
+        SelectedFile = null;
+        _selectedFiles.Clear();
+        SelectedFileCount = 0;
+        DiffRows.Clear();
+        _currentDiff = null;
+        ClearImagePreview();
+        SelectedCommit = null;
+        _allHistoryFiles.Clear();
+        HistoryFiles.Clear();
+        HistoryFileEntries.Clear();
+        DiffEmptyMessage = "Select a commit";
+        DiffOverlayMessage = null;
+        OnPropertyChanged(nameof(ShowCommitDetailsDock));
+        OnPropertyChanged(nameof(DiffFooterText));
+        SelectionSyncRequested?.Invoke();
+        await LoadHistoryAsync(reset: true);
     }
 
     [RelayCommand]
@@ -1566,7 +1643,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             }
 
             var skip = _allHistoryCommits.Count;
-            var page = await _history.ListCommitsAsync(_repoPath, skip, HistoryPageSize, ct);
+            var page = await _history.ListCommitsAsync(_repoPath, skip, HistoryPageSize, HistoryRevision, ct);
             ct.ThrowIfCancellationRequested();
 
             foreach (var c in page)
@@ -1604,7 +1681,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         IsHistoryRefreshing = true;
         try
         {
-            var page = await _history.ListCommitsAsync(_repoPath, skip: 0, HistoryPageSize, ct);
+            var page = await _history.ListCommitsAsync(_repoPath, skip: 0, HistoryPageSize, HistoryRevision, ct);
             ct.ThrowIfCancellationRequested();
 
             _allHistoryCommits.Clear();
@@ -1705,15 +1782,119 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         _cachedHistorySelectedPath = null;
         HistorySearchText = "";
         HistoryFileFilter = "";
+        HistoryBranchFilter = "";
         HasMoreHistory = false;
         IsHistoryLoading = false;
         IsHistoryRefreshing = false;
+        _suppressHistoryBranchReload = true;
+        try
+        {
+            SelectedHistoryBranch = null;
+            HistoryBranches.Clear();
+            FilteredHistoryBranches.Clear();
+        }
+        finally
+        {
+            _suppressHistoryBranchReload = false;
+        }
+
+        OnPropertyChanged(nameof(ShowHistoryBranchFilterEmpty));
     }
 
     private void CancelCommitFilesLoad()
     {
         _commitFilesCts?.Cancel();
         _commitFilesCts = null;
+    }
+
+    private string HistoryRevision =>
+        string.IsNullOrWhiteSpace(SelectedHistoryBranch?.Name) ? "HEAD" : SelectedHistoryBranch.Name;
+
+    private static bool IsHistoryBranchCandidate(BranchInfo branch) =>
+        !branch.Name.EndsWith("/HEAD", StringComparison.Ordinal);
+
+    private BranchInfo? FindHistoryBranch(string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return null;
+        return HistoryBranches.FirstOrDefault(b =>
+            string.Equals(b.Name, name, StringComparison.Ordinal));
+    }
+
+    private void SyncSelectedHistoryBranchToCurrent()
+    {
+        if (HistoryBranches.Count == 0)
+            return;
+
+        var match = FindHistoryBranch(CurrentBranch);
+        if (match is null)
+            return;
+
+        if (SelectedHistoryBranch is not null
+            && string.Equals(SelectedHistoryBranch.Name, match.Name, StringComparison.Ordinal))
+        {
+            if (!ReferenceEquals(SelectedHistoryBranch, match))
+            {
+                _suppressHistoryBranchReload = true;
+                try { SelectedHistoryBranch = match; }
+                finally { _suppressHistoryBranchReload = false; }
+            }
+
+            return;
+        }
+
+        SelectedHistoryBranch = match;
+    }
+
+    private async Task LoadHistoryBranchesAsync(bool preferCurrentBranch)
+    {
+        if (_repoPath is null) return;
+        var listed = await _branches.ListBranchesAsync(_repoPath);
+        await InvokeOnUiAsync(() => ApplyHistoryBranches(listed, preferCurrentBranch));
+    }
+
+    private void ApplyHistoryBranches(IReadOnlyList<BranchInfo> listed, bool preferCurrentBranch)
+    {
+        var previousName = SelectedHistoryBranch?.Name;
+        _suppressHistoryBranchReload = true;
+        try
+        {
+            HistoryBranches.Clear();
+            foreach (var b in listed.Where(IsHistoryBranchCandidate))
+                HistoryBranches.Add(b);
+
+            var targetName = preferCurrentBranch
+                ? CurrentBranch ?? previousName
+                : previousName ?? CurrentBranch;
+            SelectedHistoryBranch = FindHistoryBranch(targetName)
+                ?? HistoryBranches.FirstOrDefault(b => b.IsCurrent)
+                ?? HistoryBranches.FirstOrDefault();
+        }
+        finally
+        {
+            _suppressHistoryBranchReload = false;
+        }
+
+        RebuildFilteredHistoryBranches();
+        OnPropertyChanged(nameof(CanCherryPickHistoryCommit));
+        CherryPickCommitCommand.NotifyCanExecuteChanged();
+    }
+
+    private void RebuildFilteredHistoryBranches()
+    {
+        FilteredHistoryBranches.Clear();
+        foreach (var branch in HistoryBranches.Where(MatchesHistoryBranchFilter))
+            FilteredHistoryBranches.Add(branch);
+
+        OnPropertyChanged(nameof(ShowHistoryBranchFilterEmpty));
+    }
+
+    private bool MatchesHistoryBranchFilter(BranchInfo branch)
+    {
+        if (string.IsNullOrWhiteSpace(HistoryBranchFilter))
+            return true;
+
+        return branch.Name.Contains(HistoryBranchFilter, StringComparison.OrdinalIgnoreCase);
     }
 
     public static string FormatCommitDate(DateTimeOffset date)
@@ -3749,7 +3930,118 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             Branches.Clear();
             foreach (var b in listed.Where(b => !b.IsRemote))
                 Branches.Add(b);
+            ApplyHistoryBranches(listed, preferCurrentBranch: false);
         });
+    }
+
+    [RelayCommand(CanExecute = nameof(CanCherryPickCommit))]
+    private async Task CherryPickCommitAsync(CommitInfo? commit)
+    {
+        commit ??= SelectedCommit;
+        if (_repoPath is null || commit is null || !CanCherryPickHistoryCommit)
+            return;
+
+        try
+        {
+            await _commit.CherryPickAsync(_repoPath, commit.Oid);
+            _notifications.Info($"Cherry-picked {commit.ShortOid}");
+            await RefreshAsync();
+            await LoadBranchesAsync();
+            if (IsHistoryMode)
+                _ = SoftRefreshHistoryAsync();
+        }
+        catch (Exception ex)
+        {
+            await RefreshAsync();
+            _notifications.Error($"Cherry-pick failed: {ex.Message}", exception: ex);
+        }
+    }
+
+    private bool CanCherryPickCommit(CommitInfo? _) => CanCherryPickHistoryCommit;
+
+    [RelayCommand]
+    private async Task CheckoutCommitAsync(CommitInfo? commit)
+    {
+        commit ??= SelectedCommit;
+        if (_repoPath is null || commit is null)
+            return;
+
+        try
+        {
+            await _branches.CheckoutAsync(_repoPath, commit.Oid);
+            await RefreshAsync();
+            await LoadBranchesAsync();
+            if (IsHistoryMode)
+                _ = SoftRefreshHistoryAsync();
+        }
+        catch (GitException ex) when (ex.Message.Contains("local changes", StringComparison.OrdinalIgnoreCase)
+                                       || ex.StderrSummary?.Contains("would be overwritten", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            _notifications.Info("Checkout blocked by local changes. Stash and retry?",
+                () => _ = StashThenCheckoutAsync(commit.Oid), "Stash");
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Checkout failed: {ex.Message}", exception: ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task RevertCommitAsync(CommitInfo? commit)
+    {
+        commit ??= SelectedCommit;
+        if (_repoPath is null || commit is null)
+            return;
+
+        try
+        {
+            await _commit.RevertAsync(_repoPath, commit.Oid);
+            _notifications.Info($"Reverted {commit.ShortOid}");
+            await RefreshAsync();
+            await LoadBranchesAsync();
+            if (IsHistoryMode)
+                _ = SoftRefreshHistoryAsync();
+        }
+        catch (Exception ex)
+        {
+            await RefreshAsync();
+            _notifications.Error($"Revert failed: {ex.Message}", exception: ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task CopyCommitHashAsync(CommitInfo? commit)
+    {
+        commit ??= SelectedCommit;
+        if (commit is null)
+            return;
+        await CopyTextToClipboardAsync(commit.Oid);
+    }
+
+    [RelayCommand]
+    private async Task CopyCommitMessageAsync(CommitInfo? commit)
+    {
+        commit ??= SelectedCommit;
+        if (commit is null)
+            return;
+
+        var message = string.IsNullOrEmpty(commit.Body)
+            ? commit.Subject
+            : $"{commit.Subject}\n\n{commit.Body}";
+        await CopyTextToClipboardAsync(message);
+    }
+
+    private static async Task CopyTextToClipboardAsync(string text)
+    {
+        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime
+            { MainWindow: { } window })
+            return;
+
+        var clipboard = TopLevel.GetTopLevel(window)?.Clipboard;
+        if (clipboard is null)
+            return;
+
+        await clipboard.SetTextAsync(text);
     }
 
     private async Task LoadStashesAsync()

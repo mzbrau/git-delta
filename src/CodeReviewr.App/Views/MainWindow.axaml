@@ -3050,6 +3050,60 @@
 
             <Border DockPanel.Dock="Top" Padding="8,6"
                     BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+              <Button x:Name="HistoryBranchSwitcherButton" Classes="Ghost"
+                      HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                      Padding="8,6">
+                <Button.Flyout>
+                  <Flyout Placement="BottomEdgeAlignedLeft" Opened="OnHistoryBranchSwitcherFlyoutOpened">
+                    <Border MinWidth="220" MaxWidth="360" MaxHeight="320" Padding="8">
+                      <DockPanel>
+                        <TextBox DockPanel.Dock="Top" Classes="Forge"
+                                 Text="{Binding WorkingCopy.HistoryBranchFilter}"
+                                 PlaceholderText="Filter branches…"
+                                 Margin="0,0,0,8" />
+                        <TextBlock DockPanel.Dock="Bottom"
+                                   Text="No matching branches"
+                                   FontSize="11" Opacity="0.7" TextWrapping="Wrap"
+                                   Margin="4,8,4,0"
+                                   IsVisible="{Binding WorkingCopy.ShowHistoryBranchFilterEmpty}" />
+                        <ScrollViewer MaxHeight="260" HorizontalScrollBarVisibility="Disabled">
+                          <ItemsControl ItemsSource="{Binding WorkingCopy.FilteredHistoryBranches}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="core:BranchInfo">
+                                <Button Classes="Ghost"
+                                        Classes.NavSelected="{Binding IsCurrent}"
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Left"
+                                        Padding="8,6" Margin="0,1"
+                                        Tag="{Binding}"
+                                        Click="OnHistoryBranchEntryClick"
+                                        ToolTip.Tip="{Binding Name}">
+                                  <TextBlock Text="{Binding Name}"
+                                             TextTrimming="CharacterEllipsis"
+                                             FontFamily="{DynamicResource ForgeCodeFont}" />
+                                </Button>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </ScrollViewer>
+                      </DockPanel>
+                    </Border>
+                  </Flyout>
+                </Button.Flyout>
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Grid.Column="0"
+                             Text="{Binding WorkingCopy.SelectedHistoryBranch.Name, TargetNullValue='Select branch…'}"
+                             VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis"
+                             FontFamily="{DynamicResource ForgeCodeFont}" />
+                  <icons:MaterialIcon Grid.Column="1" Kind="MenuDown" Width="16" Height="16"
+                                      VerticalAlignment="Center" Margin="4,0,0,0" Opacity="0.7" />
+                </Grid>
+              </Button>
+            </Border>
+
+            <Border DockPanel.Dock="Top" Padding="8,6"
+                    BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
               <Grid>
                 <TextBox Classes="Forge" Text="{Binding WorkingCopy.HistorySearchText}"
                          PlaceholderText="Search commits…" Padding="8,6,28,6" />
@@ -3097,6 +3151,27 @@
                      ItemsSource="{Binding WorkingCopy.HistoryCommits}"
                      SelectionMode="Single"
                      SelectionChanged="OnHistoryCommitSelectionChanged">
+              <ListBox.ContextMenu>
+                <ContextMenu>
+                  <MenuItem Header="Checkout"
+                            Command="{Binding WorkingCopy.CheckoutCommitCommand}"
+                            CommandParameter="{Binding #HistoryCommitList.SelectedItem}" />
+                  <Separator />
+                  <MenuItem Header="Cherry Pick"
+                            Command="{Binding WorkingCopy.CherryPickCommitCommand}"
+                            CommandParameter="{Binding #HistoryCommitList.SelectedItem}" />
+                  <MenuItem Header="Reverse Commit"
+                            Command="{Binding WorkingCopy.RevertCommitCommand}"
+                            CommandParameter="{Binding #HistoryCommitList.SelectedItem}" />
+                  <Separator />
+                  <MenuItem Header="Copy Hash"
+                            Command="{Binding WorkingCopy.CopyCommitHashCommand}"
+                            CommandParameter="{Binding #HistoryCommitList.SelectedItem}" />
+                  <MenuItem Header="Copy Message"
+                            Command="{Binding WorkingCopy.CopyCommitMessageCommand}"
+                            CommandParameter="{Binding #HistoryCommitList.SelectedItem}" />
+                </ContextMenu>
+              </ListBox.ContextMenu>
               <ListBox.ItemTemplate>
                 <DataTemplate x:DataType="core:CommitInfo">
                   <Border Padding="12,6">

@@ -94,6 +94,14 @@ public interface IGitCommitService
         bool noVerify,
         IProgress<string>? hookOutput,
         CancellationToken ct = default);
+
+    /// <summary>Applies <paramref name="oid"/> onto the current HEAD (<c>git cherry-pick</c>).</summary>
+    Task CherryPickAsync(string repositoryPath, string oid, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a new commit that reverses <paramref name="oid"/> (<c>git revert --no-edit</c>).
+    /// </summary>
+    Task RevertAsync(string repositoryPath, string oid, CancellationToken ct = default);
 }
 
 public interface IGitBranchService
@@ -171,10 +179,15 @@ public interface IGitStashService
 
 public interface IGitHistoryService
 {
+    /// <summary>
+    /// Paginated commit log for <paramref name="revision"/> (branch name, tag, or OID).
+    /// Defaults to <c>HEAD</c>.
+    /// </summary>
     Task<IReadOnlyList<CommitInfo>> ListCommitsAsync(
         string repositoryPath,
         int skip,
         int take,
+        string revision = "HEAD",
         CancellationToken ct = default);
 
     /// <summary>
