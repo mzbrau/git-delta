@@ -12,6 +12,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Styling;
+using Avalonia.Threading;
 using CodeReviewr.App.Diagnostics;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
@@ -111,11 +112,19 @@ public sealed class DiffViewer : Control
     private bool _draggingMinimap;
     private bool _draggingHScroll;
     private double? _maxCodeContentWidthCache;
+    private double? _monoCharWidth;
     private bool _rowsInvalidatePosted;
     private bool _annotationsInvalidatePosted;
     private int _paintEpoch;
-    private readonly Dictionary<string, double> _measureWidthCache = new(StringComparer.Ordinal);
+    private int _contentEpoch;
+    private int _scrollDirection = 1;
+    private bool _paintWarmPosted;
+    private int _paintWarmCursor = -1;
     private readonly Dictionary<LinePaintKey, LinePaintCache> _linePaintCache = new();
+    private readonly Dictionary<DisplayTextKey, string> _displayTextCache = new();
+    private readonly Dictionary<int, FormattedText> _gutterCache = new();
+    private readonly Dictionary<(string Prefix, IBrush Brush), FormattedText> _prefixCache = new();
+    private readonly Dictionary<uint, SolidColorBrush> _intraHighlightBrushes = new();
     private Size _layoutSize;
     private INotifyCollectionChanged? _rowsNotify;
     private INotifyCollectionChanged? _annotationsNotify;
@@ -126,7 +135,11 @@ public sealed class DiffViewer : Control
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
 
+    private const int PaintWarmRowsPerTick = 6;
+    private const int PaintWarmViewportMultiplier = 2;
+
     private readonly record struct LinePaintKey(int RowIndex, byte Side, int Epoch);
+    private readonly record struct DisplayTextKey(int RowIndex, byte Side, int ContentEpoch);
 
     private sealed class LinePaintCache(
         string text,
@@ -302,6 +315,9 @@ public sealed class DiffViewer : Control
     private void OnActualThemeVariantChanged(object? sender, EventArgs e)
     {
         ClearPaintCache();
+        _gutterCache.Clear();
+        _prefixCache.Clear();
+        _intraHighlightBrushes.Clear();
         InvalidateVisual();
     }
 
@@ -318,9 +334,10 @@ public sealed class DiffViewer : Control
             _hoverAddComment = false;
             _scrollY = 0;
             _scrollX = 0;
-            _maxCodeContentWidthCache = null;
+            _scrollDirection = 1;
+            _paintWarmCursor = -1;
             _minimapSnapshot = null;
-            ClearPaintCache();
+            ClearContentCaches();
             UpdateEmptyMessage();
             InvalidateVisual();
             InvalidateMeasure();
@@ -337,12 +354,17 @@ public sealed class DiffViewer : Control
             UpdateEmptyMessage();
             InvalidateVisual();
         }
-        else if (change.Property == ShowWhitespaceProperty
-                 || change.Property == LeftSyntaxTokensProperty
+        else if (change.Property == LeftSyntaxTokensProperty
                  || change.Property == RightSyntaxTokensProperty)
         {
-            _maxCodeContentWidthCache = null;
-            ClearPaintCache();
+            // Syntax does not change glyph widths — keep measure/max-width caches.
+            ClearLinePaintCache();
+            ClampScroll();
+            InvalidateVisual();
+        }
+        else if (change.Property == ShowWhitespaceProperty)
+        {
+            ClearContentCaches();
             ClampScroll();
             InvalidateVisual();
         }
@@ -355,10 +377,7 @@ public sealed class DiffViewer : Control
                  || change.Property == InlineInsetHeightProperty)
         {
             if (change.Property == ViewModeProperty)
-            {
-                _maxCodeContentWidthCache = null;
-                ClearPaintCache();
-            }
+                ClearContentCaches();
             ClampScroll();
             InvalidateVisual();
         }
@@ -451,8 +470,8 @@ public sealed class DiffViewer : Control
     private void InvalidateRowsState()
     {
         _minimapSnapshot = null;
-        _maxCodeContentWidthCache = null;
-        ClearPaintCache();
+        _paintWarmCursor = -1;
+        ClearContentCaches();
         UpdateEmptyMessage();
         ClampScroll();
         InvalidateVisual();
@@ -621,14 +640,14 @@ public sealed class DiffViewer : Control
                 {
                     DrawGutter(context, row.OldLineNumber, contentLeft, y);
                     if (row.Kind == DiffRowKind.HunkHeader)
-                        DrawText(context, row.LeftText.ToString(), SideBySideCodeX(contentLeft) - _scrollX, y, muted);
+                        DrawText(context, GetDisplayText(i, side: 0, row.LeftText), SideBySideCodeX(contentLeft) - _scrollX, y, muted);
                     else if (row.Kind == DiffRowKind.Collapsed)
                         DrawText(context, $"⋯ {row.CollapsedCount} unchanged lines — click to expand",
                             SideBySideCodeX(contentLeft), y, muted);
                     else if (!row.LeftText.IsEmpty)
                     {
                         var x = SideBySideCodeX(contentLeft) - _scrollX;
-                        var leftFormatted = FormatText(row.LeftText);
+                        var leftFormatted = GetDisplayText(i, side: 0, row.LeftText);
                         DrawIntraLineHighlights(context, leftFormatted, row.LeftIntraLine, x, y, rowH, removedAccent);
                         DrawSyntaxOrPlainText(context, i, side: 0, leftFormatted, x, y,
                             TextBrush(leftKind, contextText), LeftSyntaxTokens, row.OldLineNumber);
@@ -641,7 +660,7 @@ public sealed class DiffViewer : Control
                     if (row.Kind is not DiffRowKind.HunkHeader and not DiffRowKind.Collapsed && !row.RightText.IsEmpty)
                     {
                         var x = SideBySideCodeX(midX) - _scrollX;
-                        var rightFormatted = FormatText(row.RightText);
+                        var rightFormatted = GetDisplayText(i, side: 1, row.RightText);
                         DrawIntraLineHighlights(context, rightFormatted, row.RightIntraLine, x, y, rowH, addedAccent);
                         DrawSyntaxOrPlainText(context, i, side: 1, rightFormatted, x, y,
                             TextBrush(rightKind, contextText), RightSyntaxTokens, row.NewLineNumber);
@@ -655,7 +674,7 @@ public sealed class DiffViewer : Control
 
                 if (row.Kind == DiffRowKind.HunkHeader)
                 {
-                    DrawText(context, row.LeftText.ToString(), UnifiedCodeX(contentLeft) - _scrollX, y, muted);
+                    DrawText(context, GetDisplayText(i, side: 0, row.LeftText), UnifiedCodeX(contentLeft) - _scrollX, y, muted);
                     DrawUnifiedHunkButtons(context, row.HunkIndex, y, rowH, bounds.Width);
                     continue;
                 }
@@ -675,14 +694,14 @@ public sealed class DiffViewer : Control
                     DiffRowKind.Removed => "-",
                     _ => " ",
                 };
-                var formatted = FormatText(text);
+                var formatted = GetDisplayText(i, side: 2, text);
                 var x = UnifiedCodeX(contentLeft) - _scrollX;
                 var intra = row.Kind == DiffRowKind.Removed ? row.LeftIntraLine : row.RightIntraLine;
                 var accent = row.Kind == DiffRowKind.Added ? addedAccent : removedAccent;
                 // Offset highlights by the +/- prefix width.
-                var prefixWidth = MeasureWidth(prefix);
+                var prefixBrush = TextBrush(row.Kind, contextText);
+                var prefixWidth = DrawPrefix(context, prefix, x, y, prefixBrush);
                 DrawIntraLineHighlights(context, formatted, intra, x + prefixWidth, y, rowH, accent);
-                DrawText(context, prefix, x, y, TextBrush(row.Kind, contextText));
                 var tokens = row.Kind == DiffRowKind.Removed ? LeftSyntaxTokens : RightSyntaxTokens;
                 var lineNo = row.Kind == DiffRowKind.Removed ? row.OldLineNumber : row.NewLineNumber;
                 if (row.Kind == DiffRowKind.Context)
@@ -701,6 +720,7 @@ public sealed class DiffViewer : Control
 
         DrawHorizontalScrollbar(context, bounds);
         OpenTelemetryBootstrap.RecordDiffRender(renderSw.Elapsed.TotalMilliseconds, visibleCount);
+        SchedulePaintWarm(first, last, rows.Count);
     }
 
     private static double UnifiedCodeX(double contentLeft) =>
@@ -738,7 +758,9 @@ public sealed class DiffViewer : Control
             return 0;
         }
 
-        double max = 0;
+        // JetBrains Mono is fixed-width — max advance is char-count × single-glyph width.
+        var advance = MonoCharWidth();
+        var maxChars = 0;
         if (ViewMode == DiffViewMode.SideBySide)
         {
             foreach (var row in rows)
@@ -747,14 +769,14 @@ public sealed class DiffViewer : Control
                     continue;
                 if (row.Kind == DiffRowKind.HunkHeader)
                 {
-                    max = Math.Max(max, MeasureWidth(row.LeftText.ToString()));
+                    maxChars = Math.Max(maxChars, DisplayCharCount(row.LeftText));
                     continue;
                 }
 
                 if (!row.LeftText.IsEmpty)
-                    max = Math.Max(max, MeasureWidth(FormatText(row.LeftText)));
+                    maxChars = Math.Max(maxChars, DisplayCharCount(row.LeftText));
                 if (!row.RightText.IsEmpty)
-                    max = Math.Max(max, MeasureWidth(FormatText(row.RightText)));
+                    maxChars = Math.Max(maxChars, DisplayCharCount(row.RightText));
             }
         }
         else
@@ -765,24 +787,38 @@ public sealed class DiffViewer : Control
                     continue;
                 if (row.Kind == DiffRowKind.HunkHeader)
                 {
-                    max = Math.Max(max, MeasureWidth(row.LeftText.ToString()));
+                    maxChars = Math.Max(maxChars, DisplayCharCount(row.LeftText));
                     continue;
                 }
 
                 var text = row.Kind == DiffRowKind.Removed ? row.LeftText : row.RightText;
                 if (text.IsEmpty) text = row.LeftText.IsEmpty ? row.RightText : row.LeftText;
-                var prefix = row.Kind switch
-                {
-                    DiffRowKind.Added => "+",
-                    DiffRowKind.Removed => "-",
-                    _ => " ",
-                };
-                max = Math.Max(max, MeasureWidth(prefix) + MeasureWidth(FormatText(text)));
+                // Unified rows include a one-character +/-/space prefix.
+                maxChars = Math.Max(maxChars, 1 + DisplayCharCount(text));
             }
         }
 
-        _maxCodeContentWidthCache = max;
-        return max;
+        _maxCodeContentWidthCache = maxChars * advance;
+        return _maxCodeContentWidthCache.Value;
+    }
+
+    private static int DisplayCharCount(ReadOnlyMemory<char> text)
+    {
+        var span = text.Span;
+        var len = span.Length;
+        while (len > 0 && (span[len - 1] == '\n' || span[len - 1] == '\r'))
+            len--;
+        return len;
+    }
+
+    private double MonoCharWidth()
+    {
+        if (_monoCharWidth is { } cached)
+            return cached;
+
+        var ft = CreateFormattedText("M", 12, Brushes.Transparent);
+        _monoCharWidth = ft.WidthIncludingTrailingWhitespace;
+        return _monoCharWidth.Value;
     }
 
     private double MaxScrollX() => Math.Max(0, GetMaxCodeContentWidth() - ViewportCodeWidth());
@@ -1251,9 +1287,35 @@ public sealed class DiffViewer : Control
 
     private void ClearPaintCache()
     {
+        ClearLinePaintCache();
+        _gutterCache.Clear();
+        _prefixCache.Clear();
+    }
+
+    private void ClearLinePaintCache()
+    {
         _paintEpoch++;
-        _measureWidthCache.Clear();
         _linePaintCache.Clear();
+        _paintWarmCursor = -1;
+    }
+
+    private void ClearContentCaches()
+    {
+        _contentEpoch++;
+        _displayTextCache.Clear();
+        _maxCodeContentWidthCache = null;
+        ClearPaintCache();
+    }
+
+    private string GetDisplayText(int rowIndex, byte side, ReadOnlyMemory<char> text)
+    {
+        var key = new DisplayTextKey(rowIndex, side, _contentEpoch);
+        if (_displayTextCache.TryGetValue(key, out var cached))
+            return cached;
+
+        var formatted = FormatText(text);
+        _displayTextCache[key] = formatted;
+        return formatted;
     }
 
     private string FormatText(ReadOnlyMemory<char> text)
@@ -1266,8 +1328,13 @@ public sealed class DiffViewer : Control
     private void DrawGutter(DrawingContext ctx, int? line, double x, double y)
     {
         if (line is null) return;
-        var brush = Brush("ForgeDiffGutterTextBrush", Brushes.Gray);
-        var ft = CreateFormattedText(line.Value.ToString(), 12, brush);
+        if (!_gutterCache.TryGetValue(line.Value, out var ft))
+        {
+            var brush = Brush("ForgeDiffGutterTextBrush", Brushes.Gray);
+            ft = CreateFormattedText(line.Value.ToString(), 12, brush);
+            _gutterCache[line.Value] = ft;
+        }
+
         ctx.DrawText(ft, new Point(x + GutterWidth - ft.Width - 4, y + (RowHeight - ft.Height) / 2));
     }
 
@@ -1280,16 +1347,16 @@ public sealed class DiffViewer : Control
         return ft.WidthIncludingTrailingWhitespace;
     }
 
-    private double MeasureWidth(string text)
+    private double DrawPrefix(DrawingContext ctx, string prefix, double x, double y, IBrush brush)
     {
-        if (string.IsNullOrEmpty(text)) return 0;
-        if (_measureWidthCache.TryGetValue(text, out var cached))
-            return cached;
+        if (!_prefixCache.TryGetValue((prefix, brush), out var ft))
+        {
+            ft = CreateFormattedText(prefix, 12, brush);
+            _prefixCache[(prefix, brush)] = ft;
+        }
 
-        var ft = CreateFormattedText(text, 12, Brushes.Transparent);
-        var width = ft.WidthIncludingTrailingWhitespace;
-        _measureWidthCache[text] = width;
-        return width;
+        ctx.DrawText(ft, new Point(x, y + (RowHeight - ft.Height) / 2));
+        return ft.WidthIncludingTrailingWhitespace;
     }
 
     private FormattedText CreateFormattedText(string text, double fontSize, IBrush brush) =>
@@ -1313,10 +1380,8 @@ public sealed class DiffViewer : Control
         if (spans is null || spans.Count == 0 || string.IsNullOrEmpty(text))
             return;
 
-        // Semi-transparent accent under changed substrings.
-        var highlight = accent is ISolidColorBrush solid
-            ? (IBrush)new SolidColorBrush(Color.FromArgb(0x55, solid.Color.R, solid.Color.G, solid.Color.B))
-            : accent;
+        var highlight = GetIntraHighlightBrush(accent);
+        var advance = MonoCharWidth();
 
         foreach (var span in spans)
         {
@@ -1324,13 +1389,25 @@ public sealed class DiffViewer : Control
                 continue;
             var len = Math.Min(span.Length, text.Length - span.Start);
             if (len <= 0) continue;
-            var before = text[..span.Start];
-            var mid = text.Substring(span.Start, len);
-            var left = x + MeasureWidth(before);
-            var width = MeasureWidth(mid);
+            var left = x + span.Start * advance;
+            var width = len * advance;
             if (width <= 0) continue;
             ctx.FillRectangle(highlight, new Rect(left, y, width, rowH));
         }
+    }
+
+    private IBrush GetIntraHighlightBrush(IBrush accent)
+    {
+        if (accent is not ISolidColorBrush solid)
+            return accent;
+
+        var key = Color.FromArgb(0x55, solid.Color.R, solid.Color.G, solid.Color.B).ToUInt32();
+        if (_intraHighlightBrushes.TryGetValue(key, out var cached))
+            return cached;
+
+        var brush = new SolidColorBrush(Color.FromUInt32(key));
+        _intraHighlightBrushes[key] = brush;
+        return brush;
     }
 
     private void DrawSyntaxOrPlainText(
@@ -1425,6 +1502,130 @@ public sealed class DiffViewer : Control
         return cached;
     }
 
+    private void SchedulePaintWarm(int firstVisible, int lastVisible, int rowCount)
+    {
+        if (rowCount <= 0 || _paintWarmPosted)
+            return;
+
+        _paintWarmPosted = true;
+        var epoch = _paintEpoch;
+        var contentEpoch = _contentEpoch;
+        var direction = _scrollDirection;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _paintWarmPosted = false;
+            if (epoch != _paintEpoch || contentEpoch != _contentEpoch)
+                return;
+            WarmPaintCache(firstVisible, lastVisible, direction);
+        }, DispatcherPriority.Background);
+    }
+
+    private void WarmPaintCache(int firstVisible, int lastVisible, int direction)
+    {
+        var rows = Rows;
+        if (rows is null || rows.Count == 0)
+            return;
+
+        var rowH = RowHeight;
+        if (rowH <= 0)
+            return;
+
+        var band = Math.Max(PaintWarmRowsPerTick, (int)(ViewportHeight / rowH) * PaintWarmViewportMultiplier);
+        int start;
+        int end;
+        if (direction >= 0)
+        {
+            start = lastVisible + 1;
+            end = Math.Min(rows.Count - 1, lastVisible + band);
+        }
+        else
+        {
+            end = firstVisible - 1;
+            start = Math.Max(0, firstVisible - band);
+        }
+
+        if (start > end)
+        {
+            // First paint / nowhere to warm ahead — seed a small band below the viewport.
+            start = lastVisible + 1;
+            end = Math.Min(rows.Count - 1, lastVisible + band);
+            if (start > end)
+                return;
+        }
+
+        if (direction >= 0)
+        {
+            if (_paintWarmCursor > end)
+                return; // Band already warmed.
+            if (_paintWarmCursor < start)
+                _paintWarmCursor = start;
+        }
+        else
+        {
+            if (_paintWarmCursor >= 0 && _paintWarmCursor < start)
+                return;
+            if (_paintWarmCursor < 0 || _paintWarmCursor > end)
+                _paintWarmCursor = end;
+        }
+
+        var warmed = 0;
+        var muted = Brush("ForgeOnSurfaceBrush", Brushes.White);
+        while (warmed < PaintWarmRowsPerTick && _paintWarmCursor >= start && _paintWarmCursor <= end)
+        {
+            WarmRow(rows, _paintWarmCursor, muted);
+            warmed++;
+            _paintWarmCursor += direction >= 0 ? 1 : -1;
+        }
+
+        if (_paintWarmCursor >= start && _paintWarmCursor <= end)
+            SchedulePaintWarm(firstVisible, lastVisible, rows.Count);
+    }
+
+    private void WarmRow(IReadOnlyList<DiffRow> rows, int index, IBrush fallback)
+    {
+        if ((uint)index >= (uint)rows.Count)
+            return;
+
+        var row = rows[index];
+        if (row.Kind is DiffRowKind.HunkHeader or DiffRowKind.Collapsed or DiffRowKind.Padding)
+            return;
+
+        if (ViewMode == DiffViewMode.SideBySide)
+        {
+            if (!row.LeftText.IsEmpty)
+            {
+                var left = GetDisplayText(index, side: 0, row.LeftText);
+                var leftKind = DiffRowPresentation.SideBySideLeftKind(row);
+                GetOrCreateLinePaint(index, side: 0, left, TextBrush(leftKind, fallback), LeftSyntaxTokens, row.OldLineNumber);
+            }
+
+            if (!row.RightText.IsEmpty)
+            {
+                var right = GetDisplayText(index, side: 1, row.RightText);
+                var rightKind = DiffRowPresentation.SideBySideRightKind(row);
+                GetOrCreateLinePaint(index, side: 1, right, TextBrush(rightKind, fallback), RightSyntaxTokens, row.NewLineNumber);
+            }
+
+            return;
+        }
+
+        var text = row.Kind == DiffRowKind.Removed ? row.LeftText : row.RightText;
+        if (text.IsEmpty) text = row.LeftText.IsEmpty ? row.RightText : row.LeftText;
+        if (text.IsEmpty)
+            return;
+
+        var formatted = GetDisplayText(index, side: 2, text);
+        var tokens = row.Kind == DiffRowKind.Removed ? LeftSyntaxTokens : RightSyntaxTokens;
+        var lineNo = row.Kind == DiffRowKind.Removed ? row.OldLineNumber : row.NewLineNumber;
+        if (row.Kind == DiffRowKind.Context)
+        {
+            tokens = RightSyntaxTokens ?? LeftSyntaxTokens;
+            lineNo = row.NewLineNumber ?? row.OldLineNumber;
+        }
+
+        GetOrCreateLinePaint(index, side: 2, formatted, TextBrush(row.Kind, fallback), tokens, lineNo);
+    }
+
     private IBrush RowBrush(DiffRowKind kind, bool selected) =>
         selected ? Brush("ForgeDiffSelectionFillBrush", Brushes.SlateBlue)
         : kind switch
@@ -1501,6 +1702,7 @@ public sealed class DiffViewer : Control
         var next = Math.Clamp(ratio * Math.Max(0, contentHeight - viewportHeight), 0, Math.Max(0, contentHeight - viewportHeight));
         if (Math.Abs(next - _scrollY) > 0.01)
         {
+            _scrollDirection = next > _scrollY ? 1 : -1;
             _scrollY = next;
             NotifyViewportChanged();
         }
@@ -1560,6 +1762,7 @@ public sealed class DiffViewer : Control
             var nextY = Math.Clamp(_scrollY - e.Delta.Y * RowHeight * 3, 0, max);
             if (Math.Abs(nextY - _scrollY) > 0.01)
             {
+                _scrollDirection = nextY > _scrollY ? 1 : -1;
                 _scrollY = nextY;
                 changed = true;
             }
@@ -1926,6 +2129,7 @@ public sealed class DiffViewer : Control
             next = y + RowHeight - viewportHeight;
         if (Math.Abs(next - _scrollY) > 0.01)
         {
+            _scrollDirection = next > _scrollY ? 1 : -1;
             _scrollY = next;
             NotifyViewportChanged();
         }

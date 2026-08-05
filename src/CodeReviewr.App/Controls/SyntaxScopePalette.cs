@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Avalonia.Media;
 using Avalonia.Styling;
 
@@ -9,6 +10,8 @@ namespace CodeReviewr.App.Controls;
 /// </summary>
 internal static class SyntaxScopePalette
 {
+    private static readonly ConcurrentDictionary<string, IBrush> BrushCache = new(StringComparer.Ordinal);
+
     public static IBrush? BrushForScope(string scope, ThemeVariant? theme)
     {
         if (string.IsNullOrEmpty(scope))
@@ -44,5 +47,5 @@ internal static class SyntaxScopePalette
         scope.Contains(fragment, StringComparison.OrdinalIgnoreCase);
 
     private static IBrush Hex(string hex) =>
-        new SolidColorBrush(Color.Parse(hex));
+        BrushCache.GetOrAdd(hex, static h => new SolidColorBrush(Color.Parse(h)));
 }
