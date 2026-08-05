@@ -11,6 +11,8 @@ namespace CodeReviewr.Git;
 /// </summary>
 public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitRebaseService
 {
+    private const string SessionMarkerFileName = "codereviewr-rebase-session";
+
     public Task<RebaseRunResult> StartInteractiveAsync(
         string repositoryPath,
         string ontoRef,
@@ -27,12 +29,16 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
 
             ValidateTodo(kept);
 
+            // Drop any leftover session from a previous interrupted rebase in this repo.
+            CleanupSession(repositoryPath);
+
             var sessionDir = Path.Combine(
                 Path.GetTempPath(),
                 "codereviewr-rebase",
                 Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(sessionDir);
 
+            var retainSession = false;
             try
             {
                 var todoPath = Path.Combine(sessionDir, "todo");
@@ -84,11 +90,12 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
                     token).ConfigureAwait(false);
 
                 var (sequenceEditor, commitEditor) = WriteEditorScripts(sessionDir, todoPath);
+                WriteSessionMarker(repositoryPath, sessionDir);
 
                 var env = new Dictionary<string, string?>
                 {
-                    ["GIT_SEQUENCE_EDITOR"] = sequenceEditor,
-                    ["GIT_EDITOR"] = commitEditor,
+                    ["GIT_SEQUENCE_EDITOR"] = QuoteEditorCommand(sequenceEditor),
+                    ["GIT_EDITOR"] = QuoteEditorCommand(commitEditor),
                     // Prevent nested editors / prompts if a hook tries to open one.
                     ["GIT_TERMINAL_PROMPT"] = "0",
                 };
@@ -103,43 +110,49 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
                     },
                     token).ConfigureAwait(false);
 
-                return InterpretResult(repositoryPath, result);
+                var interpreted = InterpretResult(repositoryPath, result);
+                retainSession = interpreted.Outcome == RebaseRunOutcome.Conflicts;
+                return interpreted;
             }
             finally
             {
-                try
-                {
-                    if (Directory.Exists(sessionDir))
-                        Directory.Delete(sessionDir, recursive: true);
-                }
-                catch
-                {
-                    // Best effort; leftover temp dirs are harmless.
-                }
+                if (!retainSession)
+                    CleanupSession(repositoryPath, sessionDir);
             }
         }, ct);
 
     public Task<RebaseRunResult> ContinueAsync(string repositoryPath, CancellationToken ct = default) =>
         gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
+            var env = TryBuildContinueEnvironment(repositoryPath);
             var result = await runner.RunAsync(
                 repositoryPath,
                 ["rebase", "--continue"],
-                new GitProcessOptions { AllowNonZeroExitCode = true },
+                new GitProcessOptions
+                {
+                    AllowNonZeroExitCode = true,
+                    ExtraEnvironment = env,
+                },
                 token).ConfigureAwait(false);
 
-            return InterpretResult(repositoryPath, result);
+            var interpreted = InterpretResult(repositoryPath, result);
+            if (interpreted.Outcome != RebaseRunOutcome.Conflicts)
+                CleanupSession(repositoryPath);
+
+            return interpreted;
         }, ct);
 
     public Task AbortAsync(string repositoryPath, CancellationToken ct = default) =>
         gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {
             var inProgress = GitRepositoryPaths.DetectInProgress(repositoryPath);
-            if (inProgress != InProgressOperation.Rebase)
-                return;
+            if (inProgress == InProgressOperation.Rebase)
+            {
+                await runner.RunAsync(repositoryPath, ["rebase", "--abort"], options: null, token)
+                    .ConfigureAwait(false);
+            }
 
-            await runner.RunAsync(repositoryPath, ["rebase", "--abort"], options: null, token)
-                .ConfigureAwait(false);
+            CleanupSession(repositoryPath);
         }, ct);
 
     private static RebaseRunResult InterpretResult(string repositoryPath, GitCommandResult result)
@@ -179,6 +192,12 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
         }
     }
 
+    /// <summary>
+    /// Filters dropped entries the same way <see cref="StartInteractiveAsync"/> does before building the todo file.
+    /// </summary>
+    internal static IReadOnlyList<RebaseTodoEntry> FilterDropped(IReadOnlyList<RebaseTodoEntry> todo) =>
+        todo.Where(t => t.Action != RebaseTodoAction.Drop).ToList();
+
     internal static string BuildTodoFile(IReadOnlyList<RebaseTodoEntry> kept)
     {
         var sb = new StringBuilder();
@@ -198,6 +217,11 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Git treats editor env vars as a command line; quote so paths with spaces still launch.
+    /// </summary>
+    internal static string QuoteEditorCommand(string path) => $"\"{path}\"";
+
     private static (string SequenceEditor, string CommitEditor) WriteEditorScripts(
         string sessionDir,
         string todoPath)
@@ -214,10 +238,30 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
                 exit /b 0
                 """);
 
+            // Only overwrite for reword/squash. A conflict --continue on pick may still
+            // invoke GIT_EDITOR; consuming a queued message there would steal it.
             File.WriteAllText(commitCmd, $$"""
                 @echo off
                 setlocal EnableDelayedExpansion
                 set "DIR={{sessionDir}}"
+                for /f "delims=" %%G in ('git rev-parse --git-dir 2^>nul') do set "GITDIR=%%G"
+                if not defined GITDIR exit /b 0
+                set "VERB="
+                if exist "!GITDIR!\rebase-merge\done" (
+                  for /f "usebackq delims=" %%L in ("!GITDIR!\rebase-merge\done") do set "LASTDONE=%%L"
+                  for /f "tokens=1" %%V in ("!LASTDONE!") do set "VERB=%%V"
+                )
+                if /I "!VERB!"=="pick" exit /b 0
+                if /I "!VERB!"=="p" exit /b 0
+                if /I "!VERB!"=="edit" exit /b 0
+                if /I "!VERB!"=="e" exit /b 0
+                if /I "!VERB!"=="exec" exit /b 0
+                if /I "!VERB!"=="x" exit /b 0
+                if /I "!VERB!"=="break" exit /b 0
+                if /I "!VERB!"=="b" exit /b 0
+                if /I "!VERB!"=="drop" exit /b 0
+                if /I "!VERB!"=="d" exit /b 0
+                if "!VERB!"=="" exit /b 0
                 set /p IDX=<"%DIR%\msg_index"
                 set "MSG=%DIR%\messages\!IDX!.txt"
                 if exist "!MSG!" (
@@ -239,9 +283,18 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
             cp "{{todoPath}}" "$1"
             """);
 
+        // Only overwrite for reword/squash. A conflict --continue on pick may still
+        // invoke GIT_EDITOR; consuming a queued message there would steal it.
         File.WriteAllText(commitSh, $$"""
             #!/bin/sh
             DIR="{{sessionDir}}"
+            GITDIR=$(git rev-parse --git-dir 2>/dev/null) || exit 0
+            DONE="$GITDIR/rebase-merge/done"
+            [ -f "$DONE" ] || exit 0
+            VERB=$(awk 'NF { line=$0 } END { print line }' "$DONE" | awk '{ print $1 }')
+            case "$VERB" in
+              pick|p|edit|e|exec|x|break|b|drop|d|"") exit 0 ;;
+            esac
             IDX=$(cat "$DIR/msg_index")
             MSG="$DIR/messages/$IDX.txt"
             if [ -f "$MSG" ]; then
@@ -271,6 +324,79 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
         catch (Exception)
         {
             // Ignore — script may still run if the filesystem grants execute another way.
+        }
+    }
+
+    private static string SessionMarkerPath(string repositoryPath) =>
+        Path.Combine(GitRepositoryPaths.ResolveGitDir(repositoryPath), SessionMarkerFileName);
+
+    private static void WriteSessionMarker(string repositoryPath, string sessionDir) =>
+        File.WriteAllText(SessionMarkerPath(repositoryPath), sessionDir);
+
+    private static string? TryReadSessionDir(string repositoryPath)
+    {
+        var marker = SessionMarkerPath(repositoryPath);
+        if (!File.Exists(marker))
+            return null;
+
+        try
+        {
+            var sessionDir = File.ReadAllText(marker).Trim();
+            return string.IsNullOrWhiteSpace(sessionDir) ? null : sessionDir;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string CommitEditorPath(string sessionDir) =>
+        OperatingSystem.IsWindows()
+            ? Path.Combine(sessionDir, "commit-editor.cmd")
+            : Path.Combine(sessionDir, "commit-editor.sh");
+
+    private static Dictionary<string, string?>? TryBuildContinueEnvironment(string repositoryPath)
+    {
+        var sessionDir = TryReadSessionDir(repositoryPath);
+        if (sessionDir is null || !Directory.Exists(sessionDir))
+            return null;
+
+        var commitEditor = CommitEditorPath(sessionDir);
+        if (!File.Exists(commitEditor))
+            return null;
+
+        return new Dictionary<string, string?>
+        {
+            ["GIT_EDITOR"] = QuoteEditorCommand(commitEditor),
+            ["GIT_TERMINAL_PROMPT"] = "0",
+        };
+    }
+
+    private static void CleanupSession(string repositoryPath, string? knownSessionDir = null)
+    {
+        var sessionDir = knownSessionDir ?? TryReadSessionDir(repositoryPath);
+        if (sessionDir is not null)
+        {
+            try
+            {
+                if (Directory.Exists(sessionDir))
+                    Directory.Delete(sessionDir, recursive: true);
+            }
+            catch
+            {
+                // Best effort; leftover temp dirs are harmless.
+            }
+        }
+
+        try
+        {
+            var marker = SessionMarkerPath(repositoryPath);
+            if (File.Exists(marker))
+                File.Delete(marker);
+        }
+        catch
+        {
+            // Best effort.
         }
     }
 }

@@ -222,7 +222,7 @@ public partial class RebaseWizardViewModel : ObservableObject
         Step = RebaseWizardStep.SelectBase;
         IsDirty = _getChangeCount() > 0;
 
-        TodoItems.Clear();
+        ClearTodoItems();
         BeforeCommits.Clear();
         AfterCommits.Clear();
         SelectedTodoItem = null;
@@ -256,7 +256,7 @@ public partial class RebaseWizardViewModel : ObservableObject
         _repoPath = null;
         _ontoRef = null;
         OwnsInProgressRebase = false;
-        TodoItems.Clear();
+        ClearTodoItems();
         BeforeCommits.Clear();
         AfterCommits.Clear();
         BaseBranches.Clear();
@@ -487,7 +487,7 @@ public partial class RebaseWizardViewModel : ObservableObject
                 await ReloadCommitsForBaseAsync(SelectedBaseBranch.Name).ConfigureAwait(true);
             else
             {
-                TodoItems.Clear();
+                ClearTodoItems();
                 StatusMessage = "No suitable base branch found.";
             }
         }
@@ -509,7 +509,7 @@ public partial class RebaseWizardViewModel : ObservableObject
             var commits = await _history.ListCommitsRangeAsync(
                 _repoPath, baseRef, "HEAD", oldestFirst: true).ConfigureAwait(true);
 
-            TodoItems.Clear();
+            ClearTodoItems();
             foreach (var commit in commits)
                 TodoItems.Add(new RebaseTodoItemViewModel(commit));
 
@@ -541,7 +541,7 @@ public partial class RebaseWizardViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            TodoItems.Clear();
+            ClearTodoItems();
             StatusMessage = $"Failed to load commits: {ex.Message}";
         }
     }
@@ -661,6 +661,17 @@ public partial class RebaseWizardViewModel : ObservableObject
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Unsubscribes per-item handlers before clearing. <see cref="ObservableCollection{T}.Clear"/>
+    /// raises Reset without OldItems, so <see cref="OnTodoCollectionChanged"/> alone cannot unsubscribe.
+    /// </summary>
+    private void ClearTodoItems()
+    {
+        foreach (var item in TodoItems)
+            item.PropertyChanged -= OnTodoItemPropertyChanged;
+        TodoItems.Clear();
     }
 
     private void OnTodoCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
