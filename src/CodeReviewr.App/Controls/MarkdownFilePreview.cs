@@ -323,10 +323,11 @@ public sealed class MarkdownFilePreview : UserControl
             && string.Equals(fence.Info?.Trim(), "mermaid", StringComparison.OrdinalIgnoreCase))
         {
             var mermaidSource = fence.Lines.ToString();
+            // Preview is click-to-expand only; pan/zoom lives in the enlarge modal.
             return new MermaidDiagramView
             {
                 Source = mermaidSource,
-                IsInteractive = true,
+                IsInteractive = false,
                 ExpandOnClick = true,
                 MinHeight = 160,
                 MaxHeight = 420,

@@ -697,7 +697,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             await RevalidateSelectedDiffAfterStatusAsync(previousStatus, status);
             await PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReviewAfter);
             PendingReview.UpdateFileUnresolvedCommentCounts();
-            PendingReview.RequestClassificationRefresh();
             ScheduleFileStatusPrefetch();
 
             CodeReviewrMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);

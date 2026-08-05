@@ -732,17 +732,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         NotifyAiFileDetailChanged();
     }
 
-    /// <summary>
-    /// Re-applies file classifications from the latest AI run onto the current pending file rows.
-    /// Call after the file list is rebuilt so icons survive status refresh.
-    /// </summary>
-    public void RequestClassificationRefresh()
-    {
-        if (AiRunState != AiRunState.Complete)
-            return;
-        _ = RefreshFileClassificationsAsync();
-    }
-
     /// <summary>Best-effort refresh of each pending file's <see cref="FileItemViewModel.AiChangeClassification"/> from the latest run.</summary>
     private async Task RefreshFileClassificationsAsync()
     {
