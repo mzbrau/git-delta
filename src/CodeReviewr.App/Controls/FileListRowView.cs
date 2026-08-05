@@ -186,6 +186,17 @@ public sealed class FileListRowView : UserControl
             Child = grid,
         };
 
+        _folderRow[!MarginProperty] = new Binding(nameof(FileListEntry.IndentMargin));
+        _fileRow[!MarginProperty] = new Binding(nameof(FileListEntry.IndentMargin));
+        _folderRow[!IsVisibleProperty] = new Binding(nameof(FileListEntry.IsFolder));
+        _fileRow[!IsVisibleProperty] = new Binding(nameof(FileListEntry.IsFile));
+        _folderLabel[!TextBlock.TextProperty] = new Binding(nameof(FileListEntry.Label));
+        _name[!MiddleEllipsisTextBlock.TextProperty] = new Binding(nameof(FileListEntry.Label));
+        _folderChevron[!MaterialIcon.KindProperty] = new Binding(nameof(FileListEntry.IsExpanded))
+        {
+            Converter = ForgeConverters.ChevronKind,
+        };
+
         Content = new Panel { Children = { _folderRow, _fileRow } };
         DataContextChanged += (_, _) => OnEntryChanged();
     }
@@ -255,25 +266,6 @@ public sealed class FileListRowView : UserControl
             return;
         }
 
-        _folderRow[!MarginProperty] = new Binding(nameof(FileListEntry.IndentMargin));
-        _fileRow[!MarginProperty] = new Binding(nameof(FileListEntry.IndentMargin));
-        _folderRow[!IsVisibleProperty] = new Binding(nameof(FileListEntry.IsFolder));
-        _fileRow[!IsVisibleProperty] = new Binding(nameof(FileListEntry.IsFile));
-
-        _folderLabel.Text = entry.Label;
-        _folderChevron.Kind = entry.IsExpanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight;
-        entry.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName is nameof(FileListEntry.IsExpanded) or null)
-                _folderChevron.Kind = entry.IsExpanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight;
-            if (e.PropertyName is nameof(FileListEntry.Label) or null)
-            {
-                _folderLabel.Text = entry.Label;
-                _name.Text = entry.Label;
-            }
-        };
-
-        _name.Text = entry.Label;
         _stageCheck.IsVisible = ShowStageCheckbox;
         _stageCheck.IsChecked = StageCheckboxChecked;
         ToolTip.SetTip(_stageCheck, StageCheckboxChecked ? "Unstage file" : "Stage file");
