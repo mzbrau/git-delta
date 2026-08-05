@@ -17,6 +17,7 @@ using CodeReviewr.App.Controls;
 using CodeReviewr.App.Services;
 using CodeReviewr.App.ViewModels;
 using CodeReviewr.Core;
+using CodeReviewr.Core.Diff;
 using CodeReviewr.GitHub;
 using CodeReviewr.Review;
 
@@ -126,6 +127,8 @@ public partial class MainWindow : Window
         vm.WorkingCopy.PendingReview.ExpandedLocalCommentChanged += SyncWcInlineCommentLayout;
         vm.WorkingCopy.PendingReview.RequestScrollToSelectedAnnotation += ScrollWcToSelectedAnnotation;
         vm.WorkingCopy.PendingReview.FocusCommentDraftRequested += FocusWcCommentDraft;
+        vm.WorkingCopy.DiffScrollRequested += ScrollWcDiffToLine;
+        vm.Review.DiffScrollRequested += ScrollPrDiffToLine;
 
         if (!_inlineCommentLayoutHooked)
         {
@@ -190,6 +193,24 @@ public partial class MainWindow : Window
             viewer.ScrollToLine(ann.Range.End.Side, ann.Range.End.Line);
 
         SyncWcInlineCommentLayout();
+    }
+
+    private void ScrollWcDiffToLine(DiffSide side, int line)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<DiffViewer>("WcDiffViewer") is { } viewer)
+                viewer.ScrollToLine(side, line);
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void ScrollPrDiffToLine(DiffSide side, int line)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (this.FindControl<DiffViewer>("PrDiffViewer") is { } viewer)
+                viewer.ScrollToLine(side, line);
+        }, DispatcherPriority.Loaded);
     }
 
     private void FocusWcCommentDraft()
@@ -1067,7 +1088,9 @@ public partial class MainWindow : Window
         if (sender is not ListBox list) return;
         if (TryHandleFolderSelection(list, e.AddedItems, isHistory: false))
             return;
-        if (list.SelectedItem is FileListEntry { File: { } file })
+        if (TryHandleSearchHitSelection(list, e.AddedItems))
+            return;
+        if (list.SelectedItem is FileListEntry { File: { } file, IsSearchGroup: false })
             Vm.WorkingCopy.SetFileSelection([file]);
         else if (list.SelectedItem is FileItemViewModel legacy)
             Vm.WorkingCopy.SetFileSelection([legacy]);
@@ -1088,7 +1111,9 @@ public partial class MainWindow : Window
         if (sender is not ListBox list) return;
         if (TryHandleFolderSelection(list, e.AddedItems, isHistory: true))
             return;
-        if (list.SelectedItem is FileListEntry { File: { } file })
+        if (TryHandleSearchHitSelection(list, e.AddedItems))
+            return;
+        if (list.SelectedItem is FileListEntry { File: { } file, IsSearchGroup: false, IsSearchHit: false })
             Vm.WorkingCopy.SetFileSelection([file]);
         else if (list.SelectedItem is FileItemViewModel legacy)
             Vm.WorkingCopy.SetFileSelection([legacy]);
@@ -1157,6 +1182,9 @@ public partial class MainWindow : Window
         if (sender is ListBox source)
         {
             if (TryHandleFolderSelection(source, e.AddedItems, isHistory: false))
+                return;
+
+            if (TryHandleSearchHitSelection(source, e.AddedItems))
                 return;
 
             if (!_multiSelectModifiers)
@@ -1265,7 +1293,7 @@ public partial class MainWindow : Window
     {
         foreach (var item in added)
         {
-            if (item is not FileListEntry { IsFolder: true, FolderKey: { } key })
+            if (item is not FileListEntry { IsExpandable: true, FolderKey: { } key })
                 continue;
 
             _suppressSelectionSync = true;
@@ -1290,20 +1318,48 @@ public partial class MainWindow : Window
         return false;
     }
 
+    private bool TryHandleSearchHitSelection(ListBox list, System.Collections.IList added)
+    {
+        foreach (var item in added)
+        {
+            if (item is not FileListEntry
+                {
+                    IsSearchHit: true,
+                    File: { } file,
+                    HitSide: { } side,
+                    HitLine: { } line
+                })
+            {
+                continue;
+            }
+
+            Vm.WorkingCopy.SelectSearchHit(file, side, line);
+            return true;
+        }
+
+        return false;
+    }
+
     private static FileListEntry? FindEntryInList(ListBox? list, FileItemViewModel file)
     {
         if (list?.Items is null) return null;
+        FileListEntry? hitFallback = null;
         foreach (var item in list.Items)
         {
-            if (item is FileListEntry { File: { } candidate } entry
-                && string.Equals(candidate.Path.Value, file.Path.Value, StringComparison.Ordinal)
-                && candidate.IsStagedList == file.IsStagedList)
+            if (item is not FileListEntry { File: { } candidate } entry
+                || !string.Equals(candidate.Path.Value, file.Path.Value, StringComparison.Ordinal)
+                || candidate.IsStagedList != file.IsStagedList)
             {
-                return entry;
+                continue;
             }
+
+            if (entry.IsFile || entry.IsSearchGroup)
+                return entry;
+            if (entry.IsSearchHit)
+                hitFallback ??= entry;
         }
 
-        return null;
+        return hitFallback;
     }
 
     private static FileItemViewModel? FindInList(ListBox? list, FileItemViewModel file)
@@ -1316,6 +1372,8 @@ public partial class MainWindow : Window
         if (list?.SelectedItems is null) return;
         foreach (var item in list.SelectedItems)
         {
+            if (item is FileListEntry { IsSearchGroup: true })
+                continue;
             if (item is FileListEntry { File: { } file })
                 into.Add(file);
             else if (item is FileItemViewModel legacy)

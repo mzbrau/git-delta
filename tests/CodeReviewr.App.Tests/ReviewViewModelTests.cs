@@ -2221,6 +2221,75 @@ public sealed class ReviewViewModelTests
         Assert.That(vm.HasAiFileBriefing, Is.True);
     }
 
+    [Test]
+    public void FileListQueryMode_Toggle_Updates_Derived_Properties()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        Assert.That(vm.FileListQueryMode, Is.EqualTo(FileListQueryMode.Filter));
+        Assert.That(vm.IsFileListFilterMode, Is.True);
+        Assert.That(vm.IsFileListSearchMode, Is.False);
+        Assert.That(vm.IsPrContentSearchActive, Is.False);
+        Assert.That(vm.FileListQueryPlaceholder, Does.Contain("Filter"));
+        Assert.That(vm.FileListQueryClearTip, Does.Contain("filter").IgnoreCase);
+
+        vm.SetFileListQueryModeCommand.Execute(FileListQueryMode.Search);
+
+        Assert.That(vm.FileListQueryMode, Is.EqualTo(FileListQueryMode.Search));
+        Assert.That(vm.IsFileListFilterMode, Is.False);
+        Assert.That(vm.IsFileListSearchMode, Is.True);
+        Assert.That(vm.FileListQueryPlaceholder, Does.Contain("Search"));
+        Assert.That(vm.FileListQueryClearTip, Does.Contain("search").IgnoreCase);
+
+        vm.SetFileListQueryModeCommand.Execute(FileListQueryMode.Filter);
+
+        Assert.That(vm.IsFileListFilterMode, Is.True);
+        Assert.That(vm.IsFileListSearchMode, Is.False);
+    }
+
+    [Test]
+    public void SelectSearchHit_SameFile_With_DiffRows_Fires_DiffScrollRequested()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var reviewService = Substitute.For<IReviewService>();
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings,
+            reviewService: reviewService);
+
+        var file = new FileItemViewModel(FilePath.From("src/Foo.cs"), ChangeKind.Modified, isStagedList: false);
+        vm.SelectedFile = file;
+
+        // Populate DiffRows so the "already loaded" path is taken.
+        vm.DiffRows.Add(new DiffRow(DiffRowKind.Context, 1, 1, "".AsMemory(), "".AsMemory(), null, null, 0, 0));
+
+        (DiffSide side, int line)? scrolled = null;
+        vm.DiffScrollRequested += (s, l) => scrolled = (s, l);
+
+        vm.SelectSearchHit(file, DiffSide.New, 42);
+
+        Assert.That(scrolled, Is.Not.Null);
+        Assert.That(scrolled!.Value.side, Is.EqualTo(DiffSide.New));
+        Assert.That(scrolled.Value.line, Is.EqualTo(42));
+    }
+
+    [Test]
+    public void SelectSearchHit_DifferentFile_Changes_SelectedFile()
+    {
+        var settings = Substitute.For<ISettingsStore>();
+        settings.Current.Returns(new AppSettings());
+        var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
+
+        var fileA = new FileItemViewModel(FilePath.From("src/A.cs"), ChangeKind.Modified, isStagedList: false);
+        var fileB = new FileItemViewModel(FilePath.From("src/B.cs"), ChangeKind.Added, isStagedList: false);
+        vm.SelectedFile = fileA;
+
+        vm.SelectSearchHit(fileB, DiffSide.Old, 10);
+
+        Assert.That(vm.SelectedFile, Is.SameAs(fileB));
+    }
+
     private static AiChangeBriefingResult CreateChangeBriefing(AiRiskLevel risk) =>
         new(
             ExecutiveSummary: "Summary",

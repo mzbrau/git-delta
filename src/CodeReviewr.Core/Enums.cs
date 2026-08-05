@@ -86,6 +86,13 @@ public enum FileListLayoutMode
     Tree,
 }
 
+/// <summary>Path filter vs content search for changed-file sidebars.</summary>
+public enum FileListQueryMode
+{
+    Filter,
+    Search,
+}
+
 /// <summary>
 /// Semantic classification of a file's changes (one primary label per file).
 /// </summary>

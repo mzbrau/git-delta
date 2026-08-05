@@ -119,6 +119,7 @@ public sealed class DiffViewer : Control
     private int _contentEpoch;
     private int _scrollDirection = 1;
     private bool _paintWarmPosted;
+    private bool _paintWarmUseRenderPriority;
     private int _paintWarmCursor = -1;
     private readonly Dictionary<LinePaintKey, LinePaintCache> _linePaintCache = new();
     private readonly Dictionary<DisplayTextKey, string> _displayTextCache = new();
@@ -135,7 +136,7 @@ public sealed class DiffViewer : Control
     private readonly Typeface _typeface = new(
         new FontFamily("avares://CodeReviewr.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
 
-    private const int PaintWarmRowsPerTick = 6;
+    private const int PaintWarmRowsPerTick = 12;
     private const int PaintWarmViewportMultiplier = 2;
 
     private readonly record struct LinePaintKey(int RowIndex, byte Side, int Epoch);
@@ -472,6 +473,9 @@ public sealed class DiffViewer : Control
         _minimapSnapshot = null;
         _paintWarmCursor = -1;
         ClearContentCaches();
+        // Prefill max-width so the first wheel/clamp does not O(n) scan on the UI thread.
+        _ = GetMaxCodeContentWidth();
+        _paintWarmUseRenderPriority = true;
         UpdateEmptyMessage();
         ClampScroll();
         InvalidateVisual();
@@ -1511,13 +1515,17 @@ public sealed class DiffViewer : Control
         var epoch = _paintEpoch;
         var contentEpoch = _contentEpoch;
         var direction = _scrollDirection;
+        var priority = _paintWarmUseRenderPriority
+            ? DispatcherPriority.Render
+            : DispatcherPriority.Background;
         Dispatcher.UIThread.Post(() =>
         {
             _paintWarmPosted = false;
             if (epoch != _paintEpoch || contentEpoch != _contentEpoch)
                 return;
+            _paintWarmUseRenderPriority = false;
             WarmPaintCache(firstVisible, lastVisible, direction);
-        }, DispatcherPriority.Background);
+        }, priority);
     }
 
     private void WarmPaintCache(int firstVisible, int lastVisible, int direction)
@@ -1768,8 +1776,11 @@ public sealed class DiffViewer : Control
             }
         }
         if (changed)
+        {
             NotifyViewportChanged();
-        InvalidateVisual();
+            InvalidateVisual();
+        }
+
         e.Handled = true;
     }
 
@@ -2115,8 +2126,11 @@ public sealed class DiffViewer : Control
     /// <summary>Scrolls so the row for <paramref name="side"/>/<paramref name="line"/> is visible.</summary>
     public void ScrollToLine(DiffSide side, int line)
     {
-        if (TryGetRowIndex(side, line, out var idx))
-            EnsureVisible(idx);
+        if (!TryGetRowIndex(side, line, out var idx))
+            return;
+
+        EnsureVisible(idx);
+        InvalidateVisual();
     }
 
     private void EnsureVisible(int index)
