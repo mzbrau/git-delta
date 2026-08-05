@@ -4,7 +4,7 @@ namespace CodeReviewr.Persistence;
 
 public sealed class SqliteDurableUserStore : IDurableUserStore
 {
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     private readonly string _connectionString;
     private SqliteConnection? _connection;
@@ -57,6 +57,12 @@ public sealed class SqliteDurableUserStore : IDurableUserStore
         {
             ApplyMigrationV4(connection);
             SchemaVersion = 4;
+        }
+
+        if (SchemaVersion < 5)
+        {
+            ApplyMigrationV5(connection);
+            SchemaVersion = 5;
         }
     }
 
@@ -518,6 +524,36 @@ public sealed class SqliteDurableUserStore : IDurableUserStore
             CREATE INDEX IF NOT EXISTS idx_local_review_comments_repo_unresolved ON local_review_comments(repository_key, is_resolved);
 
             INSERT INTO schema_migrations (version) VALUES (4);
+            """;
+        cmd.ExecuteNonQuery();
+    }
+
+    private static void ApplyMigrationV5(SqliteConnection connection)
+    {
+        using var cmd = connection.CreateCommand();
+        // SQLite cannot DROP COLUMN in all environments we support; rebuild ai_file_results
+        // without priority_stars / guidance.
+        cmd.CommandText = """
+            CREATE TABLE IF NOT EXISTS ai_file_results_v5 (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                session_key TEXT NOT NULL,
+                path TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                classification TEXT,
+                summary_json TEXT,
+                updated_utc TEXT NOT NULL
+            );
+            INSERT INTO ai_file_results_v5 (run_id, session_key, path, cache_key, classification, summary_json, updated_utc)
+            SELECT run_id, session_key, path, cache_key, classification, summary_json, updated_utc
+            FROM ai_file_results;
+            DROP TABLE ai_file_results;
+            ALTER TABLE ai_file_results_v5 RENAME TO ai_file_results;
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_file_results_cache_key ON ai_file_results(cache_key);
+            CREATE INDEX IF NOT EXISTS idx_ai_file_results_run_id ON ai_file_results(run_id);
+            CREATE INDEX IF NOT EXISTS idx_ai_file_results_session_key ON ai_file_results(session_key);
+
+            INSERT INTO schema_migrations (version) VALUES (5);
             """;
         cmd.ExecuteNonQuery();
     }

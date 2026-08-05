@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using CodeReviewr.AI;
 using CodeReviewr.App.Controls;
 using CodeReviewr.App.Services;
 using CodeReviewr.Core;
@@ -18,7 +19,7 @@ namespace CodeReviewr.App.ViewModels;
 /// </summary>
 public interface IPendingChangesReviewHost
 {
-    /// <summary>Absolute path to the open repository, or null when no repository is open.</summary>
+    /// <summary>Absolute path to the open repository, or null when no repository is open. Used for on-demand file-history lookups.</summary>
     string? RepositoryPath { get; }
 
     /// <summary>Stable key identifying this repository for AI caching / exclusion settings (a normalized absolute path).</summary>
@@ -61,6 +62,8 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     private readonly ISettingsStore _settings;
     private readonly IConfirmDialog _confirm;
     private readonly NotificationService _notifications;
+    private readonly IGitHistoryService _history;
+    private readonly FileHistoryCache _fileHistoryCache = new();
 
     private IPendingChangesReviewHost? _host;
     private IDisposable? _aiProgressSubscription;
@@ -78,13 +81,15 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         ILocalCommentStore localComments,
         ISettingsStore settings,
         IConfirmDialog confirm,
-        NotificationService notifications)
+        NotificationService notifications,
+        IGitHistoryService history)
     {
         _ai = ai;
         _localComments = localComments;
         _settings = settings;
         _confirm = confirm;
         _notifications = notifications;
+        _history = history;
     }
 
     /// <summary>Raised when the comment draft should receive keyboard focus.</summary>
@@ -123,10 +128,14 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
         AiRunState = AiRunState.Idle;
         AiProgress = null;
-        AiFileSummary = null;
-        AiFileBandExpanded = true;
-        AiFileQuestion = "";
-        AiFileAnswer = null;
+        AiChangeBriefing = null;
+        AiFileBriefing = null;
+        IsChangeBriefingSelected = false;
+        ShowAiSidePanel = false;
+        IsAiFileBriefingTabSelected = true;
+        IsGeneratingFileBriefing = false;
+        FileHistory = null;
+        _fileHistoryCache.ClearAll();
         AiAdHocInstructions = "";
         AiLastError = null;
         AiActivityLog = "";
@@ -134,7 +143,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         AiReviewFinishedUtc = null;
         ShowAiProgressDialog = false;
         ShowAiInstructionsDialog = false;
-        ShowAiChat = false;
         AiChatInput = "";
         AiChatMessages.Clear();
         DiffAnnotations.Clear();
@@ -168,12 +176,29 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     [ObservableProperty] private string _aiAdHocInstructions = "";
     [ObservableProperty] private bool _showAiProgressDialog;
     [ObservableProperty] private bool _showAiInstructionsDialog;
-    [ObservableProperty] private AiFileSummaryResult? _aiFileSummary;
-    [ObservableProperty] private bool _aiFileBandExpanded = true;
-    [ObservableProperty] private string _aiFileQuestion = "";
-    [ObservableProperty] private string? _aiFileAnswer;
+
+    /// <summary>Change-level briefing for the current run (executive summary, risk, focus, testing, dependencies).</summary>
+    [ObservableProperty] private AiChangeBriefingResult? _aiChangeBriefing;
+
+    /// <summary>Per-file briefing for the currently selected file, if one has been generated.</summary>
+    [ObservableProperty] private AiFileBriefingResult? _aiFileBriefing;
+
+    /// <summary>True when the "Change briefing" row (rather than a file or Comments) is the active selection.</summary>
+    [ObservableProperty] private bool _isChangeBriefingSelected;
+
+    /// <summary>Whether the AI side panel (file briefing / chat tabs) is expanded.</summary>
+    [ObservableProperty] private bool _showAiSidePanel;
+
+    /// <summary>True when the "File briefing" tab is active in the AI side panel; false selects the chat tab.</summary>
+    [ObservableProperty] private bool _isAiFileBriefingTabSelected = true;
+
+    /// <summary>True while a manually requested file briefing is in flight.</summary>
+    [ObservableProperty] private bool _isGeneratingFileBriefing;
+
+    /// <summary>On-demand commit-history timeline for the currently selected file, or null when no file is selected.</summary>
+    [ObservableProperty] private FileHistoryCacheEntry? _fileHistory;
+
     [ObservableProperty] private string _aiChatInput = "";
-    [ObservableProperty] private bool _showAiChat;
     [ObservableProperty] private bool _isAiChatBusy;
     [ObservableProperty] private bool _aiShowDismissedAnnotations;
     [ObservableProperty] private string? _aiLastError;
@@ -258,9 +283,26 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     public bool IsAiRunActive => AiRunState == AiRunState.Running;
     public bool CanResumeAiReview => AiRunState is AiRunState.Incomplete or AiRunState.PausedBudget;
     public bool CanRerunAiReview => AiRunState is AiRunState.Complete or AiRunState.Failed;
-    public bool HasAiFileSummary => AiFileSummary is not null;
-    public bool ShowAiFileBand => AiFileSummary is not null;
-    public bool HasAiFileAnswer => !string.IsNullOrWhiteSpace(AiFileAnswer);
+
+    /// <summary>True once the change-level briefing has been produced for the current run.</summary>
+    public bool HasAiChangeBriefing => AiChangeBriefing is not null;
+
+    /// <summary>The "Change briefing" row is offered whenever an AI run exists for this repository.</summary>
+    public bool ShowChangeBriefingRow => HasAiRun;
+
+    /// <summary>True once a per-file briefing has been generated for the currently selected file.</summary>
+    public bool HasAiFileBriefing => AiFileBriefing is not null;
+
+    /// <summary>True when the currently selected file has no briefing yet but one can be requested manually.</summary>
+    public bool CanGenerateFileBriefing =>
+        _host?.SelectedFile is not null && HasAiRun && !IsAiRunActive && !IsGeneratingFileBriefing;
+
+    /// <summary>The Comments row is only offered once at least one local comment exists.</summary>
+    public bool ShowCommentsRow => LocalComments.Count > 0;
+
+    /// <summary>True when the chat tab (rather than the file-briefing tab) is active in the AI side panel.</summary>
+    public bool IsAiChatTabSelected => !IsAiFileBriefingTabSelected;
+
     public bool CanSendAiChat =>
         !string.IsNullOrWhiteSpace(AiChatInput) && !IsAiRunActive && !IsAiChatBusy;
     public bool CanClearAiChat => _host is not null && AiChatMessages.Count > 0;
@@ -272,11 +314,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         _host?.SelectedFile is null
             ? "Ask about your pending changes…"
             : $"Ask about {_host.SelectedFile.Name}…";
-
-    public Material.Icons.MaterialIconKind AiFileBandChevron =>
-        AiFileBandExpanded
-            ? Material.Icons.MaterialIconKind.ChevronDown
-            : Material.Icons.MaterialIconKind.ChevronRight;
 
     public bool IsRepositoryExcludedFromAi =>
         _host is not null &&
@@ -412,6 +449,13 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         OnPropertyChanged(nameof(CanSendAiChat));
         OnPropertyChanged(nameof(AiStatusDialogTitle));
         OnPropertyChanged(nameof(HasAiDiagnostics));
+        OnPropertyChanged(nameof(ShowChangeBriefingRow));
+        OnPropertyChanged(nameof(CanGenerateFileBriefing));
+        GenerateFileBriefingCommand.NotifyCanExecuteChanged();
+
+        if (HasAiRun)
+            ShowAiSidePanel = true;
+
         NotifyAiButtonStateChanged();
     }
 
@@ -436,16 +480,46 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
     partial void OnAiCopilotSessionIdChanged(string? value) => OnPropertyChanged(nameof(AiDiagnosticsText));
 
-    partial void OnAiFileSummaryChanged(AiFileSummaryResult? value)
+    partial void OnAiChangeBriefingChanged(AiChangeBriefingResult? value) =>
+        OnPropertyChanged(nameof(HasAiChangeBriefing));
+
+    partial void OnAiFileBriefingChanged(AiFileBriefingResult? value)
     {
-        OnPropertyChanged(nameof(HasAiFileSummary));
-        NotifyAiFileBandChanged();
+        OnPropertyChanged(nameof(HasAiFileBriefing));
+        NotifyAiFileDetailChanged();
     }
 
-    partial void OnAiFileBandExpandedChanged(bool value) =>
-        OnPropertyChanged(nameof(AiFileBandChevron));
+    partial void OnIsAiFileBriefingTabSelectedChanged(bool value) =>
+        OnPropertyChanged(nameof(IsAiChatTabSelected));
 
-    partial void OnAiFileAnswerChanged(string? value) => OnPropertyChanged(nameof(HasAiFileAnswer));
+    partial void OnIsGeneratingFileBriefingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CanGenerateFileBriefing));
+        GenerateFileBriefingCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnIsChangeBriefingSelectedChanged(bool value)
+    {
+        if (!value)
+            return;
+
+        ClearDraftCommentAnchorCore();
+        SelectedAnnotation = null;
+        ExpandedFileLevelComment = null;
+        _suppressCommentsDeselect = true;
+        try
+        {
+            _host?.ClearFileSelection();
+        }
+        finally
+        {
+            _suppressCommentsDeselect = false;
+        }
+
+        _boundSelectionPath = null;
+        _boundOldContentId = null;
+        _boundNewContentId = null;
+    }
 
     partial void OnAiChatInputChanged(string value) => OnPropertyChanged(nameof(CanSendAiChat));
 
@@ -455,7 +529,16 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     private void ToggleAiReviewSection() => AiReviewSectionExpanded = !AiReviewSectionExpanded;
 
     [RelayCommand]
-    private void ToggleAiFileBand() => AiFileBandExpanded = !AiFileBandExpanded;
+    private void SelectChangeBriefing() => IsChangeBriefingSelected = true;
+
+    [RelayCommand]
+    private void ToggleAiSidePanel() => ShowAiSidePanel = !ShowAiSidePanel;
+
+    [RelayCommand]
+    private void SelectAiFileBriefingTab() => IsAiFileBriefingTabSelected = true;
+
+    [RelayCommand]
+    private void SelectAiChatTab() => IsAiFileBriefingTabSelected = false;
 
     [RelayCommand(CanExecute = nameof(AiButtonEnabled))]
     private async Task RequestAiReviewAsync()
@@ -624,11 +707,18 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         AiCopilotSessionId = snapshot.CopilotSessionId;
         AiLastError = snapshot.ErrorMessage;
         AiReviewFinishedUtc = snapshot.FinishedUtc ?? snapshot.StartedUtc;
+        AiChangeBriefing = snapshot.ChangeBriefing;
 
         if (snapshot.State == AiRunState.Complete)
+        {
             ShowAiProgressDialog = false;
+            IsChangeBriefingSelected = true;
+            _ = RefreshFileClassificationsAsync();
+        }
         else if (snapshot.State is AiRunState.Failed or AiRunState.Incomplete)
+        {
             ShowAiProgressDialog = true;
+        }
 
         if ((snapshot.State is AiRunState.Failed or AiRunState.Incomplete) &&
             !string.IsNullOrWhiteSpace(snapshot.ErrorMessage))
@@ -638,7 +728,35 @@ public partial class PendingChangesReviewViewModel : ObservableObject
                 detail: AiDiagnosticsText);
         }
 
-        NotifyAiFileBandChanged();
+        NotifyAiFileDetailChanged();
+    }
+
+    /// <summary>Best-effort refresh of each pending file's <see cref="FileItemViewModel.AiChangeClassification"/> from the latest run.</summary>
+    private async Task RefreshFileClassificationsAsync()
+    {
+        if (_host is null)
+            return;
+
+        var host = _host;
+        var sessionKey = SessionKey;
+        var files = host.PendingFiles;
+
+        foreach (var file in files)
+        {
+            if (!ReferenceEquals(_host, host))
+                return;
+
+            try
+            {
+                var briefing = await _ai.GetFileBriefingAsync(sessionKey, file.Path.Value).ConfigureAwait(false);
+                if (briefing is not null && ReferenceEquals(_host, host))
+                    await InvokeOnUiAsync(() => file.AiChangeClassification = briefing.Classification).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Classification refresh is best-effort; the file list simply stays unlabelled.
+            }
+        }
     }
 
     /// <summary>Pushes per-file local-comment counts onto the host's file list rows.</summary>
@@ -663,12 +781,13 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         }
     }
 
-    private void NotifyAiFileBandChanged()
+    private void NotifyAiFileDetailChanged()
     {
-        OnPropertyChanged(nameof(ShowAiFileBand));
-        OnPropertyChanged(nameof(HasAiFileSummary));
+        OnPropertyChanged(nameof(HasAiFileBriefing));
+        OnPropertyChanged(nameof(CanGenerateFileBriefing));
         OnPropertyChanged(nameof(AiChatSelectedFileLabel));
         OnPropertyChanged(nameof(AiChatPlaceholder));
+        GenerateFileBriefingCommand.NotifyCanExecuteChanged();
     }
 
     /// <summary>Hydrates the latest completed/failed run from durable cache without starting a live agent session.</summary>
@@ -699,26 +818,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         catch
         {
             // Cached-run lookup is best-effort and must never block opening the repository.
-        }
-    }
-
-    [RelayCommand]
-    private async Task AskFileQuestionAsync()
-    {
-        if (_host?.SelectedFile is not { } file || string.IsNullOrWhiteSpace(AiFileQuestion))
-            return;
-
-        var question = AiFileQuestion.Trim();
-        try
-        {
-            var answer = await _ai
-                .AskAsync(new AiQuestionRequest(SessionKey, file.Path.Value, question))
-                .ConfigureAwait(false);
-            await InvokeOnUiAsync(() => AiFileAnswer = answer).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            await InvokeOnUiAsync(() => AiFileAnswer = $"Error: {ex.Message}").ConfigureAwait(false);
         }
     }
 
@@ -814,13 +913,15 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         }
     }
 
+    /// <summary>Expands the AI side panel (if collapsed) and switches it to the chat tab.</summary>
     [RelayCommand]
     private async Task ToggleAiChatAsync()
     {
-        ShowAiChat = !ShowAiChat;
+        ShowAiSidePanel = true;
+        IsAiFileBriefingTabSelected = false;
         OnPropertyChanged(nameof(AiChatSelectedFileLabel));
         OnPropertyChanged(nameof(AiChatPlaceholder));
-        if (!ShowAiChat || _host is null || AiChatMessages.Count > 0)
+        if (_host is null || AiChatMessages.Count > 0)
             return;
 
         try
@@ -906,9 +1007,14 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         var sessionKey = SessionKey;
         try
         {
-            var summary = await _ai.GetFileSummaryAsync(sessionKey, file.Path.Value, ct).ConfigureAwait(false);
-            if (summary is null)
+            var briefing = await _ai.GetFileBriefingAsync(sessionKey, file.Path.Value, ct).ConfigureAwait(false);
+            if (briefing is null && FileBriefingEligibility.IsEligible(
+                    file.ChangePercent, file.LinesAdded ?? 0, file.LinesRemoved ?? 0,
+                    _settings.Current.AiFileBriefingMinChangePercent, _settings.Current.AiFileBriefingMinLinesChanged))
             {
+                // Eligible files are briefed automatically during the run; if it is still missing
+                // (e.g. the run was resumed after this file was added), request it now. Files below
+                // the threshold are left for the reviewer to request explicitly via GenerateFileBriefingAsync.
                 var beforeOid = diff.OldContent.IsEmpty ? null : diff.OldContent.Value;
                 var afterOid = diff.NewContent.IsEmpty ? null : diff.NewContent.Value;
                 _ = _ai.RequestFileDepthAsync(
@@ -927,7 +1033,7 @@ public partial class PendingChangesReviewViewModel : ObservableObject
                 if (!ReferenceEquals(_host?.SelectedFile, file) || !ReferenceEquals(_host?.CurrentDiff, diff))
                     return;
 
-                AiFileSummary = summary;
+                AiFileBriefing = briefing;
 
                 foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
                     DiffAnnotations.Remove(stale);
@@ -947,6 +1053,88 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         catch
         {
             // AI file overlay is best-effort and must never block the diff view.
+        }
+    }
+
+    /// <summary>Manually requests a file briefing for the selected file (used when it is below the auto-briefing threshold).</summary>
+    [RelayCommand(CanExecute = nameof(CanGenerateFileBriefing))]
+    private async Task GenerateFileBriefingAsync()
+    {
+        if (_host?.SelectedFile is not { } file || _host.CurrentDiff is not { } diff || IsGeneratingFileBriefing)
+            return;
+
+        var sessionKey = SessionKey;
+        IsGeneratingFileBriefing = true;
+        try
+        {
+            var beforeOid = diff.OldContent.IsEmpty ? null : diff.OldContent.Value;
+            var afterOid = diff.NewContent.IsEmpty ? null : diff.NewContent.Value;
+            await _ai.RequestFileDepthAsync(
+                new AiFileDepthRequest(sessionKey, file.Path.Value, beforeOid, afterOid),
+                CancellationToken.None).ConfigureAwait(false);
+
+            var briefing = await _ai.GetFileBriefingAsync(sessionKey, file.Path.Value).ConfigureAwait(false);
+            var annotations = await _ai
+                .GetFileAnnotationsAsync(sessionKey, file.Path.Value, AiShowDismissedAnnotations)
+                .ConfigureAwait(false);
+
+            await InvokeOnUiAsync(() =>
+            {
+                if (!ReferenceEquals(_host?.SelectedFile, file) || !ReferenceEquals(_host?.CurrentDiff, diff))
+                    return;
+
+                AiFileBriefing = briefing;
+
+                foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
+                    DiffAnnotations.Remove(stale);
+
+                foreach (var annotation in annotations)
+                {
+                    var content = annotation.Side == DiffSide.Old ? diff.OldContent : diff.NewContent;
+                    var start = new DiffAnchor(annotation.Side, content, annotation.StartLine);
+                    var end = new DiffAnchor(annotation.Side, content, annotation.EndLine);
+                    DiffAnnotations.Add(new AiLineAnnotation(annotation, new AnnotationRange(start, end)));
+                }
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to generate file briefing: {ex.Message}", exception: ex);
+        }
+        finally
+        {
+            await InvokeOnUiAsync(() => IsGeneratingFileBriefing = false).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Loads the on-demand commit-history timeline for the currently selected file into <see cref="FileHistory"/>.</summary>
+    [RelayCommand]
+    private async Task LoadFileHistoryAsync()
+    {
+        if (_host?.SelectedFile is not { } file || FileHistory is not { } entry || !entry.IsNotLoaded)
+            return;
+
+        var repositoryPath = _host.RepositoryPath;
+        if (string.IsNullOrWhiteSpace(repositoryPath))
+            return;
+
+        entry.State = FileHistoryLoadState.Loading;
+        try
+        {
+            var path = file.Path.Value;
+            var createdTask = _history.GetFileCreatedCommitAsync(repositoryPath, path);
+            var recentTask = _history.ListFileHistoryAsync(repositoryPath, path, take: 5);
+            await Task.WhenAll(createdTask, recentTask).ConfigureAwait(false);
+
+            if (!ReferenceEquals(FileHistory, entry))
+                return;
+
+            var timeline = FileHistoryCacheEntry.BuildTimeline(createdTask.Result, recentTask.Result);
+            await InvokeOnUiAsync(() => entry.ApplyResult(timeline)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await InvokeOnUiAsync(() => entry.ApplyFailure(ex.Message)).ConfigureAwait(false);
         }
     }
 
@@ -970,7 +1158,7 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         {
             // Soft status refresh remapped FileItemViewModel instances; keep AI overlays and only refresh local markers.
             ReloadLocalCommentAnnotationsForSelection();
-            NotifyAiFileBandChanged();
+            NotifyAiFileDetailChanged();
             return;
         }
 
@@ -981,19 +1169,21 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         _boundOldContentId = oldId;
         _boundNewContentId = newId;
 
-        AiFileQuestion = "";
-        AiFileAnswer = null;
-        AiFileSummary = null;
+        AiFileBriefing = null;
         SelectedAnnotation = null;
+        FileHistory = file is null ? null : _fileHistoryCache.GetOrCreate(SessionKey, path!);
 
         foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())
             DiffAnnotations.Remove(stale);
 
         ReloadLocalCommentAnnotationsForSelection();
-        NotifyAiFileBandChanged();
+        NotifyAiFileDetailChanged();
 
         if (file is not null && !_suppressCommentsDeselect)
+        {
             IsCommentsSelected = false;
+            IsChangeBriefingSelected = false;
+        }
 
         if (file is null || diff is null)
             return;
@@ -1054,6 +1244,10 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(UnresolvedCommentCount));
         OnPropertyChanged(nameof(HasUnresolvedComments));
+        OnPropertyChanged(nameof(ShowCommentsRow));
+        if (IsCommentsSelected && LocalComments.Count == 0)
+            IsCommentsSelected = false;
+
         UpdateFileUnresolvedCommentCounts();
     }
 
@@ -1157,9 +1351,9 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     {
         AiRunState = AiRunState.Idle;
         AiProgress = null;
-        AiFileSummary = null;
-        AiFileQuestion = "";
-        AiFileAnswer = null;
+        AiChangeBriefing = null;
+        AiFileBriefing = null;
+        IsChangeBriefingSelected = false;
         AiLastError = null;
 
         foreach (var stale in DiffAnnotations.OfType<AiLineAnnotation>().ToList())

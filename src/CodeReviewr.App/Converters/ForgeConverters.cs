@@ -112,9 +112,17 @@ public static class ForgeConverters
         {
             AiChangeClassification.BehaviorChanged => MaterialIconKind.SwapHorizontal,
             AiChangeClassification.NewFeature => MaterialIconKind.StarOutline,
+            AiChangeClassification.BugFix => MaterialIconKind.BugOutline,
             AiChangeClassification.RefactorOnly => MaterialIconKind.AutoFix,
             AiChangeClassification.Configuration => MaterialIconKind.CogOutline,
             AiChangeClassification.Tests => MaterialIconKind.FlaskOutline,
+            AiChangeClassification.Documentation => MaterialIconKind.FileDocumentOutline,
+            AiChangeClassification.DependencyUpdate => MaterialIconKind.PackageVariant,
+            AiChangeClassification.BuildOrCi => MaterialIconKind.HammerWrench,
+            AiChangeClassification.Deletion => MaterialIconKind.DeleteOutline,
+            AiChangeClassification.Performance => MaterialIconKind.Speedometer,
+            AiChangeClassification.Security => MaterialIconKind.ShieldOutline,
+            AiChangeClassification.UiOrStyling => MaterialIconKind.PaletteOutline,
             AiChangeClassification.Generated => MaterialIconKind.RobotOutline,
             _ => MaterialIconKind.HelpCircleOutline,
         });
@@ -124,12 +132,37 @@ public static class ForgeConverters
         {
             AiChangeClassification.BehaviorChanged => "Behavior changed",
             AiChangeClassification.NewFeature => "New feature",
+            AiChangeClassification.BugFix => "Bug fix",
             AiChangeClassification.RefactorOnly => "Refactor only",
             AiChangeClassification.Configuration => "Configuration",
             AiChangeClassification.Tests => "Tests",
+            AiChangeClassification.Documentation => "Documentation",
+            AiChangeClassification.DependencyUpdate => "Dependency update",
+            AiChangeClassification.BuildOrCi => "Build / CI",
+            AiChangeClassification.Deletion => "Deletion",
+            AiChangeClassification.Performance => "Performance",
+            AiChangeClassification.Security => "Security",
+            AiChangeClassification.UiOrStyling => "UI / styling",
             AiChangeClassification.Generated => "Generated",
             _ => null,
         });
+
+    public static readonly IValueConverter AiChangeClassificationLabel =
+        new FuncValueConverter<AiChangeClassification?, string?>(kind =>
+            (string?)AiChangeClassificationTooltip.Convert(kind, typeof(string), null, CultureInfo.InvariantCulture));
+
+    public static readonly IValueConverter AiRiskBadgeBackground =
+        new FuncValueConverter<AiRiskLevel?, IBrush>(risk => risk switch
+        {
+            AiRiskLevel.Low => new SolidColorBrush(Color.Parse("#2E7D32")),
+            AiRiskLevel.Medium => new SolidColorBrush(Color.Parse("#EF6C00")),
+            AiRiskLevel.High => new SolidColorBrush(Color.Parse("#C62828")),
+            AiRiskLevel.Critical => new SolidColorBrush(Color.Parse("#6A1B9A")),
+            _ => new SolidColorBrush(Color.Parse("#546E7A")),
+        });
+
+    public static readonly IValueConverter AiRiskLabel =
+        new FuncValueConverter<AiRiskLevel?, string>(risk => risk?.ToString().ToUpperInvariant() ?? "");
 
     public static readonly IValueConverter ChevronKind =
         new FuncValueConverter<bool, MaterialIconKind>(expanded =>

@@ -70,7 +70,7 @@ public sealed class WorkingCopyViewModelSnappyTests
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
             _conflicts, _stash, _history, _settings, _notifications, _confirm, _stashDialog,
             new IntraLineDiffer(), _fsmonitor, _watcher,
-            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications));
+            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications, Substitute.For<IGitHistoryService>()));
 
     private static StatusEntry Unstaged(string path, string? worktreeOid = null) =>
         new(FilePath.From(path), null, ChangeKind.Modified, IsStaged: false, IsUnstaged: true, IsConflicted: false,

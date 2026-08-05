@@ -89,8 +89,7 @@ public sealed class WorkingCopyViewModelDiscardTests
     private WorkingCopyViewModel CreateVm(IConfirmDialog? confirm = null, IStashDialog? stashDialog = null) =>
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
             _settings, _notifications, confirm ?? _confirm, stashDialog ?? _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher,
-            new PendingChangesReviewViewModel(
-                NullAIReviewService.Instance, _localComments, _settings, confirm ?? _confirm, _notifications));
+            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, confirm ?? _confirm, _notifications, Substitute.For<IGitHistoryService>()));
 
     private static StatusEntry Unstaged(string path, ChangeKind kind = ChangeKind.Modified) =>
         new(FilePath.From(path), null, kind, IsStaged: false, IsUnstaged: true, IsConflicted: false);
@@ -178,7 +177,7 @@ public sealed class WorkingCopyViewModelDiscardTests
             var vm = new WorkingCopyViewModel(
                 _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
                 _settings, _notifications, confirm, _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher,
-                new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, confirm, _notifications));
+                new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, confirm, _notifications, Substitute.For<IGitHistoryService>()));
             await vm.OpenAsync(repo);
             vm.SetFileSelection([vm.UnstagedFiles[0]]);
 

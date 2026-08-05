@@ -404,7 +404,7 @@ public sealed class ReviewViewModelTests
         var now = DateTimeOffset.UtcNow;
         var failed = new AiRunSnapshot(
             "run1", summary.NodeId, sha, sha, AiRunState.Failed, "session-abc",
-            TurnsUsed: 1, AdHocInstructions: null, Triage: null,
+            TurnsUsed: 1, AdHocInstructions: null, ChangeBriefing: null,
             ErrorMessage: "AI review timed out after 180s with no Copilot activity (turn idle timeout).",
             now, now);
 
@@ -1441,6 +1441,8 @@ public sealed class ReviewViewModelTests
         Assert.That(vm.HasExpandedInlineThread, Is.False);
         Assert.That(vm.ShowSideThreadPanel, Is.True);
         Assert.That(vm.SelectedThread, Is.Not.Null);
+        Assert.That(vm.ShowAiSidePanel, Is.True);
+        Assert.That(vm.IsAiCommentsTabSelected, Is.True);
     }
 
     [Test]
@@ -2048,21 +2050,20 @@ public sealed class ReviewViewModelTests
             PullRequestFileListLayout = FileListLayoutMode.Flat,
         });
 
-        var triage = new AiPrTriageResult(
-            Summary: "Summary",
+        var briefing = new AiChangeBriefingResult(
+            ExecutiveSummary: "Summary",
             Risk: AiRiskLevel.Medium,
-            Justifications: [new AiRiskJustification(path.Value, "Touches auth")],
-            SuggestedOrder: [path.Value],
-            Files:
-            [
-                new AiFileTriage(path.Value, AiFileClassification.ReviewCarefully, 5, "Check auth paths"),
-            ],
+            RiskDrivers: ["Touches auth"],
+            WhatChanged: ["Authentication"],
+            ReviewFocus: [path.Value],
+            TestingStatus: new AiTestingStatus("Needs review", []),
+            Dependencies: [],
             Measured: new AiMeasuredFacts(1, 1, 1));
 
         var finished = DateTimeOffset.UtcNow;
         var complete = new AiRunSnapshot(
             "run1", summary.NodeId, sha, sha, AiRunState.Complete, "session-abc",
-            TurnsUsed: 2, AdHocInstructions: null, Triage: triage,
+            TurnsUsed: 2, AdHocInstructions: null, ChangeBriefing: briefing,
             ErrorMessage: null, finished.AddMinutes(-2), finished);
 
         var ai = Substitute.For<IAIReviewService>();
@@ -2102,6 +2103,12 @@ public sealed class ReviewViewModelTests
         await vm.ConfirmStartAiReviewCommand.ExecuteAsync(null);
         await WaitUntilAsync(() => vm.AiRunState == AiRunState.Complete);
 
+        // Completing a run switches the side panel to the change briefing tab, which
+        // clears the file selection; selecting the file again should still work cleanly.
+        Assert.That(vm.IsChangeBriefingSelected, Is.True);
+        Assert.That(vm.SelectedFile, Is.Null);
+
+        vm.SelectedFile = selectedBefore;
         Assert.That(vm.SelectedFile, Is.SameAs(selectedBefore));
         Assert.That(vm.PullRequestFileListLayout, Is.EqualTo(FileListLayoutMode.Flat));
         Assert.That(vm.HasAiRun, Is.True);
@@ -2159,7 +2166,7 @@ public sealed class ReviewViewModelTests
         var started = finished.AddMinutes(-3);
         var complete = new AiRunSnapshot(
             "run1", summary.NodeId, sha, sha, AiRunState.Complete, "session-abc",
-            TurnsUsed: 2, AdHocInstructions: null, Triage: CreateTriage(AiRiskLevel.Low),
+            TurnsUsed: 2, AdHocInstructions: null, ChangeBriefing: CreateChangeBriefing(AiRiskLevel.Low),
             ErrorMessage: null, started, finished);
 
         var ai = Substitute.For<IAIReviewService>();
@@ -2190,38 +2197,39 @@ public sealed class ReviewViewModelTests
     }
 
     [Test]
-    public void ShowAiFileBand_Visible_For_Summary_And_Toggle_Keeps_Data()
+    public void AiFileBriefing_Visible_For_Selection_And_SidePanelToggle_KeepsData()
     {
         var settings = Substitute.For<ISettingsStore>();
         settings.Current.Returns(new AppSettings());
         var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
 
-        Assert.That(vm.ShowAiFileBand, Is.False);
-        Assert.That(vm.AiFileBandExpanded, Is.True);
+        Assert.That(vm.HasAiFileBriefing, Is.False);
+        Assert.That(vm.ShowAiSidePanel, Is.True);
 
         vm.SelectedFile = new FileItemViewModel(FilePath.From("src/Empty.cs"), ChangeKind.Modified, isStagedList: false);
-        Assert.That(vm.ShowAiFileBand, Is.False);
+        Assert.That(vm.HasAiFileBriefing, Is.False);
 
-        vm.AiFileSummary = new AiFileSummaryResult(
+        vm.AiFileBriefing = new AiFileBriefingResult(
             "src/Empty.cs",
             "Purpose",
-            "Interesting",
-            "Focus");
-        Assert.That(vm.ShowAiFileBand, Is.True);
-        Assert.That(vm.HasAiFileSummary, Is.True);
+            AiChangeClassification.RefactorOnly,
+            ["Interesting finding"]);
+        Assert.That(vm.HasAiFileBriefing, Is.True);
 
-        vm.ToggleAiFileBandCommand.Execute(null);
-        Assert.That(vm.AiFileBandExpanded, Is.False);
-        Assert.That(vm.ShowAiFileBand, Is.True);
+        vm.ToggleAiSidePanelCommand.Execute(null);
+        Assert.That(vm.ShowAiSidePanel, Is.False);
+        Assert.That(vm.HasAiFileBriefing, Is.True);
     }
 
-    private static AiPrTriageResult CreateTriage(AiRiskLevel risk) =>
+    private static AiChangeBriefingResult CreateChangeBriefing(AiRiskLevel risk) =>
         new(
-            Summary: "Summary",
+            ExecutiveSummary: "Summary",
             Risk: risk,
-            Justifications: [],
-            SuggestedOrder: [],
-            Files: [],
+            RiskDrivers: [],
+            WhatChanged: [],
+            ReviewFocus: [],
+            TestingStatus: new AiTestingStatus("", []),
+            Dependencies: [],
             Measured: new AiMeasuredFacts(0, 0, 0));
 
     private static ReviewViewModel CreateViewModel(
@@ -2233,6 +2241,7 @@ public sealed class ReviewViewModelTests
         IDurableUserStore? durable = null,
         IReviewSubmitDialog? reviewSubmit = null,
         IGitObjectReader? objects = null,
+        IGitHistoryService? history = null,
         IAIReviewService? ai = null)
     {
         outbox ??= Substitute.For<IReviewOutbox>();
@@ -2252,6 +2261,7 @@ public sealed class ReviewViewModelTests
             new NotificationService(),
             new IntraLineDiffer(),
             objects ?? Substitute.For<IGitObjectReader>(),
+            history ?? Substitute.For<IGitHistoryService>(),
             ai: ai ?? NullAIReviewService.Instance);
     }
 

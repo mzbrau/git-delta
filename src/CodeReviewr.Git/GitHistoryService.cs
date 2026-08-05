@@ -38,6 +38,59 @@ public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGateP
             return (IReadOnlyList<CommitInfo>)ParseCommitLog(result.Stdout);
         }, ct);
 
+    public Task<IReadOnlyList<CommitInfo>> ListFileHistoryAsync(
+        string repositoryPath,
+        string path,
+        int take,
+        CancellationToken ct = default) =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
+        {
+            if (take <= 0 || string.IsNullOrWhiteSpace(path))
+                return (IReadOnlyList<CommitInfo>)Array.Empty<CommitInfo>();
+
+            var args = new List<string>
+            {
+                "log",
+                "HEAD",
+                "--follow",
+                $"--max-count={take}",
+                $"--format={LogFormat}",
+                "--",
+                path,
+            };
+
+            var result = await runner.RunAsync(repositoryPath, args, options: null, token)
+                .ConfigureAwait(false);
+            return (IReadOnlyList<CommitInfo>)ParseCommitLog(result.Stdout);
+        }, ct);
+
+    public Task<CommitInfo?> GetFileCreatedCommitAsync(
+        string repositoryPath,
+        string path,
+        CancellationToken ct = default) =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                return (CommitInfo?)null;
+
+            var args = new List<string>
+            {
+                "log",
+                "HEAD",
+                "--follow",
+                "--diff-filter=A",
+                "--max-count=1",
+                $"--format={LogFormat}",
+                "--",
+                path,
+            };
+
+            var result = await runner.RunAsync(repositoryPath, args, options: null, token)
+                .ConfigureAwait(false);
+            var commits = ParseCommitLog(result.Stdout);
+            return commits.Count > 0 ? commits[0] : null;
+        }, ct);
+
     public Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetCommitFilesAsync(
         string repositoryPath,
         string oid,

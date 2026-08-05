@@ -31,11 +31,11 @@ public partial class MainWindow : Window
     private bool _aiChatScrollSubscribed;
     private bool _aiChatRowSubscribed;
     private bool _aiProgressScrollSubscribed;
-    private double _aiChatPanelHeight = 240;
+    private double _prAiSidePanelWidth = 320;
     private bool _wcAiChatScrollSubscribed;
     private bool _wcAiChatRowSubscribed;
     private bool _wcAiProgressScrollSubscribed;
-    private double _wcAiChatPanelHeight = 240;
+    private double _wcAiSidePanelWidth = 320;
     private bool _inlineCommentLayoutHooked;
     private bool _wcInlineCommentLayoutHooked;
     private bool _syncingInlineCommentLayout;
@@ -115,8 +115,8 @@ public partial class MainWindow : Window
             _wcAiChatRowSubscribed = true;
         }
 
-        SyncAiChatRowHeight();
-        SyncWcAiChatRowHeight();
+        SyncAiSidePanelWidth();
+        SyncWcAiSidePanelWidth();
 
         vm.Review.FocusCommentDraftRequested += FocusPrCommentDraft;
         vm.Review.FocusFileFilterRequested += FocusPrFileFilter;
@@ -811,38 +811,42 @@ public partial class MainWindow : Window
 
     private void OnReviewPropertyChangedForAiChat(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(ReviewViewModel.ShowAiChat))
-            SyncAiChatRowHeight();
+        if (e.PropertyName == nameof(ReviewViewModel.ShowAiSidePanel))
+            SyncAiSidePanelWidth();
+        else if (e.PropertyName == nameof(ReviewViewModel.IsAiFileBriefingTabSelected))
+            ScrollAiChatToEnd();
     }
 
-    private void SyncAiChatRowHeight()
+    private void SyncAiSidePanelWidth()
     {
         if (DataContext is not MainWindowViewModel vm) return;
         if (this.FindControl<Grid>("PrDiffChatGrid") is not { } grid) return;
-        if (grid.RowDefinitions.Count < 3) return;
+        if (grid.ColumnDefinitions.Count < 3) return;
 
-        var row = grid.RowDefinitions[2];
-        if (vm.Review.ShowAiChat)
+        var column = grid.ColumnDefinitions[2];
+        if (vm.Review.ShowAiSidePanel)
         {
-            var height = Math.Clamp(_aiChatPanelHeight, 120, 560);
-            row.MinHeight = 120;
-            row.MaxHeight = 560;
-            row.Height = new GridLength(height);
+            var width = Math.Clamp(_prAiSidePanelWidth, 240, 560);
+            column.MinWidth = 240;
+            column.MaxWidth = 560;
+            column.Width = new GridLength(width);
             ScrollAiChatToEnd();
         }
         else
         {
-            if (row.Height.IsAbsolute && row.Height.Value >= 120)
-                _aiChatPanelHeight = Math.Clamp(row.Height.Value, 120, 560);
-            row.MinHeight = 0;
-            row.MaxHeight = 560;
-            row.Height = new GridLength(0);
+            if (column.Width.IsAbsolute && column.Width.Value >= 240)
+                _prAiSidePanelWidth = Math.Clamp(column.Width.Value, 240, 560);
+            column.MinWidth = 0;
+            column.MaxWidth = 560;
+            column.Width = new GridLength(0);
         }
     }
 
     private void ScrollAiChatToEnd()
     {
-        if (DataContext is not MainWindowViewModel vm || !vm.Review.ShowAiChat) return;
+        if (DataContext is not MainWindowViewModel vm ||
+            !vm.Review.ShowAiSidePanel || !vm.Review.IsAiChatTabSelected)
+            return;
         Dispatcher.UIThread.Post(() =>
         {
             if (this.FindControl<ScrollViewer>("AiChatScrollViewer") is { } scroll)
@@ -875,38 +879,42 @@ public partial class MainWindow : Window
 
     private void OnWcReviewPropertyChangedForAiChat(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(PendingChangesReviewViewModel.ShowAiChat))
-            SyncWcAiChatRowHeight();
+        if (e.PropertyName == nameof(PendingChangesReviewViewModel.ShowAiSidePanel))
+            SyncWcAiSidePanelWidth();
+        else if (e.PropertyName == nameof(PendingChangesReviewViewModel.IsAiFileBriefingTabSelected))
+            ScrollWcAiChatToEnd();
     }
 
-    private void SyncWcAiChatRowHeight()
+    private void SyncWcAiSidePanelWidth()
     {
         if (DataContext is not MainWindowViewModel vm) return;
         if (this.FindControl<Grid>("WcDiffChatGrid") is not { } grid) return;
-        if (grid.RowDefinitions.Count < 3) return;
+        if (grid.ColumnDefinitions.Count < 3) return;
 
-        var row = grid.RowDefinitions[2];
-        if (vm.WorkingCopy.PendingReview.ShowAiChat)
+        var column = grid.ColumnDefinitions[2];
+        if (vm.WorkingCopy.PendingReview.ShowAiSidePanel)
         {
-            var height = Math.Clamp(_wcAiChatPanelHeight, 120, 560);
-            row.MinHeight = 120;
-            row.MaxHeight = 560;
-            row.Height = new GridLength(height);
+            var width = Math.Clamp(_wcAiSidePanelWidth, 240, 560);
+            column.MinWidth = 240;
+            column.MaxWidth = 560;
+            column.Width = new GridLength(width);
             ScrollWcAiChatToEnd();
         }
         else
         {
-            if (row.Height.IsAbsolute && row.Height.Value >= 120)
-                _wcAiChatPanelHeight = Math.Clamp(row.Height.Value, 120, 560);
-            row.MinHeight = 0;
-            row.MaxHeight = 560;
-            row.Height = new GridLength(0);
+            if (column.Width.IsAbsolute && column.Width.Value >= 240)
+                _wcAiSidePanelWidth = Math.Clamp(column.Width.Value, 240, 560);
+            column.MinWidth = 0;
+            column.MaxWidth = 560;
+            column.Width = new GridLength(0);
         }
     }
 
     private void ScrollWcAiChatToEnd()
     {
-        if (DataContext is not MainWindowViewModel vm || !vm.WorkingCopy.PendingReview.ShowAiChat) return;
+        if (DataContext is not MainWindowViewModel vm ||
+            !vm.WorkingCopy.PendingReview.ShowAiSidePanel || !vm.WorkingCopy.PendingReview.IsAiChatTabSelected)
+            return;
         Dispatcher.UIThread.Post(() =>
         {
             if (this.FindControl<ScrollViewer>("WcAiChatScrollViewer") is { } scroll)

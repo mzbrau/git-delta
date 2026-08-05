@@ -159,6 +159,21 @@ public interface IGitHistoryService
         int take,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Recent commits that touched <paramref name="path"/> (follows renames). Newest first.
+    /// </summary>
+    Task<IReadOnlyList<CommitInfo>> ListFileHistoryAsync(
+        string repositoryPath,
+        string path,
+        int take,
+        CancellationToken ct = default);
+
+    /// <summary>The commit that first added <paramref name="path"/> (follows renames), or null.</summary>
+    Task<CommitInfo?> GetFileCreatedCommitAsync(
+        string repositoryPath,
+        string path,
+        CancellationToken ct = default);
+
     Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetCommitFilesAsync(
         string repositoryPath,
         string oid,

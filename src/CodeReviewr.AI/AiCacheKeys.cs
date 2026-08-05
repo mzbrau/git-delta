@@ -9,7 +9,7 @@ namespace CodeReviewr.AI;
 /// </summary>
 public static class AiCacheKeys
 {
-    public static string ComputePrTriageKey(
+    public static string ComputeChangeBriefingKey(
         string sessionKey,
         string headSha,
         string mergeBaseSha,
@@ -20,7 +20,7 @@ public static class AiCacheKeys
         string instructionsHash) =>
         Hash(string.Join(
             '|',
-            "pr-triage",
+            "change-briefing",
             sessionKey,
             headSha,
             mergeBaseSha,

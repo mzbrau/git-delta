@@ -10,13 +10,6 @@ public enum AiRiskLevel
     Critical,
 }
 
-public enum AiFileClassification
-{
-    Normal,
-    ReviewCarefully,
-    Skip,
-}
-
 public enum AiRunState
 {
     Idle,
@@ -32,7 +25,7 @@ public enum AiRunStage
     Idle,
     Materialising,
     Connecting,
-    Triaging,
+    ChangeBriefing,
     FileDepth,
     Chat,
     Cancelling,
@@ -61,35 +54,36 @@ public enum AiReviewScope
     WorkingCopyAll,
 }
 
-/// <summary>Measured PR facts computed locally — never model judgements.</summary>
+/// <summary>Measured change facts computed locally — never model judgements.</summary>
 public sealed record AiMeasuredFacts(
     int FilesChanged,
     int LinesAdded,
     int LinesRemoved);
 
-public sealed record AiRiskJustification(
-    string FilePath,
-    string Reason);
-
-public sealed record AiFileTriage(
-    string Path,
-    AiFileClassification Classification,
-    int PriorityStars,
-    string? Guidance = null);
-
-public sealed record AiPrTriageResult(
-    string Summary,
+/// <summary>Change-level briefing produced by <c>submit_change_briefing</c>.</summary>
+public sealed record AiChangeBriefingResult(
+    string ExecutiveSummary,
     AiRiskLevel Risk,
-    IReadOnlyList<AiRiskJustification> Justifications,
-    IReadOnlyList<string> SuggestedOrder,
-    IReadOnlyList<AiFileTriage> Files,
-    AiMeasuredFacts Measured);
+    IReadOnlyList<string> RiskDrivers,
+    IReadOnlyList<string> WhatChanged,
+    IReadOnlyList<string> ReviewFocus,
+    AiTestingStatus TestingStatus,
+    IReadOnlyList<string> Dependencies,
+    AiMeasuredFacts? Measured = null);
 
-public sealed record AiFileSummaryResult(
+/// <summary>How well the change appears to be covered by tests.</summary>
+public sealed record AiTestingStatus(
+    string Summary,
+    IReadOnlyList<string> Notes);
+
+/// <summary>Per-file briefing produced by <c>submit_file_briefing</c>.</summary>
+public sealed record AiFileBriefingResult(
     string Path,
-    string Purpose,
-    string InterestingChanges,
-    string ReviewFocus);
+    string Overview,
+    AiChangeClassification Classification,
+    IReadOnlyList<string> Findings,
+    int? QualityScore = null,
+    string? QualityRationale = null);
 
 public sealed record AiAnnotationResult(
     string Id,
@@ -120,7 +114,7 @@ public sealed record AiRunSnapshot(
     string? CopilotSessionId,
     int TurnsUsed,
     string? AdHocInstructions,
-    AiPrTriageResult? Triage,
+    AiChangeBriefingResult? ChangeBriefing,
     string? ErrorMessage,
     DateTimeOffset StartedUtc,
     DateTimeOffset? FinishedUtc);
@@ -159,14 +153,18 @@ public sealed record AiChangedFileFact(
     string? BeforeBlobOid,
     string? AfterBlobOid,
     int? LinesAdded = null,
-    int? LinesRemoved = null);
+    int? LinesRemoved = null,
+    int? ChangePercent = null);
 
 public sealed record AiFileDepthRequest(
     string SessionKey,
     string Path,
     string? BeforeBlobOid,
     string? AfterBlobOid,
-    bool IncludeAnnotations = true);
+    bool IncludeAnnotations = true,
+    int? ChangePercent = null,
+    int? LinesAdded = null,
+    int? LinesRemoved = null);
 
 public sealed record AiQuestionRequest(
     string SessionKey,

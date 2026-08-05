@@ -33,13 +33,13 @@ public sealed class AiReviewCoordinatorIntegrationTests
     };
 
     [Test]
-    public async Task StartReviewAsync_CompletesImmediately_WithNullTriage_WithoutCreatingAgentSession()
+    public async Task StartReviewAsync_SubmitsChangeBriefing_AndPersistsIt()
     {
         var sessionCreations = 0;
         await using var harness = await Harness.CreateAsync(_ =>
         {
             sessionCreations++;
-            return FakeAgentScript.Empty;
+            return new FakeAgentScript().OnTurn(ChangeBriefingTurn);
         });
 
         var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
@@ -48,74 +48,65 @@ public sealed class AiReviewCoordinatorIntegrationTests
         var snapshot = await harness.Service.StartReviewAsync(request);
 
         Assert.That(snapshot.State, Is.EqualTo(AiRunState.Complete));
-        Assert.That(snapshot.Triage, Is.Null);
-        Assert.That(snapshot.CopilotSessionId, Is.Null);
-        Assert.That(sessionCreations, Is.EqualTo(0));
+        Assert.That(snapshot.ChangeBriefing, Is.Not.Null);
+        Assert.That(snapshot.ChangeBriefing!.ExecutiveSummary, Is.EqualTo(DefaultChangeBriefing.ExecutiveSummary));
+        Assert.That(snapshot.CopilotSessionId, Is.Not.Null.And.Not.Empty);
+        Assert.That(sessionCreations, Is.EqualTo(1));
 
         var run = await harness.Store.GetRunAsync(snapshot.RunId);
         Assert.That(run, Is.Not.Null);
         Assert.That(run!.State, Is.EqualTo(AiRunState.Complete));
 
-        Assert.That(await harness.Store.GetPrResultForRunAsync(snapshot.RunId), Is.Null);
+        Assert.That(await harness.Store.GetPrResultForRunAsync(snapshot.RunId), Is.Not.Null);
         Assert.That(await harness.Store.ListFileResultsForRunAsync(snapshot.RunId), Is.Empty);
     }
 
     [Test]
-    public async Task SuggestFileOrderAsync_ReturnsInputOrderUnchanged()
+    public async Task StartReviewAsync_AgentDoesNotSubmitChangeBriefing_ReturnsFailedRun()
     {
         await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.Empty);
+
         var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
-        await harness.Service.StartReviewAsync(
-            harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 1, 0)]));
+        var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
 
-        var files = new[] { new FilePath("b.cs"), new FilePath("a.cs") };
-        var ordered = await harness.Service.SuggestFileOrderAsync("PR_1", files);
+        var snapshot = await harness.Service.StartReviewAsync(request);
 
-        Assert.That(ordered, Is.EqualTo(files));
+        Assert.That(snapshot.State, Is.EqualTo(AiRunState.Failed));
+        Assert.That(snapshot.ChangeBriefing, Is.Null);
+        Assert.That(snapshot.ErrorMessage, Does.Contain("did not submit a change briefing"));
     }
 
     [Test]
-    public async Task GetChecklistAsync_ReturnsEmpty()
-    {
-        await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.Empty);
-        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
-        await harness.Service.StartReviewAsync(
-            harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 1, 0)]));
-
-        Assert.That(await harness.Service.GetChecklistAsync("PR_1"), Is.Empty);
-    }
-
-    [Test]
-    public async Task GetCachedRunAsync_ReturnsCompletedShell_WithoutCreatingAnyAgentSession()
+    public async Task GetCachedRunAsync_ReturnsCompletedRun_WithoutTouchingAgentAgain()
     {
         var sessionCreations = 0;
         await using var harness = await Harness.CreateAsync(_ =>
         {
             sessionCreations++;
-            return FakeAgentScript.Empty;
+            return new FakeAgentScript().OnTurn(ChangeBriefingTurn);
         });
 
         var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
         var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 2, 0)]);
         await harness.Service.StartReviewAsync(request);
-        Assert.That(sessionCreations, Is.EqualTo(0));
+        Assert.That(sessionCreations, Is.EqualTo(1));
 
         var cached = await harness.Service.GetCachedRunAsync("PR_1");
 
         Assert.That(cached, Is.Not.Null);
         Assert.That(cached!.State, Is.EqualTo(AiRunState.Complete));
-        Assert.That(cached.Triage, Is.Null);
-        Assert.That(sessionCreations, Is.EqualTo(0), "GetCachedRunAsync must never touch the agent.");
+        Assert.That(cached.ChangeBriefing, Is.Not.Null);
+        Assert.That(sessionCreations, Is.EqualTo(1), "GetCachedRunAsync must never touch the agent.");
     }
 
     [Test]
-    public async Task StartReviewAsync_SecondCallWithUnchangedRequest_ReturnsCachedResult_WithoutAgentSession()
+    public async Task StartReviewAsync_SecondCallWithUnchangedRequest_ReturnsCachedResult_WithoutNewAgentSession()
     {
         var sessionCreations = 0;
         await using var harness = await Harness.CreateAsync(_ =>
         {
             sessionCreations++;
-            return FakeAgentScript.Empty;
+            return new FakeAgentScript().OnTurn(ChangeBriefingTurn);
         });
 
         var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
@@ -124,16 +115,18 @@ public sealed class AiReviewCoordinatorIntegrationTests
         var first = await harness.Service.StartReviewAsync(request);
         var second = await harness.Service.StartReviewAsync(request);
 
-        Assert.That(sessionCreations, Is.EqualTo(0));
+        Assert.That(sessionCreations, Is.EqualTo(1));
         Assert.That(second.RunId, Is.EqualTo(first.RunId));
         Assert.That(second.State, Is.EqualTo(AiRunState.Complete));
-        Assert.That(second.Triage, Is.Null);
+        Assert.That(second.ChangeBriefing, Is.Not.Null);
     }
 
     [Test]
     public async Task StartReviewAsync_DiscardCached_CreatesNewRunShell()
     {
-        await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.Empty);
+        await using var harness = await Harness.CreateAsync(_ => new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
+            .OnTurn(ChangeBriefingTurn));
 
         var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
         var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 1, 0)]);
@@ -143,13 +136,15 @@ public sealed class AiReviewCoordinatorIntegrationTests
 
         Assert.That(second.RunId, Is.Not.EqualTo(first.RunId));
         Assert.That(second.State, Is.EqualTo(AiRunState.Complete));
-        Assert.That(second.Triage, Is.Null);
+        Assert.That(second.ChangeBriefing, Is.Not.Null);
     }
 
     [Test]
     public async Task StartReviewAsync_ChangedHeadSha_MissesCacheAndCreatesNewRunShell()
     {
-        await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.Empty, addSecondCommit: true);
+        await using var harness = await Harness.CreateAsync(
+            _ => new FakeAgentScript().OnTurn(ChangeBriefingTurn).OnTurn(ChangeBriefingTurn),
+            addSecondCommit: true);
 
         var sha1 = harness.Repo.RunGit("rev-parse", "HEAD~1").Trim();
         var sha2 = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
@@ -160,18 +155,18 @@ public sealed class AiReviewCoordinatorIntegrationTests
         var request2 = request1 with { HeadSha = sha2, MergeBaseSha = sha1 };
         var snapshot2 = await harness.Service.StartReviewAsync(request2);
 
-        Assert.That(snapshot1.Triage, Is.Null);
-        Assert.That(snapshot2.Triage, Is.Null);
+        Assert.That(snapshot1.ChangeBriefing, Is.Not.Null);
+        Assert.That(snapshot2.ChangeBriefing, Is.Not.Null);
         Assert.That(snapshot2.RunId, Is.Not.EqualTo(snapshot1.RunId));
         Assert.That(snapshot1.State, Is.EqualTo(AiRunState.Complete));
         Assert.That(snapshot2.State, Is.EqualTo(AiRunState.Complete));
     }
 
     [Test]
-    public async Task StartReviewAsync_ActivityLog_ReportsReadyWithoutToolIo()
+    public async Task StartReviewAsync_ActivityLog_IncludesChangeBriefingPromptAndTool()
     {
         var log = new List<string>();
-        await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.Empty);
+        await using var harness = await Harness.CreateAsync(_ => new FakeAgentScript().OnTurn(ChangeBriefingTurn));
 
         using var _ = harness.Service.ObserveActivityLog(RepositoryKey, line => log.Add(line));
 
@@ -180,17 +175,20 @@ public sealed class AiReviewCoordinatorIntegrationTests
         var snapshot = await harness.Service.StartReviewAsync(request);
 
         Assert.That(snapshot.State, Is.EqualTo(AiRunState.Complete));
-        Assert.That(log, Has.Some.Contain("triage disabled"));
+        Assert.That(log, Has.Some.Contain("Waiting on: change briefing"));
+        Assert.That(log, Has.Some.Contain(">>> Tool start: submit_change_briefing"));
+        Assert.That(log, Has.Some.Contain("<<< Tool result: submit_change_briefing"));
         Assert.That(log, Has.Some.Contain("Review completed."));
-        Assert.That(log, Has.None.Contain("submit_pr_triage"));
-        Assert.That(log, Has.None.Contain(">>> Prompt"));
+        Assert.That(log, Has.Some.Contain(">>> Prompt"));
     }
 
     [Test]
     public async Task CancelAsync_WhileFileDepthInFlight_CancelsTheTurn()
     {
         var reachedAgent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var script = new FakeAgentScript().OnTurn(t => t.BlockUntilCancelled(() => reachedAgent.TrySetResult()));
+        var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
+            .OnTurn(t => t.BlockUntilCancelled(() => reachedAgent.TrySetResult()));
         await using var harness = await Harness.CreateAsync(_ => script);
 
         var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
@@ -211,8 +209,10 @@ public sealed class AiReviewCoordinatorIntegrationTests
     [Test]
     public async Task RequestFileDepthAsync_SdkTimeoutException_Propagates()
     {
-        var script = new FakeAgentScript().OnTurn(t => t.BeforeCalls(_ =>
-            throw new TimeoutException("SendAndWaitAsync timed out after 00:01:00")));
+        var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
+            .OnTurn(t => t.BeforeCalls(_ =>
+                throw new TimeoutException("SendAndWaitAsync timed out after 00:01:00")));
         await using var harness = await Harness.CreateAsync(
             _ => script,
             configureSettings: s => s.AiTurnTimeoutSeconds = 120);
@@ -231,7 +231,9 @@ public sealed class AiReviewCoordinatorIntegrationTests
     [Test]
     public async Task RequestFileDepthAsync_IdleSilence_ProducesTurnIdleTimeout()
     {
-        var script = new FakeAgentScript().OnTurn(t => t.BlockUntilCancelled());
+        var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
+            .OnTurn(t => t.BlockUntilCancelled());
         await using var harness = await Harness.CreateAsync(
             _ => script,
             configureSettings: s =>
@@ -254,13 +256,15 @@ public sealed class AiReviewCoordinatorIntegrationTests
     [Test]
     public async Task RequestFileDepthAsync_ToolInFlight_PausesIdleTimeout_Completes()
     {
-        var fileSummary = new AiFileSummaryResult(
-            "src/App.cs", "Entry point.", "Added a guard.", "Check the guard.");
+        var fileBriefing = new AiFileBriefingResult(
+            "src/App.cs", "Entry point.", AiChangeClassification.BugFix, ["Check the guard."]);
         await using var harness = await Harness.CreateAsync(
-            _ => new FakeAgentScript().OnTurn(t => t
-                .Text("thinking...\n")
-                .Call("submit_file_summary", ToJson(fileSummary))
-                .DelayEachTool(TimeSpan.FromSeconds(12))),
+            _ => new FakeAgentScript()
+                .OnTurn(ChangeBriefingTurn)
+                .OnTurn(t => t
+                    .Text("thinking...\n")
+                    .Call("submit_file_briefing", ToJson(fileBriefing))
+                    .DelayEachTool(TimeSpan.FromSeconds(12))),
             configureSettings: s =>
             {
                 s.AiTurnTimeoutSeconds = 10;
@@ -274,13 +278,13 @@ public sealed class AiReviewCoordinatorIntegrationTests
         await harness.Service.RequestFileDepthAsync(
             new AiFileDepthRequest("PR_IDLE_RESET", "src/App.cs", "before-oid", "after-oid"));
 
-        var summary = await harness.Service.GetFileSummaryAsync("PR_IDLE_RESET", "src/App.cs");
-        Assert.That(summary, Is.Not.Null);
-        Assert.That(summary!.Purpose, Is.EqualTo("Entry point."));
+        var briefing = await harness.Service.GetFileBriefingAsync("PR_IDLE_RESET", "src/App.cs");
+        Assert.That(briefing, Is.Not.Null);
+        Assert.That(briefing!.Overview, Is.EqualTo("Entry point."));
     }
 
     [Test]
-    public async Task RequestFileDepthAsync_SubmitsFileSummaryAndAnnotation_PersistsBoth()
+    public async Task RequestFileDepthAsync_SubmitsFileBriefingAndAnnotation_PersistsBoth()
     {
         const string annotationJson = """
             {
@@ -293,11 +297,12 @@ public sealed class AiReviewCoordinatorIntegrationTests
               "body": "Consider handling the null case here."
             }
             """;
-        var fileSummary = new AiFileSummaryResult(
-            "src/App.cs", "Entry point of the app.", "Added a null guard.", "Check the guard clause logic.");
+        var fileBriefing = new AiFileBriefingResult(
+            "src/App.cs", "Entry point of the app.", AiChangeClassification.BugFix, ["Added a null guard."]);
 
         var script = new FakeAgentScript()
-            .OnTurn(t => t.Call("submit_file_summary", ToJson(fileSummary)).Call("add_annotation", annotationJson));
+            .OnTurn(ChangeBriefingTurn)
+            .OnTurn(t => t.Call("submit_file_briefing", ToJson(fileBriefing)).Call("add_annotation", annotationJson));
         await using var harness = await Harness.CreateAsync(_ => script);
 
         var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
@@ -306,24 +311,61 @@ public sealed class AiReviewCoordinatorIntegrationTests
 
         await harness.Service.RequestFileDepthAsync(new AiFileDepthRequest("PR_1", "src/App.cs", "before-oid", "after-oid-1"));
 
-        var summary = await harness.Service.GetFileSummaryAsync("PR_1", "src/App.cs");
-        Assert.That(summary, Is.Not.Null);
-        Assert.That(summary!.Purpose, Is.EqualTo("Entry point of the app."));
+        var briefing = await harness.Service.GetFileBriefingAsync("PR_1", "src/App.cs");
+        Assert.That(briefing, Is.Not.Null);
+        Assert.That(briefing!.Overview, Is.EqualTo("Entry point of the app."));
+        Assert.That(briefing.Classification, Is.EqualTo(AiChangeClassification.BugFix));
 
         var annotations = await harness.Service.GetFileAnnotationsAsync("PR_1", "src/App.cs");
         Assert.That(annotations, Has.Count.EqualTo(1));
         Assert.That(annotations[0].Body, Is.EqualTo("Consider handling the null case here."));
         Assert.That(annotations[0].Severity, Is.EqualTo(AiAnnotationSeverity.Warning));
+        Assert.That(annotations[0].BlobOid, Is.EqualTo("after-oid-1"));
+    }
+
+    [Test]
+    public async Task RequestFileDepthAsync_AnnotationMissingBlobOid_ResolvesFromSide()
+    {
+        const string annotationJson = """
+            {
+              "path": "src/App.cs",
+              "startLine": 3,
+              "endLine": 3,
+              "side": "New",
+              "severity": "Suggestion",
+              "body": "Missing blobOid should be filled from AfterOid."
+            }
+            """;
+        var fileBriefing = new AiFileBriefingResult(
+            "src/App.cs", "Entry point.", AiChangeClassification.BugFix, ["Note."]);
+
+        var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
+            .OnTurn(t => t.Call("submit_file_briefing", ToJson(fileBriefing)).Call("add_annotation", annotationJson));
+        await using var harness = await Harness.CreateAsync(_ => script);
+
+        var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
+        await harness.Service.StartReviewAsync(
+            harness.BuildRequest("PR_BLOB", head, head, [ChangedFile("src/App.cs", 5, 1, "after-oid-resolved")]));
+
+        await harness.Service.RequestFileDepthAsync(
+            new AiFileDepthRequest("PR_BLOB", "src/App.cs", "before-oid", "after-oid-resolved"));
+
+        var annotations = await harness.Service.GetFileAnnotationsAsync("PR_BLOB", "src/App.cs");
+        Assert.That(annotations, Has.Count.EqualTo(1));
+        Assert.That(annotations[0].BlobOid, Is.EqualTo("after-oid-resolved"));
+        Assert.That(annotations[0].Body, Does.Contain("Missing blobOid"));
     }
 
     [Test]
     public async Task RequestFileDepthAsync_ActivityLog_IncludesPromptAndToolIo()
     {
         var log = new List<string>();
-        var fileSummary = new AiFileSummaryResult(
-            "src/App.cs", "Purpose", "Change", "Look at");
+        var fileBriefing = new AiFileBriefingResult(
+            "src/App.cs", "Purpose", AiChangeClassification.RefactorOnly, ["Look at this."]);
         var script = new FakeAgentScript()
-            .OnTurn(t => t.Call("submit_file_summary", ToJson(fileSummary)));
+            .OnTurn(ChangeBriefingTurn)
+            .OnTurn(t => t.Call("submit_file_briefing", ToJson(fileBriefing)));
         await using var harness = await Harness.CreateAsync(_ => script);
 
         using var _ = harness.Service.ObserveActivityLog(RepositoryKey, line => log.Add(line));
@@ -335,14 +377,15 @@ public sealed class AiReviewCoordinatorIntegrationTests
             new AiFileDepthRequest("PR_1", "src/App.cs", "before-oid", "after-oid"));
 
         Assert.That(log, Has.Some.Contain(">>> Prompt"));
-        Assert.That(log, Has.Some.Contain(">>> Tool start: submit_file_summary"));
-        Assert.That(log, Has.Some.Contain("<<< Tool result: submit_file_summary"));
+        Assert.That(log, Has.Some.Contain(">>> Tool start: submit_file_briefing"));
+        Assert.That(log, Has.Some.Contain("<<< Tool result: submit_file_briefing"));
     }
 
     [Test]
     public async Task AskAsync_ReturnsScriptedAssistantAnswer()
     {
         var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
             .OnTurn(t => t.Text("This adds a null check before dereferencing the argument."));
         await using var harness = await Harness.CreateAsync(_ => script);
 
@@ -359,6 +402,7 @@ public sealed class AiReviewCoordinatorIntegrationTests
     public async Task ChatAsync_ReturnsScriptedAnswer_AndPersistsBothMessages()
     {
         var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
             .OnTurn(t => t.Text("Because it fixes a crash reported in issue #42."));
         await using var harness = await Harness.CreateAsync(_ => script);
 
@@ -381,20 +425,21 @@ public sealed class AiReviewCoordinatorIntegrationTests
     public async Task ChatAsync_AfterRestart_ResumesStoredCopilotSession()
     {
         var script = new FakeAgentScript()
-            .OnTurn(t => t.Text("First answer opens the session."));
+            .OnTurn(ChangeBriefingTurn)
+            .OnTurn(t => t.Text("First answer, on the already-open session."));
         await using var harness = await Harness.CreateAsync(_ => script);
 
         var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
         var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
         var snapshot = await harness.Service.StartReviewAsync(request);
         Assert.That(snapshot.State, Is.EqualTo(AiRunState.Complete));
-        Assert.That(snapshot.CopilotSessionId, Is.Null);
+        Assert.That(snapshot.CopilotSessionId, Is.Not.Null.And.Not.Empty);
+        var storedSessionId = snapshot.CopilotSessionId!;
 
         await harness.Service.ChatAsync(new AiQuestionRequest("PR_1", null, "Open the session"));
 
         var runAfterChat = await harness.Store.GetRunAsync(snapshot.RunId);
-        Assert.That(runAfterChat!.CopilotSessionId, Is.Not.Null.And.Not.Empty);
-        var storedSessionId = runAfterChat.CopilotSessionId!;
+        Assert.That(runAfterChat!.CopilotSessionId, Is.EqualTo(storedSessionId));
 
         // Simulate app restart: new coordinator / FakeAgentClient, same durable store + repo.
         var chatScript = new FakeAgentScript()
@@ -426,6 +471,7 @@ public sealed class AiReviewCoordinatorIntegrationTests
     public async Task ChatAsync_WithSelectedFile_IncludesFileFramingInPrompt()
     {
         var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
             .OnTurn(t => t.Text("Answer about App.cs"));
         await using var harness = await Harness.CreateAsync(_ => script);
 
@@ -450,6 +496,7 @@ public sealed class AiReviewCoordinatorIntegrationTests
     public async Task ChatAsync_SecondTurn_IncludesPriorConversationInPrompt()
     {
         var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
             .OnTurn(t => t.Text("First answer about the crash."))
             .OnTurn(t => t.Text("Second answer referring to earlier context."));
         await using var harness = await Harness.CreateAsync(_ => script);
@@ -473,6 +520,7 @@ public sealed class AiReviewCoordinatorIntegrationTests
     public async Task ClearChatHistoryAsync_RemovesPersistedMessages_KeepsRun()
     {
         var script = new FakeAgentScript()
+            .OnTurn(ChangeBriefingTurn)
             .OnTurn(t => t.Text("Because it fixes a crash."));
         await using var harness = await Harness.CreateAsync(_ => script);
 
@@ -492,7 +540,7 @@ public sealed class AiReviewCoordinatorIntegrationTests
     [Test]
     public async Task ClearAiDataAsync_EmptiesTheDurableStore()
     {
-        await using var harness = await Harness.CreateAsync(_ => FakeAgentScript.Empty);
+        await using var harness = await Harness.CreateAsync(_ => new FakeAgentScript().OnTurn(ChangeBriefingTurn));
 
         var head = harness.Repo.RunGit("rev-parse", "HEAD").Trim();
         var request = harness.BuildRequest("PR_1", head, head, [ChangedFile("src/App.cs", 5, 1)]);
@@ -504,6 +552,19 @@ public sealed class AiReviewCoordinatorIntegrationTests
         Assert.That(await harness.Store.GetRunAsync(snapshot.RunId), Is.Null);
         Assert.That(await harness.Service.GetCachedRunAsync("PR_1"), Is.Null);
     }
+
+    private static readonly AiChangeBriefingResult DefaultChangeBriefing = new(
+        ExecutiveSummary: "This adds a null check before dereferencing the argument.",
+        Risk: AiRiskLevel.Low,
+        RiskDrivers: ["Small, well-scoped change."],
+        WhatChanged: ["Bug fix"],
+        ReviewFocus: ["Verify the new guard clause."],
+        TestingStatus: new AiTestingStatus("No new tests were added.", []),
+        Dependencies: []);
+
+    /// <summary>Scripts the mandatory <c>submit_change_briefing</c> tool call every <c>StartReviewAsync</c> requires.</summary>
+    private static void ChangeBriefingTurn(FakeAgentTurnBuilder t) =>
+        t.Call("submit_change_briefing", ToJson(DefaultChangeBriefing));
 
     private static AiChangedFileFact ChangedFile(string path, int added, int removed, string? afterOid = "after-oid") =>
         new(path, "Modified", "before-oid", afterOid, added, removed);

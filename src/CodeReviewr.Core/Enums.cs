@@ -87,15 +87,22 @@ public enum FileListLayoutMode
 }
 
 /// <summary>
-/// Semantic classification of a file's changes (future AI). UI shows an icon when set;
-/// nothing populates this yet.
+/// Semantic classification of a file's changes (one primary label per file).
 /// </summary>
 public enum AiChangeClassification
 {
     BehaviorChanged,
     NewFeature,
+    BugFix,
     RefactorOnly,
     Configuration,
     Tests,
+    Documentation,
+    DependencyUpdate,
+    BuildOrCi,
+    Deletion,
+    Performance,
+    Security,
+    UiOrStyling,
     Generated,
 }

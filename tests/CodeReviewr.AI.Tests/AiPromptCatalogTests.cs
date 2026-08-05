@@ -11,23 +11,49 @@ public sealed class AiPromptCatalogTests
     }
 
     [Test]
-    public void GetFileSummaryPrompt_RendersAllPlaceholders()
+    public void GetFileBriefingPrompt_RendersAllPlaceholders()
     {
         var catalog = new AiPromptCatalog();
 
-        var prompt = catalog.GetFileSummaryPrompt(new Dictionary<string, string>
+        var prompt = catalog.GetFileBriefingPrompt(new Dictionary<string, string>
         {
             ["rules"] = "RULE-TEXT",
             ["adhoc_instructions"] = "ADHOC-TEXT",
             ["path"] = "src/App.cs",
             ["before_oid"] = "before123",
             ["after_oid"] = "after456",
+            ["change_percent"] = "42",
+            ["lines_added"] = "10",
+            ["lines_removed"] = "2",
         });
 
         Assert.That(prompt, Does.Contain("src/App.cs"));
         Assert.That(prompt, Does.Contain("before123"));
         Assert.That(prompt, Does.Contain("after456"));
+        Assert.That(prompt, Does.Contain("42"));
         Assert.That(prompt, Does.Contain("add_annotation"));
+        Assert.That(prompt, Does.Contain("\"blobOid\": \"after456\""));
+        Assert.That(prompt, Does.Contain("Never use `New`, `Old`"));
+        Assert.That(prompt, Does.Contain("submit_file_briefing"));
+        Assert.That(prompt, Does.Not.Contain("{{"));
+    }
+
+    [Test]
+    public void GetChangeBriefingPrompt_RendersAllPlaceholders()
+    {
+        var catalog = new AiPromptCatalog();
+
+        var prompt = catalog.GetChangeBriefingPrompt(new Dictionary<string, string>
+        {
+            ["rules"] = "RULE-TEXT",
+            ["facts"] = "FACTS-TEXT",
+            ["adhoc_instructions"] = "ADHOC-TEXT",
+        });
+
+        Assert.That(prompt, Does.Contain("RULE-TEXT"));
+        Assert.That(prompt, Does.Contain("FACTS-TEXT"));
+        Assert.That(prompt, Does.Contain("ADHOC-TEXT"));
+        Assert.That(prompt, Does.Contain("submit_change_briefing"));
         Assert.That(prompt, Does.Not.Contain("{{"));
     }
 
@@ -91,10 +117,13 @@ public sealed class AiPromptCatalogTests
             ["path"] = "p",
             ["before_oid"] = "b",
             ["after_oid"] = "a",
+            ["change_percent"] = "10",
+            ["lines_added"] = "1",
+            ["lines_removed"] = "0",
         };
 
-        var first = catalog.GetFileSummaryPrompt(placeholders);
-        var second = catalog.GetFileSummaryPrompt(placeholders);
+        var first = catalog.GetFileBriefingPrompt(placeholders);
+        var second = catalog.GetFileBriefingPrompt(placeholders);
 
         Assert.That(first, Is.EqualTo(second));
     }

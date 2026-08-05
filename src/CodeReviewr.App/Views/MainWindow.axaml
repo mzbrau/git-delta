@@ -740,19 +740,34 @@
                   </ListBox>
                 </StackPanel>
 
-                <!-- Comments (local-only review comments on pending changes) -->
-                <Button Classes="Ghost" Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsCommentsSelected}"
-                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                        Padding="12,8" Margin="0,0,0,-8"
-                        IsVisible="{Binding WorkingCopy.IsFileStatusMode}"
-                        Command="{Binding WorkingCopy.PendingReview.SelectCommentsCommand}">
-                  <StackPanel Orientation="Horizontal" Spacing="8">
-                    <icons:MaterialIcon Kind="ForumOutline" Width="16" Height="16" />
-                    <TextBlock Text="Comments"
-                               FontWeight="{Binding WorkingCopy.PendingReview.IsCommentsSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
-                  </StackPanel>
-                </Button>
+                <!-- Change Briefing / Comments (only relevant to File Status mode) -->
+                <StackPanel IsVisible="{Binding WorkingCopy.IsFileStatusMode}" Margin="0,0,0,-8">
+                  <Button Classes="Ghost" Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsChangeBriefingSelected}"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Padding="12,8"
+                          IsVisible="{Binding WorkingCopy.PendingReview.ShowChangeBriefingRow}"
+                          Command="{Binding WorkingCopy.PendingReview.SelectChangeBriefingCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <icons:MaterialIcon Kind="Creation" Width="16" Height="16"
+                                          Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                      <TextBlock Text="Change Briefing"
+                                 FontWeight="{Binding WorkingCopy.PendingReview.IsChangeBriefingSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                    </StackPanel>
+                  </Button>
 
+                  <!-- Comments (local-only review comments on pending changes) -->
+                  <Button Classes="Ghost" Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsCommentsSelected}"
+                          HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                          Padding="12,8"
+                          IsVisible="{Binding WorkingCopy.PendingReview.ShowCommentsRow}"
+                          Command="{Binding WorkingCopy.PendingReview.SelectCommentsCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <icons:MaterialIcon Kind="ForumOutline" Width="16" Height="16" />
+                      <TextBlock Text="Comments"
+                                 FontWeight="{Binding WorkingCopy.PendingReview.IsCommentsSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                    </StackPanel>
+                  </Button>
+                </StackPanel>
 
 
                 <!-- Staged -->
@@ -1077,8 +1092,20 @@
             </Border>
             <ScrollViewer>
               <StackPanel>
+                <Button Classes="Ghost" Classes.FileListSelected="{Binding Review.IsChangeBriefingSelected}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                        Padding="12,8"
+                        IsVisible="{Binding Review.ShowChangeBriefingRow}"
+                        Command="{Binding Review.SelectChangeBriefingCommand}">
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <icons:MaterialIcon Kind="Creation" Width="16" Height="16"
+                                        Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                    <TextBlock Text="Change Briefing" FontWeight="{Binding Review.IsChangeBriefingSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                  </StackPanel>
+                </Button>
                 <Button Classes="Ghost" Classes.FileListSelected="{Binding Review.IsConversationSelected}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                        Padding="12,8" Command="{Binding Review.SelectConversationCommand}">
+                        Padding="12,8"
+                        IsVisible="{Binding Review.ShowConversationRow}"
+                        Command="{Binding Review.SelectConversationCommand}">
                   <StackPanel Orientation="Horizontal" Spacing="8">
                     <icons:MaterialIcon Kind="ForumOutline" Width="16" Height="16" />
                     <TextBlock Text="Conversation" FontWeight="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
@@ -1140,6 +1167,12 @@
                         IsVisible="{Binding WorkingCopy.CanShowMarkdownPreview}"
                         ToolTip.Tip="Rendered markdown">
                   <icons:MaterialIcon Kind="LanguageMarkdown" Width="18" Height="18" />
+                </Button>
+                <Button Classes="ReviewAction"
+                        Classes.Pressed="{Binding WorkingCopy.PendingReview.ShowAiSidePanel}"
+                        Command="{Binding WorkingCopy.PendingReview.ToggleAiSidePanelCommand}"
+                        ToolTip.Tip="Toggle AI panel">
+                  <icons:MaterialIcon Kind="DockRight" Width="18" Height="18" />
                 </Button>
                 <Border Width="1" Height="22" Margin="2,0"
                         Background="{DynamicResource ForgeOutlineVariantBrush}" />
@@ -1312,58 +1345,156 @@
 
             <Grid x:Name="WcDiffChatGrid"
                   IsVisible="{Binding WorkingCopy.PendingReview.IsCommentsSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
-              <Grid.RowDefinitions>
-                <RowDefinition Height="*" MinHeight="100" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="0" MinHeight="0" MaxHeight="420" />
-              </Grid.RowDefinitions>
-              <DockPanel Grid.Row="0">
-                <!-- AI file guidance band -->
-                <Border DockPanel.Dock="Top" Padding="10" MaxHeight="200"
-                        Background="{DynamicResource ForgeSurfaceContainerBrush}"
-                        BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1"
-                        IsVisible="{Binding WorkingCopy.PendingReview.ShowAiFileBand}">
-                  <DockPanel>
-                    <Button DockPanel.Dock="Top" Classes="Ghost" HorizontalAlignment="Stretch"
-                            HorizontalContentAlignment="Left" Padding="0,0,0,6"
-                            Command="{Binding WorkingCopy.PendingReview.ToggleAiFileBandCommand}">
-                      <DockPanel>
-                        <icons:MaterialIcon DockPanel.Dock="Right" Width="16" Height="16"
-                                            Kind="{Binding WorkingCopy.PendingReview.AiFileBandChevron}"
-                                            Opacity="0.7" />
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                          <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
-                                              Foreground="{DynamicResource ForgeAiAccentBrush}" />
-                          <TextBlock Text="AI GUIDANCE" Classes="PanelHeader" Opacity="0.7"
-                                     VerticalAlignment="Center" />
-                        </StackPanel>
-                      </DockPanel>
-                    </Button>
-                    <ScrollViewer MaxHeight="160" IsVisible="{Binding WorkingCopy.PendingReview.AiFileBandExpanded}">
-                      <StackPanel Spacing="6">
-                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileSummary.Purpose}" FontSize="12" TextWrapping="Wrap"
-                                   IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileSummary}" />
-                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileSummary.InterestingChanges}" FontSize="12"
-                                   TextWrapping="Wrap"
-                                   IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileSummary}"
-                                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileSummary.ReviewFocus}" FontSize="12" FontStyle="Italic"
-                                   TextWrapping="Wrap"
-                                   IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileSummary}"
-                                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                        <DockPanel Margin="0,6,0,0" IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileSummary}">
-                          <Button DockPanel.Dock="Right" Classes="Ghost" Content="Ask" FontSize="11" Margin="6,0,0,0"
-                                  Command="{Binding WorkingCopy.PendingReview.AskFileQuestionCommand}" />
-                          <TextBox Text="{Binding WorkingCopy.PendingReview.AiFileQuestion}" FontSize="12"
-                                   PlaceholderText="Ask a question about this file…" />
-                        </DockPanel>
-                        <controls:MarkdownView Markdown="{Binding WorkingCopy.PendingReview.AiFileAnswer}"
-                                               IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileAnswer}" />
-                      </StackPanel>
-                    </ScrollViewer>
-                  </DockPanel>
-                </Border>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="200" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="0" MinWidth="0" MaxWidth="560" />
+              </Grid.ColumnDefinitions>
 
+              <!-- Change Briefing view -->
+              <ScrollViewer Grid.Column="0" Grid.ColumnSpan="3"
+                            IsVisible="{Binding WorkingCopy.PendingReview.IsChangeBriefingSelected}">
+                <StackPanel Margin="16" Spacing="16">
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="Ghost" Content="Re-run" FontSize="11"
+                            Command="{Binding WorkingCopy.PendingReview.RerunAiReviewCommand}"
+                            IsVisible="{Binding WorkingCopy.PendingReview.CanRerunAiReview}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                      <icons:MaterialIcon Kind="Creation" Width="16" Height="16"
+                                          Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                      <TextBlock Text="Change Briefing" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </DockPanel>
+
+                  <WrapPanel IsVisible="{Binding WorkingCopy.PendingReview.HasAiChangeBriefing}">
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="EXECUTIVE SUMMARY" Classes="PanelHeader" Opacity="0.7" />
+                        <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiChangeBriefing.ExecutiveSummary}"
+                                             FontSize="12" TextWrapping="Wrap" LineHeight="18" />
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="RISK LEVEL" Classes="PanelHeader" Opacity="0.7" />
+                        <Border HorizontalAlignment="Left" CornerRadius="4" Padding="8,3"
+                                Background="{Binding WorkingCopy.PendingReview.AiChangeBriefing.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBackground}}">
+                          <TextBlock FontSize="11" FontWeight="SemiBold"
+                                     Text="{Binding WorkingCopy.PendingReview.AiChangeBriefing.Risk, Converter={x:Static conv:ForgeConverters.AiRiskLabel}}" />
+                        </Border>
+                        <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChangeBriefing.RiskDrivers}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <DockPanel Classes="BriefingListItem">
+                                <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                              </DockPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="WHAT'S CHANGED" Classes="PanelHeader" Opacity="0.7" />
+                        <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChangeBriefing.WhatChanged}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <DockPanel Classes="BriefingListItem">
+                                <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                              </DockPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="REVIEW FOCUS" Classes="PanelHeader" Opacity="0.7" />
+                        <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChangeBriefing.ReviewFocus}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <DockPanel Classes="BriefingListItem">
+                                <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                              </DockPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="TESTING STATUS" Classes="PanelHeader" Opacity="0.7" />
+                        <TextBlock Text="{Binding WorkingCopy.PendingReview.AiChangeBriefing.TestingStatus.Summary}"
+                                   FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" LineHeight="18" />
+                        <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChangeBriefing.TestingStatus.Notes}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <DockPanel Classes="BriefingListItem">
+                                <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                <TextBlock Text="{Binding}" Classes="BriefingListText"
+                                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                              </DockPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="SCOPE" Classes="PanelHeader" Opacity="0.7" />
+                        <StackPanel Orientation="Horizontal" Spacing="10"
+                                    IsVisible="{Binding WorkingCopy.PendingReview.AiChangeBriefing.Measured, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                          <TextBlock FontSize="12">
+                            <Run Text="{Binding WorkingCopy.PendingReview.AiChangeBriefing.Measured.FilesChanged}" />
+                            <Run Text=" files" />
+                          </TextBlock>
+                          <TextBlock FontSize="12" Foreground="{DynamicResource ForgeStatusAddedBrush}">
+                            <Run Text="+" /><Run Text="{Binding WorkingCopy.PendingReview.AiChangeBriefing.Measured.LinesAdded}" />
+                          </TextBlock>
+                          <TextBlock FontSize="12" Foreground="{DynamicResource ForgeStatusDeletedBrush}">
+                            <Run Text="-" /><Run Text="{Binding WorkingCopy.PendingReview.AiChangeBriefing.Measured.LinesRemoved}" />
+                          </TextBlock>
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChangeBriefing.Dependencies}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <Border Classes="Chip" Margin="0,0,0,4" HorizontalAlignment="Left">
+                                <TextBlock Text="{Binding}" FontSize="11" />
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                  </WrapPanel>
+
+                  <StackPanel Spacing="8" IsVisible="{Binding WorkingCopy.PendingReview.HasAiChangeBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                    <StackPanel Spacing="8" IsVisible="{Binding WorkingCopy.PendingReview.HasAiRun}">
+                      <ProgressBar IsIndeterminate="True" Height="4" />
+                      <TextBlock Text="Generating change briefing…" FontSize="12" Opacity="0.7" />
+                    </StackPanel>
+                    <TextBlock Text="Start an AI review to generate a change briefing." FontSize="12" Opacity="0.6"
+                               IsVisible="{Binding WorkingCopy.PendingReview.HasAiRun, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                  </StackPanel>
+                </StackPanel>
+              </ScrollViewer>
+
+              <DockPanel Grid.Column="0"
+                         IsVisible="{Binding WorkingCopy.PendingReview.IsChangeBriefingSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
                 <!-- Expanded AI annotation card (simplified: docked, not floating over the line) -->
                 <Border DockPanel.Dock="Bottom" Padding="12" MaxHeight="260"
                         Background="{DynamicResource ForgeSurfaceContainerHighestBrush}"
@@ -1556,70 +1687,193 @@
                 </Panel>
               </DockPanel>
 
-              <GridSplitter Grid.Row="1" Height="4" ResizeDirection="Rows"
+              <GridSplitter Grid.Column="1" Width="4" ResizeDirection="Columns"
                             Background="{DynamicResource ForgeOutlineVariantBrush}"
-                            IsVisible="{Binding WorkingCopy.PendingReview.ShowAiChat}" />
-              <Border Grid.Row="2" Padding="10"
-                      VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                            IsVisible="{Binding WorkingCopy.PendingReview.ShowAiSidePanel}" />
+
+              <!-- AI side panel: File Briefing / Chat tabs -->
+              <Border Grid.Column="2" Padding="0"
                       Background="{DynamicResource ForgeSurfaceContainerBrush}"
-                      BorderBrush="{DynamicResource ForgeAiAccentBrush}" BorderThickness="0,1,0,0"
-                      IsVisible="{Binding WorkingCopy.PendingReview.ShowAiChat}">
-                <Grid RowDefinitions="Auto,*,Auto,Auto">
-                  <DockPanel Grid.Row="0" Margin="0,0,0,8">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
-                      <Button Classes="Ghost" Content="Clear" FontSize="11"
-                              Command="{Binding WorkingCopy.PendingReview.ClearAiChatCommand}"
-                              IsEnabled="{Binding WorkingCopy.PendingReview.CanClearAiChat}"
-                              ToolTip.Tip="Clear chat history and start a new conversation" />
-                      <Button Classes="Ghost" Content="Close" FontSize="11"
-                              Command="{Binding WorkingCopy.PendingReview.ToggleAiChatCommand}" />
-                    </StackPanel>
-                    <StackPanel Orientation="Vertical" Spacing="2" VerticalAlignment="Center">
-                      <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <icons:MaterialIcon Kind="ChatOutline" Width="14" Height="14"
-                                            Foreground="{DynamicResource ForgeAiAccentBrush}" />
-                        <TextBlock Text="AI CHAT" Classes="PanelHeader" Opacity="0.7" />
+                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0"
+                      IsVisible="{Binding WorkingCopy.PendingReview.ShowAiSidePanel}">
+                <DockPanel>
+                  <Border DockPanel.Dock="Top" Padding="10,8"
+                          BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+                    <DockPanel>
+                      <Button DockPanel.Dock="Right" Classes="IconOnly" Width="24" Height="24" Padding="3"
+                              Command="{Binding WorkingCopy.PendingReview.ToggleAiSidePanelCommand}"
+                              ToolTip.Tip="Collapse AI panel">
+                        <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
+                      </Button>
+                      <StackPanel Orientation="Horizontal" Spacing="4">
+                        <Button Classes="Ghost" Padding="8,4" FontSize="11"
+                                Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsAiFileBriefingTabSelected}"
+                                Command="{Binding WorkingCopy.PendingReview.SelectAiFileBriefingTabCommand}">
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <icons:MaterialIcon Kind="Creation" Width="13" Height="13"
+                                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                            <TextBlock Text="File Briefing"
+                                       FontWeight="{Binding WorkingCopy.PendingReview.IsAiFileBriefingTabSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                          </StackPanel>
+                        </Button>
+                        <Button Classes="Ghost" Padding="8,4" FontSize="11"
+                                Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsAiChatTabSelected}"
+                                Command="{Binding WorkingCopy.PendingReview.SelectAiChatTabCommand}">
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <icons:MaterialIcon Kind="ChatOutline" Width="13" Height="13"
+                                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                            <TextBlock Text="Chat"
+                                       FontWeight="{Binding WorkingCopy.PendingReview.IsAiChatTabSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                          </StackPanel>
+                        </Button>
                       </StackPanel>
-                      <TextBlock Text="{Binding WorkingCopy.PendingReview.AiChatSelectedFileLabel}" FontSize="10"
-                                 Opacity="0.55" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                  </DockPanel>
-                  <ScrollViewer x:Name="WcAiChatScrollViewer" Grid.Row="1"
-                                VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
-                                VerticalScrollBarVisibility="Auto"
-                                HorizontalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChatMessages}">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="ai:AiChatMessage">
-                          <Border Margin="0,0,0,8" Padding="8" CornerRadius="6"
-                                  Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
-                            <StackPanel Spacing="4">
-                              <TextBlock Text="{Binding Role}" FontSize="10" FontWeight="SemiBold"
-                                         Foreground="{DynamicResource ForgeAiAccentBrush}" />
-                              <controls:MarkdownView Markdown="{Binding Content}" />
+                    </DockPanel>
+                  </Border>
+
+                  <!-- File Briefing tab -->
+                  <ScrollViewer IsVisible="{Binding WorkingCopy.PendingReview.IsAiFileBriefingTabSelected}">
+                    <StackPanel Spacing="10" Margin="10">
+                      <StackPanel Spacing="10" IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileBriefing}">
+                        <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}">
+                          <StackPanel Spacing="6">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <icons:MaterialIcon Width="14" Height="14"
+                                                  Kind="{Binding WorkingCopy.PendingReview.AiFileBriefing.Classification, Converter={x:Static conv:ForgeConverters.AiChangeClassificationIcon}}" />
+                              <TextBlock FontSize="11" FontWeight="SemiBold"
+                                         Text="{Binding WorkingCopy.PendingReview.AiFileBriefing.Classification, Converter={x:Static conv:ForgeConverters.AiChangeClassificationLabel}}" />
+                              <Border Classes="Chip" IsVisible="{Binding WorkingCopy.PendingReview.AiFileBriefing.QualityScore, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                                <TextBlock FontSize="10">
+                                  <Run Text="Quality " /><Run Text="{Binding WorkingCopy.PendingReview.AiFileBriefing.QualityScore}" />
+                                </TextBlock>
+                              </Border>
                             </StackPanel>
-                          </Border>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                            <SelectableTextBlock Text="{Binding WorkingCopy.PendingReview.AiFileBriefing.Overview}"
+                                                 FontSize="12" TextWrapping="Wrap" LineHeight="18" />
+                            <TextBlock Text="{Binding WorkingCopy.PendingReview.AiFileBriefing.QualityRationale}"
+                                       FontSize="11" TextWrapping="Wrap" LineHeight="16" Opacity="0.7" FontStyle="Italic"
+                                       IsVisible="{Binding WorkingCopy.PendingReview.AiFileBriefing.QualityRationale, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+                          </StackPanel>
+                        </Border>
+
+                        <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                                IsVisible="{Binding WorkingCopy.PendingReview.AiFileBriefing.Findings.Count, Converter={x:Static conv:ForgeConverters.IsPositive}}">
+                          <StackPanel Spacing="6">
+                            <TextBlock Text="AI FINDINGS" Classes="PanelHeader" Opacity="0.7" />
+                            <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiFileBriefing.Findings}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                  <DockPanel Classes="BriefingListItem">
+                                    <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                    <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                  </DockPanel>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </Border>
+
+                        <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}">
+                          <StackPanel Spacing="6">
+                            <DockPanel>
+                              <Button DockPanel.Dock="Right" Classes="Ghost" Content="Load" FontSize="10" Padding="6,2"
+                                      Command="{Binding WorkingCopy.PendingReview.LoadFileHistoryCommand}"
+                                      IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsNotLoaded}" />
+                              <TextBlock Text="FILE HISTORY" Classes="PanelHeader" Opacity="0.7" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <ProgressBar IsIndeterminate="True" Height="3"
+                                         IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsLoading}" />
+                            <TextBlock Text="{Binding WorkingCopy.PendingReview.FileHistory.ErrorMessage}" FontSize="11"
+                                       Foreground="{DynamicResource ForgeStatusDeletedBrush}" TextWrapping="Wrap"
+                                       IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsFailed}" />
+                            <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.FileHistory.Entries}"
+                                          IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsReady}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:FileHistoryEntry">
+                                  <DockPanel Margin="0,3" ToolTip.Tip="{Binding AuthorName}">
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding ShortOid}"
+                                               FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.6" />
+                                    <StackPanel Spacing="1">
+                                      <TextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                      <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
+                                                   FontSize="10" Opacity="0.55" />
+                                        <Border Classes="Chip" IsVisible="{Binding IsCreated}">
+                                          <TextBlock Text="Created" FontSize="9" />
+                                        </Border>
+                                        <Border Classes="Chip" IsVisible="{Binding IsCurrent}">
+                                          <TextBlock Text="Current" FontSize="9" />
+                                        </Border>
+                                      </StackPanel>
+                                    </StackPanel>
+                                  </DockPanel>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </Border>
+                      </StackPanel>
+
+                      <StackPanel Spacing="8" IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                        <StackPanel Spacing="8" IsVisible="{Binding WorkingCopy.PendingReview.IsGeneratingFileBriefing}">
+                          <ProgressBar IsIndeterminate="True" Height="4" />
+                          <TextBlock Text="Generating file briefing…" FontSize="12" Opacity="0.7" />
+                        </StackPanel>
+                        <StackPanel Spacing="8" IsVisible="{Binding WorkingCopy.PendingReview.IsGeneratingFileBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                          <StackPanel Spacing="8" IsVisible="{Binding WorkingCopy.PendingReview.CanGenerateFileBriefing}">
+                            <Button Classes="Ghost" Content="Generate briefing" HorizontalAlignment="Left"
+                                    Command="{Binding WorkingCopy.PendingReview.GenerateFileBriefingCommand}" />
+                          </StackPanel>
+                          <StackPanel Spacing="4" IsVisible="{Binding WorkingCopy.PendingReview.CanGenerateFileBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                            <TextBlock Text="Start an AI review to see file briefings." FontSize="12" Opacity="0.6"
+                                       IsVisible="{Binding WorkingCopy.PendingReview.HasAiRun, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                            <TextBlock Text="Select a file to see its AI briefing." FontSize="12" Opacity="0.6"
+                                       IsVisible="{Binding WorkingCopy.PendingReview.HasAiRun}" />
+                          </StackPanel>
+                        </StackPanel>
+                      </StackPanel>
+                    </StackPanel>
                   </ScrollViewer>
-                  <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8"
-                              Margin="0,6,0,0" VerticalAlignment="Center"
-                              IsVisible="{Binding WorkingCopy.PendingReview.IsAiChatBusy}">
-                    <ProgressBar Width="72" Height="3" IsIndeterminate="True"
+
+                  <!-- Chat tab -->
+                  <Grid RowDefinitions="*,Auto,Auto" IsVisible="{Binding WorkingCopy.PendingReview.IsAiChatTabSelected}">
+                    <ScrollViewer x:Name="WcAiChatScrollViewer" Grid.Row="0"
+                                  VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Margin="10,10,10,0">
+                      <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.AiChatMessages}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="ai:AiChatMessage">
+                            <Border Margin="0,0,0,8" Padding="8" CornerRadius="6"
+                                    Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
+                              <StackPanel Spacing="4">
+                                <TextBlock Text="{Binding Role}" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                                <controls:MarkdownView Markdown="{Binding Content}" />
+                              </StackPanel>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </ScrollViewer>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8"
+                                Margin="10,6,10,0" VerticalAlignment="Center"
+                                IsVisible="{Binding WorkingCopy.PendingReview.IsAiChatBusy}">
+                      <ProgressBar Width="72" Height="3" IsIndeterminate="True"
+                                   VerticalAlignment="Center" />
+                      <TextBlock Text="Thinking…" FontSize="11" Opacity="0.7"
                                  VerticalAlignment="Center" />
-                    <TextBlock Text="Thinking…" FontSize="11" Opacity="0.7"
-                               VerticalAlignment="Center" />
-                  </StackPanel>
-                  <DockPanel Grid.Row="3" Margin="0,8,0,0">
-                    <Button DockPanel.Dock="Right" Classes="Primary" Content="Send" Margin="6,0,0,0"
-                            Command="{Binding WorkingCopy.PendingReview.SendAiChatCommand}"
-                            IsEnabled="{Binding WorkingCopy.PendingReview.CanSendAiChat}" />
-                    <TextBox Text="{Binding WorkingCopy.PendingReview.AiChatInput}" FontSize="12"
-                             PlaceholderText="{Binding WorkingCopy.PendingReview.AiChatPlaceholder}"
-                             KeyDown="OnWcAiChatKeyDown" />
-                  </DockPanel>
-                </Grid>
+                    </StackPanel>
+                    <DockPanel Grid.Row="2" Margin="10">
+                      <Button DockPanel.Dock="Right" Classes="Primary" Content="Send" Margin="6,0,0,0"
+                              Command="{Binding WorkingCopy.PendingReview.SendAiChatCommand}"
+                              IsEnabled="{Binding WorkingCopy.PendingReview.CanSendAiChat}" />
+                      <TextBox Text="{Binding WorkingCopy.PendingReview.AiChatInput}" FontSize="12"
+                               PlaceholderText="{Binding WorkingCopy.PendingReview.AiChatPlaceholder}"
+                               KeyDown="OnWcAiChatKeyDown" />
+                    </DockPanel>
+                  </Grid>
+                </DockPanel>
               </Border>
             </Grid>
           </Panel>
@@ -1668,6 +1922,12 @@
                         IsVisible="{Binding Review.CanShowMarkdownPreview}"
                         ToolTip.Tip="Rendered markdown">
                   <icons:MaterialIcon Kind="LanguageMarkdown" Width="18" Height="18" />
+                </Button>
+                <Button Classes="ReviewAction"
+                        Classes.Pressed="{Binding Review.ShowAiSidePanel}"
+                        Command="{Binding Review.ToggleAiSidePanelCommand}"
+                        ToolTip.Tip="Toggle AI panel">
+                  <icons:MaterialIcon Kind="DockRight" Width="18" Height="18" />
                 </Button>
                 <Border Width="1" Height="22" Margin="2,0"
                         Background="{DynamicResource ForgeOutlineVariantBrush}" />
@@ -1778,6 +2038,8 @@
               <Panel ClipToBounds="True">
                 <TextBlock Text="Conversation" FontWeight="SemiBold" VerticalAlignment="Center"
                            IsVisible="{Binding Review.IsConversationSelected}" />
+                <TextBlock Text="Change Briefing" FontWeight="SemiBold" VerticalAlignment="Center"
+                           IsVisible="{Binding Review.IsChangeBriefingSelected}" />
                 <Panel IsVisible="{Binding Review.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
                   <TextBlock Text="{Binding Review.SelectedFile.Path}" FontWeight="SemiBold"
                              Classes="MonoPath" TextTrimming="CharacterEllipsis"
@@ -1910,56 +2172,156 @@
             </ScrollViewer>
             <Grid x:Name="PrDiffChatGrid"
                   IsVisible="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
-              <Grid.RowDefinitions>
-                <RowDefinition Height="*" MinHeight="100" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="0" MinHeight="0" MaxHeight="560" />
-              </Grid.RowDefinitions>
-              <DockPanel Grid.Row="0">
-              <Border DockPanel.Dock="Top" Padding="10" MaxHeight="220"
-                      Background="{DynamicResource ForgeSurfaceContainerBrush}"
-                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1"
-                      IsVisible="{Binding Review.ShowAiFileBand}">
-                <DockPanel>
-                  <Button DockPanel.Dock="Top" Classes="Ghost" HorizontalAlignment="Stretch"
-                          HorizontalContentAlignment="Left" Padding="0,0,0,6"
-                          Command="{Binding Review.ToggleAiFileBandCommand}">
-                    <DockPanel>
-                      <icons:MaterialIcon DockPanel.Dock="Right" Width="16" Height="16"
-                                          Kind="{Binding Review.AiFileBandChevron}"
-                                          Opacity="0.7" />
-                      <StackPanel Orientation="Horizontal" Spacing="6">
-                        <icons:MaterialIcon Kind="Creation" Width="14" Height="14"
-                                            Foreground="{DynamicResource ForgeAiAccentBrush}" />
-                        <TextBlock Text="AI GUIDANCE" Classes="PanelHeader" Opacity="0.7"
-                                   VerticalAlignment="Center" />
-                      </StackPanel>
-                    </DockPanel>
-                  </Button>
-                  <ScrollViewer MaxHeight="180" IsVisible="{Binding Review.AiFileBandExpanded}">
-                    <StackPanel Spacing="6">
-                      <SelectableTextBlock Text="{Binding Review.AiFileSummary.Purpose}" FontSize="12" TextWrapping="Wrap"
-                                 IsVisible="{Binding Review.HasAiFileSummary}" />
-                      <SelectableTextBlock Text="{Binding Review.AiFileSummary.InterestingChanges}" FontSize="12"
-                                 TextWrapping="Wrap"
-                                 IsVisible="{Binding Review.HasAiFileSummary}"
-                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                      <SelectableTextBlock Text="{Binding Review.AiFileSummary.ReviewFocus}" FontSize="12" FontStyle="Italic"
-                                 TextWrapping="Wrap"
-                                 IsVisible="{Binding Review.HasAiFileSummary}"
-                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                      <DockPanel Margin="0,6,0,0" IsVisible="{Binding Review.HasAiFileSummary}">
-                        <Button DockPanel.Dock="Right" Classes="Ghost" Content="Ask" FontSize="11" Margin="6,0,0,0"
-                                Command="{Binding Review.AskFileQuestionCommand}" />
-                        <TextBox Text="{Binding Review.AiFileQuestion}" FontSize="12"
-                                 PlaceholderText="Ask a question about this file…" />
-                      </DockPanel>
-                      <controls:MarkdownView Markdown="{Binding Review.AiFileAnswer}"
-                                             IsVisible="{Binding Review.HasAiFileAnswer}" />
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="200" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="0" MinWidth="0" MaxWidth="560" />
+              </Grid.ColumnDefinitions>
+
+              <!-- Change Briefing view -->
+              <ScrollViewer Grid.Column="0" Grid.ColumnSpan="3"
+                            IsVisible="{Binding Review.IsChangeBriefingSelected}">
+                <StackPanel Margin="16" Spacing="16">
+                  <DockPanel>
+                    <Button DockPanel.Dock="Right" Classes="Ghost" Content="Re-run" FontSize="11"
+                            Command="{Binding Review.RerunAiReviewCommand}"
+                            IsVisible="{Binding Review.CanRerunAiReview}" />
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                      <icons:MaterialIcon Kind="Creation" Width="16" Height="16"
+                                          Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                      <TextBlock Text="Change Briefing" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" />
                     </StackPanel>
-                  </ScrollViewer>
-                </DockPanel>
-              </Border>
+                  </DockPanel>
+
+                  <WrapPanel IsVisible="{Binding Review.HasAiChangeBriefing}">
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="EXECUTIVE SUMMARY" Classes="PanelHeader" Opacity="0.7" />
+                        <SelectableTextBlock Text="{Binding Review.AiChangeBriefing.ExecutiveSummary}"
+                                             FontSize="12" TextWrapping="Wrap" LineHeight="18" />
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="RISK LEVEL" Classes="PanelHeader" Opacity="0.7" />
+                        <Border HorizontalAlignment="Left" CornerRadius="4" Padding="8,3"
+                                Background="{Binding Review.AiChangeBriefing.Risk, Converter={x:Static conv:ForgeConverters.AiRiskBadgeBackground}}">
+                          <TextBlock FontSize="11" FontWeight="SemiBold"
+                                     Text="{Binding Review.AiChangeBriefing.Risk, Converter={x:Static conv:ForgeConverters.AiRiskLabel}}" />
+                        </Border>
+                        <ItemsControl ItemsSource="{Binding Review.AiChangeBriefing.RiskDrivers}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <DockPanel Classes="BriefingListItem">
+                                <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                              </DockPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="WHAT'S CHANGED" Classes="PanelHeader" Opacity="0.7" />
+                        <ItemsControl ItemsSource="{Binding Review.AiChangeBriefing.WhatChanged}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <DockPanel Classes="BriefingListItem">
+                                <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                              </DockPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="REVIEW FOCUS" Classes="PanelHeader" Opacity="0.7" />
+                        <ItemsControl ItemsSource="{Binding Review.AiChangeBriefing.ReviewFocus}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <DockPanel Classes="BriefingListItem">
+                                <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                              </DockPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="TESTING STATUS" Classes="PanelHeader" Opacity="0.7" />
+                        <TextBlock Text="{Binding Review.AiChangeBriefing.TestingStatus.Summary}"
+                                   FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap" LineHeight="18" />
+                        <ItemsControl ItemsSource="{Binding Review.AiChangeBriefing.TestingStatus.Notes}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <DockPanel Classes="BriefingListItem">
+                                <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                <TextBlock Text="{Binding}" Classes="BriefingListText"
+                                           Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                              </DockPanel>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+
+                    <Border Width="340" Margin="0,0,12,12" Padding="12" CornerRadius="8"
+                            Background="{DynamicResource ForgeSurfaceContainerBrush}">
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="SCOPE" Classes="PanelHeader" Opacity="0.7" />
+                        <StackPanel Orientation="Horizontal" Spacing="10"
+                                    IsVisible="{Binding Review.AiChangeBriefing.Measured, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                          <TextBlock FontSize="12">
+                            <Run Text="{Binding Review.AiChangeBriefing.Measured.FilesChanged}" />
+                            <Run Text=" files" />
+                          </TextBlock>
+                          <TextBlock FontSize="12" Foreground="{DynamicResource ForgeStatusAddedBrush}">
+                            <Run Text="+" /><Run Text="{Binding Review.AiChangeBriefing.Measured.LinesAdded}" />
+                          </TextBlock>
+                          <TextBlock FontSize="12" Foreground="{DynamicResource ForgeStatusDeletedBrush}">
+                            <Run Text="-" /><Run Text="{Binding Review.AiChangeBriefing.Measured.LinesRemoved}" />
+                          </TextBlock>
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding Review.AiChangeBriefing.Dependencies}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                              <Border Classes="Chip" Margin="0,0,0,4" HorizontalAlignment="Left">
+                                <TextBlock Text="{Binding}" FontSize="11" />
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                  </WrapPanel>
+
+                  <StackPanel Spacing="8" IsVisible="{Binding Review.HasAiChangeBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                    <StackPanel Spacing="8" IsVisible="{Binding Review.HasAiRun}">
+                      <ProgressBar IsIndeterminate="True" Height="4" />
+                      <TextBlock Text="Generating change briefing…" FontSize="12" Opacity="0.7" />
+                    </StackPanel>
+                    <TextBlock Text="Start an AI review to generate a change briefing." FontSize="12" Opacity="0.6"
+                               IsVisible="{Binding Review.HasAiRun, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                  </StackPanel>
+                </StackPanel>
+              </ScrollViewer>
+
+              <DockPanel Grid.Column="0"
+                         IsVisible="{Binding Review.IsChangeBriefingSelected, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <Border DockPanel.Dock="Bottom" MaxHeight="180" Padding="8"
                       Background="{DynamicResource ForgeSurfaceContainerBrush}"
                       BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,1,0,0"
@@ -2037,76 +2399,6 @@
                               </ItemsControl>
                             </StackPanel>
                           </Border>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                  </ScrollViewer>
-                </DockPanel>
-              </Border>
-              <Border DockPanel.Dock="Right" Width="280" Padding="8"
-                      Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
-                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0"
-                      IsVisible="{Binding Review.ShowSideThreadPanel}">
-                <DockPanel>
-                  <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
-                    <Button DockPanel.Dock="Right" Classes="Ghost" Content="Close" FontSize="11"
-                            Command="{Binding Review.ClearExpandedThreadCommand}" />
-                    <TextBlock Text="Thread" FontWeight="SemiBold" VerticalAlignment="Center" />
-                  </DockPanel>
-                  <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0"
-                              IsVisible="{Binding Review.IsEditingComment}">
-                    <TextBox x:Name="SideThreadEditBox"
-                             Text="{Binding Review.NewCommentBody}"
-                             AcceptsReturn="True"
-                             MinHeight="40"
-                             PlaceholderText="{Binding Review.DraftPlaceholder}"
-                             TextChanged="OnCommentDraftTextChanged"
-                             KeyDown="OnCommentDraftKeyDown" />
-                    <DockPanel>
-                      <Button DockPanel.Dock="Right" Classes="Primary"
-                              Content="{Binding Review.DraftPrimaryActionLabel}"
-                              Command="{Binding Review.AddCommentCommand}" />
-                      <Button Classes="Ghost" Content="Cancel" FontSize="11"
-                              Command="{Binding Review.ClearDraftCommentAnchorCommand}" />
-                    </DockPanel>
-                  </StackPanel>
-                  <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0"
-                              IsVisible="{Binding Review.CanReplyToSelectedThread}">
-                    <TextBox x:Name="SideThreadReplyBox"
-                             Text="{Binding Review.ReplyBody}"
-                             AcceptsReturn="True"
-                             MinHeight="40"
-                             PlaceholderText="Reply…"
-                             TextChanged="OnCommentDraftTextChanged"
-                             KeyDown="OnCommentDraftKeyDown" />
-                    <Button Classes="Primary" Content="Reply" HorizontalAlignment="Right"
-                            Command="{Binding Review.ReplyToThreadCommand}" />
-                  </StackPanel>
-                  <ScrollViewer>
-                    <ItemsControl ItemsSource="{Binding Review.SelectedThread.Comments}">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="review:ReviewComment">
-                          <StackPanel Spacing="4" Margin="0,0,0,8">
-                            <DockPanel>
-                              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4"
-                                          IsVisible="{Binding ViewerDidAuthor}">
-                                <Button Classes="Ghost" Content="Edit" FontSize="10" Padding="4,0"
-                                        IsVisible="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.CanMutateSelectedThreadComments}"
-                                        Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.BeginEditCommentCommand}"
-                                        CommandParameter="{Binding}" />
-                                <Button Classes="Ghost" Content="Delete" FontSize="10" Padding="4,0"
-                                        IsVisible="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.CanMutateSelectedThreadComments}"
-                                        Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.DeleteCommentCommand}"
-                                        CommandParameter="{Binding}" />
-                              </StackPanel>
-                              <TextBlock FontSize="11" Opacity="0.7">
-                                <Run Text="{Binding AuthorLogin, Mode=OneWay}" FontWeight="SemiBold" />
-                                <Run Text=" · " />
-                                <Run Text="{Binding CreatedAt, Mode=OneWay}" />
-                              </TextBlock>
-                            </DockPanel>
-                            <controls:MarkdownView Markdown="{Binding Body}" />
-                          </StackPanel>
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -2325,70 +2617,279 @@
                 </Popup>
               </Panel>
             </DockPanel>
-              <GridSplitter Grid.Row="1" Height="4" ResizeDirection="Rows"
+
+              <GridSplitter Grid.Column="1" Width="4" ResizeDirection="Columns"
                             Background="{DynamicResource ForgeOutlineVariantBrush}"
-                            IsVisible="{Binding Review.ShowAiChat}" />
-              <Border Grid.Row="2" Padding="10"
-                      VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                            IsVisible="{Binding Review.ShowAiSidePanel}" />
+
+              <!-- AI side panel: File Briefing / Chat tabs -->
+              <Border Grid.Column="2" Padding="0"
                       Background="{DynamicResource ForgeSurfaceContainerBrush}"
-                      BorderBrush="{DynamicResource ForgeAiAccentBrush}" BorderThickness="0,1,0,0"
-                      IsVisible="{Binding Review.ShowAiChat}">
-                <Grid RowDefinitions="Auto,*,Auto,Auto">
-                  <DockPanel Grid.Row="0" Margin="0,0,0,8">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
-                      <Button Classes="Ghost" Content="Clear" FontSize="11"
-                              Command="{Binding Review.ClearAiChatCommand}"
-                              IsEnabled="{Binding Review.CanClearAiChat}"
-                              ToolTip.Tip="Clear chat history and start a new conversation" />
-                      <Button Classes="Ghost" Content="Close" FontSize="11"
-                              Command="{Binding Review.ToggleAiChatCommand}" />
-                    </StackPanel>
-                    <StackPanel Orientation="Vertical" Spacing="2" VerticalAlignment="Center">
-                      <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                        <icons:MaterialIcon Kind="ChatOutline" Width="14" Height="14"
-                                            Foreground="{DynamicResource ForgeAiAccentBrush}" />
-                        <TextBlock Text="AI CHAT" Classes="PanelHeader" Opacity="0.7" />
+                      BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0"
+                      IsVisible="{Binding Review.ShowAiSidePanel}">
+                <DockPanel>
+                  <Border DockPanel.Dock="Top" Padding="10,8"
+                          BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
+                    <DockPanel>
+                      <Button DockPanel.Dock="Right" Classes="IconOnly" Width="24" Height="24" Padding="3"
+                              Command="{Binding Review.ToggleAiSidePanelCommand}"
+                              ToolTip.Tip="Collapse AI panel">
+                        <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
+                      </Button>
+                      <StackPanel Orientation="Horizontal" Spacing="4">
+                        <Button Classes="Ghost" Padding="8,4" FontSize="11"
+                                Classes.FileListSelected="{Binding Review.IsAiFileBriefingTabSelected}"
+                                Command="{Binding Review.SelectAiFileBriefingTabCommand}">
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <icons:MaterialIcon Kind="Creation" Width="13" Height="13"
+                                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                            <TextBlock Text="File Briefing"
+                                       FontWeight="{Binding Review.IsAiFileBriefingTabSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                          </StackPanel>
+                        </Button>
+                        <Button Classes="Ghost" Padding="8,4" FontSize="11"
+                                Classes.FileListSelected="{Binding Review.IsAiChatTabSelected}"
+                                Command="{Binding Review.SelectAiChatTabCommand}">
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <icons:MaterialIcon Kind="ChatOutline" Width="13" Height="13"
+                                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                            <TextBlock Text="Chat"
+                                       FontWeight="{Binding Review.IsAiChatTabSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                          </StackPanel>
+                        </Button>
+                        <Button Classes="Ghost" Padding="8,4" FontSize="11"
+                                Classes.FileListSelected="{Binding Review.IsAiCommentsTabSelected}"
+                                Command="{Binding Review.SelectAiCommentsTabCommand}">
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <icons:MaterialIcon Kind="CommentOutline" Width="13" Height="13"
+                                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                            <TextBlock Text="Comments"
+                                       FontWeight="{Binding Review.IsAiCommentsTabSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                          </StackPanel>
+                        </Button>
                       </StackPanel>
-                      <TextBlock Text="{Binding Review.AiChatSelectedFileLabel}" FontSize="10"
-                                 Opacity="0.55" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                  </DockPanel>
-                  <ScrollViewer x:Name="AiChatScrollViewer" Grid.Row="1"
-                                VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
-                                VerticalScrollBarVisibility="Auto"
-                                HorizontalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding Review.AiChatMessages}">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="ai:AiChatMessage">
-                          <Border Margin="0,0,0,8" Padding="8" CornerRadius="6"
-                                  Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
-                            <StackPanel Spacing="4">
-                              <TextBlock Text="{Binding Role}" FontSize="10" FontWeight="SemiBold"
-                                         Foreground="{DynamicResource ForgeAiAccentBrush}" />
-                              <controls:MarkdownView Markdown="{Binding Content}" />
+                    </DockPanel>
+                  </Border>
+
+                  <!-- File Briefing tab -->
+                  <ScrollViewer IsVisible="{Binding Review.IsAiFileBriefingTabSelected}">
+                    <StackPanel Spacing="10" Margin="10">
+                      <StackPanel Spacing="10" IsVisible="{Binding Review.HasAiFileBriefing}">
+                        <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}">
+                          <StackPanel Spacing="6">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                              <icons:MaterialIcon Width="14" Height="14"
+                                                  Kind="{Binding Review.AiFileBriefing.Classification, Converter={x:Static conv:ForgeConverters.AiChangeClassificationIcon}}" />
+                              <TextBlock FontSize="11" FontWeight="SemiBold"
+                                         Text="{Binding Review.AiFileBriefing.Classification, Converter={x:Static conv:ForgeConverters.AiChangeClassificationLabel}}" />
+                              <Border Classes="Chip" IsVisible="{Binding Review.AiFileBriefing.QualityScore, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                                <TextBlock FontSize="10">
+                                  <Run Text="Quality " /><Run Text="{Binding Review.AiFileBriefing.QualityScore}" />
+                                </TextBlock>
+                              </Border>
                             </StackPanel>
-                          </Border>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                            <SelectableTextBlock Text="{Binding Review.AiFileBriefing.Overview}"
+                                                 FontSize="12" TextWrapping="Wrap" LineHeight="18" />
+                            <TextBlock Text="{Binding Review.AiFileBriefing.QualityRationale}"
+                                       FontSize="11" TextWrapping="Wrap" LineHeight="16" Opacity="0.7" FontStyle="Italic"
+                                       IsVisible="{Binding Review.AiFileBriefing.QualityRationale, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+                          </StackPanel>
+                        </Border>
+
+                        <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                                IsVisible="{Binding Review.AiFileBriefing.Findings.Count, Converter={x:Static conv:ForgeConverters.IsPositive}}">
+                          <StackPanel Spacing="6">
+                            <TextBlock Text="AI FINDINGS" Classes="PanelHeader" Opacity="0.7" />
+                            <ItemsControl ItemsSource="{Binding Review.AiFileBriefing.Findings}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                  <DockPanel Classes="BriefingListItem">
+                                    <TextBlock DockPanel.Dock="Left" Classes="BriefingListBullet" />
+                                    <TextBlock Text="{Binding}" Classes="BriefingListText" />
+                                  </DockPanel>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </Border>
+
+                        <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}">
+                          <StackPanel Spacing="6">
+                            <DockPanel>
+                              <Button DockPanel.Dock="Right" Classes="Ghost" Content="Load" FontSize="10" Padding="6,2"
+                                      Command="{Binding Review.LoadFileHistoryCommand}"
+                                      IsVisible="{Binding Review.FileHistory.IsNotLoaded}" />
+                              <TextBlock Text="FILE HISTORY" Classes="PanelHeader" Opacity="0.7" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <ProgressBar IsIndeterminate="True" Height="3"
+                                         IsVisible="{Binding Review.FileHistory.IsLoading}" />
+                            <TextBlock Text="{Binding Review.FileHistory.ErrorMessage}" FontSize="11"
+                                       Foreground="{DynamicResource ForgeStatusDeletedBrush}" TextWrapping="Wrap"
+                                       IsVisible="{Binding Review.FileHistory.IsFailed}" />
+                            <ItemsControl ItemsSource="{Binding Review.FileHistory.Entries}"
+                                          IsVisible="{Binding Review.FileHistory.IsReady}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:FileHistoryEntry">
+                                  <DockPanel Margin="0,3" ToolTip.Tip="{Binding AuthorName}">
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding ShortOid}"
+                                               FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.6" />
+                                    <StackPanel Spacing="1">
+                                      <TextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                      <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
+                                                   FontSize="10" Opacity="0.55" />
+                                        <Border Classes="Chip" IsVisible="{Binding IsCreated}">
+                                          <TextBlock Text="Created" FontSize="9" />
+                                        </Border>
+                                        <Border Classes="Chip" IsVisible="{Binding IsCurrent}">
+                                          <TextBlock Text="Current" FontSize="9" />
+                                        </Border>
+                                      </StackPanel>
+                                    </StackPanel>
+                                  </DockPanel>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </Border>
+                      </StackPanel>
+
+                      <StackPanel Spacing="8" IsVisible="{Binding Review.HasAiFileBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                        <StackPanel Spacing="8" IsVisible="{Binding Review.IsGeneratingFileBriefing}">
+                          <ProgressBar IsIndeterminate="True" Height="4" />
+                          <TextBlock Text="Generating file briefing…" FontSize="12" Opacity="0.7" />
+                        </StackPanel>
+                        <StackPanel Spacing="8" IsVisible="{Binding Review.IsGeneratingFileBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                          <StackPanel Spacing="8" IsVisible="{Binding Review.CanGenerateFileBriefing}">
+                            <Button Classes="Ghost" Content="Generate briefing" HorizontalAlignment="Left"
+                                    Command="{Binding Review.GenerateFileBriefingCommand}" />
+                          </StackPanel>
+                          <StackPanel Spacing="4" IsVisible="{Binding Review.CanGenerateFileBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                            <TextBlock Text="Start an AI review to see file briefings." FontSize="12" Opacity="0.6"
+                                       IsVisible="{Binding Review.HasAiRun, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                            <TextBlock Text="Select a file to see its AI briefing." FontSize="12" Opacity="0.6"
+                                       IsVisible="{Binding Review.HasAiRun}" />
+                          </StackPanel>
+                        </StackPanel>
+                      </StackPanel>
+                    </StackPanel>
                   </ScrollViewer>
-                  <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8"
-                              Margin="0,6,0,0" VerticalAlignment="Center"
-                              IsVisible="{Binding Review.IsAiChatBusy}">
-                    <ProgressBar Width="72" Height="3" IsIndeterminate="True"
+
+                  <!-- Chat tab -->
+                  <Grid RowDefinitions="*,Auto,Auto" IsVisible="{Binding Review.IsAiChatTabSelected}">
+                    <ScrollViewer x:Name="AiChatScrollViewer" Grid.Row="0"
+                                  VerticalAlignment="Stretch" HorizontalAlignment="Stretch"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled"
+                                  Margin="10,10,10,0">
+                      <ItemsControl ItemsSource="{Binding Review.AiChatMessages}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate x:DataType="ai:AiChatMessage">
+                            <Border Margin="0,0,0,8" Padding="8" CornerRadius="6"
+                                    Background="{DynamicResource ForgeSurfaceContainerHighBrush}">
+                              <StackPanel Spacing="4">
+                                <TextBlock Text="{Binding Role}" FontSize="10" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                                <controls:MarkdownView Markdown="{Binding Content}" />
+                              </StackPanel>
+                            </Border>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </ScrollViewer>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8"
+                                Margin="10,6,10,0" VerticalAlignment="Center"
+                                IsVisible="{Binding Review.IsAiChatBusy}">
+                      <ProgressBar Width="72" Height="3" IsIndeterminate="True"
+                                   VerticalAlignment="Center" />
+                      <TextBlock Text="Thinking…" FontSize="11" Opacity="0.7"
                                  VerticalAlignment="Center" />
-                    <TextBlock Text="Thinking…" FontSize="11" Opacity="0.7"
-                               VerticalAlignment="Center" />
-                  </StackPanel>
-                  <DockPanel Grid.Row="3" Margin="0,8,0,0">
-                    <Button DockPanel.Dock="Right" Classes="Primary" Content="Send" Margin="6,0,0,0"
-                            Command="{Binding Review.SendAiChatCommand}"
-                            IsEnabled="{Binding Review.CanSendAiChat}" />
-                    <TextBox Text="{Binding Review.AiChatInput}" FontSize="12"
-                             PlaceholderText="{Binding Review.AiChatPlaceholder}"
-                             KeyDown="OnAiChatKeyDown" />
-                  </DockPanel>
-                </Grid>
+                    </StackPanel>
+                    <DockPanel Grid.Row="2" Margin="10">
+                      <Button DockPanel.Dock="Right" Classes="Primary" Content="Send" Margin="6,0,0,0"
+                              Command="{Binding Review.SendAiChatCommand}"
+                              IsEnabled="{Binding Review.CanSendAiChat}" />
+                      <TextBox Text="{Binding Review.AiChatInput}" FontSize="12"
+                               PlaceholderText="{Binding Review.AiChatPlaceholder}"
+                               KeyDown="OnAiChatKeyDown" />
+                    </DockPanel>
+                  </Grid>
+
+                  <!-- Comments tab -->
+                  <Panel IsVisible="{Binding Review.IsAiCommentsTabSelected}">
+                    <TextBlock Text="Select a comment thread to view it here."
+                               FontSize="12" Opacity="0.6" TextWrapping="Wrap"
+                               VerticalAlignment="Center" HorizontalAlignment="Center" Margin="10"
+                               IsVisible="{Binding Review.ShowSideThreadPanel, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                    <Border Padding="8" IsVisible="{Binding Review.ShowSideThreadPanel}">
+                      <DockPanel>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                          <Button DockPanel.Dock="Right" Classes="Ghost" Content="Close" FontSize="11"
+                                  Command="{Binding Review.ClearExpandedThreadCommand}" />
+                          <TextBlock Text="Thread" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0"
+                                    IsVisible="{Binding Review.IsEditingComment}">
+                          <TextBox x:Name="SideThreadEditBox"
+                                   Text="{Binding Review.NewCommentBody}"
+                                   AcceptsReturn="True"
+                                   MinHeight="40"
+                                   PlaceholderText="{Binding Review.DraftPlaceholder}"
+                                   TextChanged="OnCommentDraftTextChanged"
+                                   KeyDown="OnCommentDraftKeyDown" />
+                          <DockPanel>
+                            <Button DockPanel.Dock="Right" Classes="Primary"
+                                    Content="{Binding Review.DraftPrimaryActionLabel}"
+                                    Command="{Binding Review.AddCommentCommand}" />
+                            <Button Classes="Ghost" Content="Cancel" FontSize="11"
+                                    Command="{Binding Review.ClearDraftCommentAnchorCommand}" />
+                          </DockPanel>
+                        </StackPanel>
+                        <StackPanel DockPanel.Dock="Bottom" Spacing="6" Margin="0,8,0,0"
+                                    IsVisible="{Binding Review.CanReplyToSelectedThread}">
+                          <TextBox x:Name="SideThreadReplyBox"
+                                   Text="{Binding Review.ReplyBody}"
+                                   AcceptsReturn="True"
+                                   MinHeight="40"
+                                   PlaceholderText="Reply…"
+                                   TextChanged="OnCommentDraftTextChanged"
+                                   KeyDown="OnCommentDraftKeyDown" />
+                          <Button Classes="Primary" Content="Reply" HorizontalAlignment="Right"
+                                  Command="{Binding Review.ReplyToThreadCommand}" />
+                        </StackPanel>
+                        <ScrollViewer>
+                          <ItemsControl ItemsSource="{Binding Review.SelectedThread.Comments}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="review:ReviewComment">
+                                <StackPanel Spacing="4" Margin="0,0,0,8">
+                                  <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4"
+                                                IsVisible="{Binding ViewerDidAuthor}">
+                                      <Button Classes="Ghost" Content="Edit" FontSize="10" Padding="4,0"
+                                              IsVisible="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.CanMutateSelectedThreadComments}"
+                                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.BeginEditCommentCommand}"
+                                              CommandParameter="{Binding}" />
+                                      <Button Classes="Ghost" Content="Delete" FontSize="10" Padding="4,0"
+                                              IsVisible="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.CanMutateSelectedThreadComments}"
+                                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.DeleteCommentCommand}"
+                                              CommandParameter="{Binding}" />
+                                    </StackPanel>
+                                    <TextBlock FontSize="11" Opacity="0.7">
+                                      <Run Text="{Binding AuthorLogin, Mode=OneWay}" FontWeight="SemiBold" />
+                                      <Run Text=" · " />
+                                      <Run Text="{Binding CreatedAt, Mode=OneWay}" />
+                                    </TextBlock>
+                                  </DockPanel>
+                                  <controls:MarkdownView Markdown="{Binding Body}" />
+                                </StackPanel>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </ScrollViewer>
+                      </DockPanel>
+                    </Border>
+                  </Panel>
+                </DockPanel>
               </Border>
             </Grid>
             <Border Background="{DynamicResource ForgeSettingsScrimBrush}"
@@ -3106,6 +3607,17 @@
                         <StackPanel Spacing="4">
                           <TextBlock Text="Run timeout (s, 0 = unlimited)" FontSize="12" Opacity="0.7" />
                           <NumericUpDown Value="{Binding AiRunTimeoutSeconds}" Minimum="0" Width="120" />
+                        </StackPanel>
+                      </StackPanel>
+
+                      <StackPanel Orientation="Horizontal" Spacing="16">
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Auto file briefing min %" FontSize="12" Opacity="0.7" />
+                          <NumericUpDown Value="{Binding AiFileBriefingMinChangePercent}" Minimum="0" Maximum="100" Width="120" />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="Auto file briefing min lines" FontSize="12" Opacity="0.7" />
+                          <NumericUpDown Value="{Binding AiFileBriefingMinLinesChanged}" Minimum="0" Width="120" />
                         </StackPanel>
                       </StackPanel>
 

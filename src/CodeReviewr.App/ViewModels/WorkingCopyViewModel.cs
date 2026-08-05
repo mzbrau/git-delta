@@ -325,12 +325,23 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             ? _lastStatus.Staged
             : MergeStagedAndUnstagedEntries(_lastStatus);
 
+        var statsByPath = new Dictionary<string, FileItemViewModel>(StringComparer.Ordinal);
+        foreach (var file in StagedFiles.Concat(UnstagedFiles).Concat(ConflictedFiles))
+            statsByPath.TryAdd(file.Path.Value, file);
+
         return entries
-            .Select(e => new AiChangedFileFact(
-                e.Path.Value,
-                e.Kind.ToString(),
-                BeforeBlobOid: e.HeadOid?.Value,
-                AfterBlobOid: (scope == AiReviewScope.WorkingCopyStaged ? e.IndexOid : e.WorktreeOid ?? e.IndexOid)?.Value))
+            .Select(e =>
+            {
+                statsByPath.TryGetValue(e.Path.Value, out var file);
+                return new AiChangedFileFact(
+                    e.Path.Value,
+                    e.Kind.ToString(),
+                    BeforeBlobOid: e.HeadOid?.Value,
+                    AfterBlobOid: (scope == AiReviewScope.WorkingCopyStaged ? e.IndexOid : e.WorktreeOid ?? e.IndexOid)?.Value,
+                    LinesAdded: file?.LinesAdded,
+                    LinesRemoved: file?.LinesRemoved,
+                    ChangePercent: file?.ChangePercent);
+            })
             .ToList();
     }
 

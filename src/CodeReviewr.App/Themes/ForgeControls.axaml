@@ -29,6 +29,26 @@
     <Setter Property="TextTrimming" Value="CharacterEllipsis" />
   </Style>
 
+  <Style Selector="DockPanel.BriefingListItem">
+    <Setter Property="Margin" Value="0,4" />
+  </Style>
+  <Style Selector="TextBlock.BriefingListBullet">
+    <Setter Property="Text" Value="•" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Margin" Value="0,0,8,0" />
+    <Setter Property="Opacity" Value="0.7" />
+  </Style>
+  <Style Selector="TextBlock.BriefingListText">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="LineHeight" Value="18" />
+  </Style>
+  <Style Selector="TextBlock.BriefingBody">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="LineHeight" Value="18" />
+  </Style>
+
   <Style Selector="TextBlock.PrFileLabel.Unviewed">
     <Setter Property="FontWeight" Value="Bold" />
   </Style>

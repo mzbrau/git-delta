@@ -67,7 +67,7 @@ public sealed class WorkingCopyViewModelStashDialogTests
         new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes,
             _conflicts, _stash, _history, _settings, _notifications, _confirm, stashDialog,
             new IntraLineDiffer(), _fsmonitor, _watcher,
-            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications));
+            new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications, Substitute.For<IGitHistoryService>()));
 
     private static RepositoryStatus StatusWithChange() =>
         new(
