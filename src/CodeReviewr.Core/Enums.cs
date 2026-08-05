@@ -93,6 +93,23 @@ public enum FileListQueryMode
     Search,
 }
 
+/// <summary>Action for one commit in an interactive rebase todo list.</summary>
+public enum RebaseTodoAction
+{
+    Pick,
+    Reword,
+    Squash,
+    Fixup,
+    Drop,
+}
+
+/// <summary>Outcome of starting or continuing an interactive rebase.</summary>
+public enum RebaseRunOutcome
+{
+    Completed,
+    Conflicts,
+}
+
 /// <summary>
 /// Semantic classification of a file's changes (one primary label per file).
 /// </summary>

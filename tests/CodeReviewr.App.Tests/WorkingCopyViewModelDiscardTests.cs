@@ -87,7 +87,7 @@ public sealed class WorkingCopyViewModelDiscardTests
     public void TearDown() => _watcher.Dispose();
 
     private WorkingCopyViewModel CreateVm(IConfirmDialog? confirm = null, IStashDialog? stashDialog = null) =>
-        new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
+        new(_status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, Substitute.For<IGitRebaseService>(), _stash, _history,
             _settings, _notifications, confirm ?? _confirm, stashDialog ?? _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher,
             new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, confirm ?? _confirm, _notifications, Substitute.For<IGitHistoryService>()));
 
@@ -175,7 +175,7 @@ public sealed class WorkingCopyViewModelDiscardTests
                 .Returns(Status(unstaged: [Unstaged("work.txt")]));
 
             var vm = new WorkingCopyViewModel(
-                _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, _stash, _history,
+                _status, _diff, _staging, _discard, Substitute.For<IGitObjectReader>(), _commit, _branches, _remotes, _conflicts, Substitute.For<IGitRebaseService>(), _stash, _history,
                 _settings, _notifications, confirm, _stashDialog, new IntraLineDiffer(), _fsmonitor, _watcher,
                 new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, confirm, _notifications, Substitute.For<IGitHistoryService>()));
             await vm.OpenAsync(repo);

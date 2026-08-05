@@ -103,6 +103,15 @@
                 <TextBlock Text="Stash" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.OpenRebaseWizardCommand}"
+                    IsEnabled="{Binding WorkingCopy.CanRebase}"
+                    ToolTip.Tip="{Binding WorkingCopy.RebaseDisabledReason}">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <icons:MaterialIcon Kind="SourceBranchSync" Width="16" Height="16" />
+                <TextBlock Text="Rebase" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+            <Border Width="1" Height="16" Background="{DynamicResource ForgeOutlineVariantBrush}" Margin="8,0" />
             <Button Classes="Ghost" Command="{Binding WorkingCopy.ViewRemoteCommand}"
                     ToolTip.Tip="Open remote in browser">
               <StackPanel Orientation="Horizontal" Spacing="4">
@@ -194,8 +203,10 @@
               IsVisible="{Binding WorkingCopy.InProgressBanner, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}">
         <DockPanel>
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
-            <Button Classes="Ghost" Content="Abort" Command="{Binding WorkingCopy.AbortInProgressCommand}" />
-            <Button Classes="Ghost" Content="Continue" Command="{Binding WorkingCopy.ContinueInProgressCommand}" />
+            <Button Classes="Ghost" Content="Abort" Command="{Binding WorkingCopy.AbortInProgressCommand}"
+                    IsEnabled="{Binding WorkingCopy.CanUseInProgressBanner}" />
+            <Button Classes="Ghost" Content="Continue" Command="{Binding WorkingCopy.ContinueInProgressCommand}"
+                    IsEnabled="{Binding WorkingCopy.CanUseInProgressBanner}" />
           </StackPanel>
           <TextBlock Text="{Binding WorkingCopy.InProgressBanner}" VerticalAlignment="Center" />
         </DockPanel>
@@ -4002,6 +4013,246 @@
                            Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
               </ScrollViewer>
             </Border>
+          </DockPanel>
+        </DockPanel>
+      </Border>
+    </Border>
+
+    <!-- Interactive rebase wizard -->
+    <Border IsVisible="{Binding WorkingCopy.ShowRebaseWizard}"
+            Background="{DynamicResource ForgeSettingsScrimBrush}" ZIndex="220">
+      <Border Width="{Binding #RootWindow.Bounds.Width, Converter={x:Static conv:ForgeConverters.Scale0_8}}"
+              Height="{Binding #RootWindow.Bounds.Height, Converter={x:Static conv:ForgeConverters.Scale0_8}}"
+              HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
+              CornerRadius="10" Padding="20">
+        <DockPanel>
+          <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+            <Button DockPanel.Dock="Right" Classes="IconOnly" Width="28" Height="28" Padding="4"
+                    ToolTip.Tip="Close"
+                    Command="{Binding WorkingCopy.CloseRebaseWizardCommand}">
+              <icons:MaterialIcon Kind="Close" Width="16" Height="16" />
+            </Button>
+            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+              <icons:MaterialIcon Kind="SourceBranchSync" Width="18" Height="18" />
+              <TextBlock Text="{Binding WorkingCopy.RebaseWizard.StepTitle}" FontSize="16" FontWeight="SemiBold"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+          </DockPanel>
+
+          <TextBlock DockPanel.Dock="Top" Text="{Binding WorkingCopy.RebaseWizard.StatusMessage}"
+                     FontSize="12" Opacity="0.75" TextWrapping="Wrap" Margin="0,0,0,8"
+                     IsVisible="{Binding WorkingCopy.RebaseWizard.StatusMessage, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+          <TextBlock DockPanel.Dock="Top" Text="{Binding WorkingCopy.RebaseWizard.ValidationError}"
+                     FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8"
+                     Foreground="{DynamicResource ForgeErrorBrush}"
+                     IsVisible="{Binding WorkingCopy.RebaseWizard.ValidationError, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+
+          <!-- Step 1: choose base -->
+          <DockPanel IsVisible="{Binding WorkingCopy.RebaseWizard.IsSelectBaseStep}">
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Right" Margin="0,12,0,0">
+              <Button Content="Cancel" Classes="Ghost" Command="{Binding WorkingCopy.CloseRebaseWizardCommand}" />
+              <Button Content="Continue" Classes="Primary"
+                      Command="{Binding WorkingCopy.RebaseWizard.ContinueToPlanCommand}"
+                      IsEnabled="{Binding WorkingCopy.RebaseWizard.IsBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+            </StackPanel>
+            <Grid ColumnDefinitions="220,*" ColumnSpacing="12">
+              <StackPanel Grid.Column="0" Spacing="8">
+                <TextBlock Text="BASE BRANCH" Classes="PanelHeader" Opacity="0.7" />
+                <ComboBox ItemsSource="{Binding WorkingCopy.RebaseWizard.BaseBranches}"
+                          SelectedItem="{Binding WorkingCopy.RebaseWizard.SelectedBaseBranch}"
+                          HorizontalAlignment="Stretch">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="core:BranchInfo">
+                      <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Border IsVisible="{Binding WorkingCopy.RebaseWizard.IsDirty}"
+                        Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                        CornerRadius="6" Padding="10" Margin="0,8,0,0">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="You have local changes. Stash them before rebasing."
+                               FontSize="12" TextWrapping="Wrap" />
+                    <Button Content="Stash changes" Classes="Ghost" HorizontalAlignment="Left"
+                            Command="{Binding WorkingCopy.RebaseWizard.StashChangesCommand}" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+              <DockPanel Grid.Column="1">
+                <TextBlock DockPanel.Dock="Top" Text="COMMITS AHEAD OF BASE" Classes="PanelHeader" Opacity="0.7" Margin="0,0,0,6" />
+                <ListBox ItemsSource="{Binding WorkingCopy.RebaseWizard.TodoItems}"
+                         SelectedItem="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem}"
+                         Background="Transparent">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:RebaseTodoItemViewModel">
+                      <Grid ColumnDefinitions="64,*,Auto" Margin="4,4">
+                        <TextBlock Grid.Column="0" Text="{Binding ShortOid}" FontFamily="{DynamicResource ForgeCodeFont}"
+                                   FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" Spacing="2">
+                          <TextBlock Text="{Binding Subject}" TextTrimming="CharacterEllipsis" FontSize="13" />
+                          <TextBlock Text="{Binding AuthorDisplay}" FontSize="11" Opacity="0.65" />
+                        </StackPanel>
+                        <TextBlock Grid.Column="2" Text="{Binding StatDisplay}" FontSize="11" Opacity="0.65"
+                                   VerticalAlignment="Center" Margin="8,0,0,0" />
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </DockPanel>
+            </Grid>
+          </DockPanel>
+
+          <!-- Step 2: edit plan -->
+          <DockPanel IsVisible="{Binding WorkingCopy.RebaseWizard.IsEditPlanStep}">
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Right" Margin="0,12,0,0">
+              <Button Content="Back" Classes="Ghost" Command="{Binding WorkingCopy.RebaseWizard.BackToBaseCommand}" />
+              <Button Content="Start rebase" Classes="Primary"
+                      Command="{Binding WorkingCopy.RebaseWizard.StartRebaseCommand}"
+                      IsEnabled="{Binding WorkingCopy.RebaseWizard.IsBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+            </StackPanel>
+            <Grid ColumnDefinitions="*,280" ColumnSpacing="12">
+              <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Text="REBASE PLAN (oldest first)" Classes="PanelHeader" Opacity="0.7" Margin="0,0,0,6" />
+                <ListBox ItemsSource="{Binding WorkingCopy.RebaseWizard.TodoItems}"
+                         SelectedItem="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem}"
+                         Background="Transparent">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:RebaseTodoItemViewModel">
+                      <Grid ColumnDefinitions="Auto,64,*,120,Auto" Margin="2,4" ColumnSpacing="6">
+                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="2">
+                          <Button Classes="IconOnly" Width="24" Height="24" Padding="2"
+                                  Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.RebaseWizard.MoveTodoUpCommand}"
+                                  CommandParameter="{Binding}">
+                            <icons:MaterialIcon Kind="ChevronUp" Width="14" Height="14" />
+                          </Button>
+                          <Button Classes="IconOnly" Width="24" Height="24" Padding="2"
+                                  Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.RebaseWizard.MoveTodoDownCommand}"
+                                  CommandParameter="{Binding}">
+                            <icons:MaterialIcon Kind="ChevronDown" Width="14" Height="14" />
+                          </Button>
+                        </StackPanel>
+                        <TextBlock Grid.Column="1" Text="{Binding ShortOid}" FontFamily="{DynamicResource ForgeCodeFont}"
+                                   FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                        <TextBlock Grid.Column="2" Text="{Binding Subject}" TextTrimming="CharacterEllipsis"
+                                   FontSize="13" VerticalAlignment="Center" />
+                        <ComboBox Grid.Column="3" ItemsSource="{Binding AvailableActions}"
+                                  SelectedItem="{Binding Action}" MinWidth="100" />
+                        <TextBlock Grid.Column="4" Text="{Binding StatDisplay}" FontSize="11" Opacity="0.65"
+                                   VerticalAlignment="Center" />
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </DockPanel>
+              <Border Grid.Column="1" Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      CornerRadius="8" Padding="12">
+                <DockPanel>
+                  <TextBlock DockPanel.Dock="Top" Text="COMMIT DETAILS" Classes="PanelHeader" Opacity="0.7" Margin="0,0,0,8" />
+                  <StackPanel Spacing="8"
+                              IsVisible="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                    <TextBlock Text="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem.Subject}" FontWeight="SemiBold"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem.AuthorDisplay}" FontSize="12" Opacity="0.7" />
+                    <TextBlock Text="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem.AuthorDateDisplay}" FontSize="12" Opacity="0.7" />
+                    <TextBlock Text="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem.StatDisplay}" FontSize="12" Opacity="0.7" />
+                    <StackPanel Spacing="4"
+                                IsVisible="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem.NeedsMessage}">
+                      <TextBlock Text="Commit message" FontSize="12" FontWeight="SemiBold" />
+                      <TextBox Text="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem.Message}"
+                               AcceptsReturn="True" MinHeight="100" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <TextBlock Text="Files" FontSize="12" FontWeight="SemiBold" Margin="0,4,0,0" />
+                    <ItemsControl ItemsSource="{Binding WorkingCopy.RebaseWizard.SelectedTodoItem.FilePathDisplays}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                          <TextBlock FontSize="11" Opacity="0.8" Margin="0,1" Text="{Binding}" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+            </Grid>
+          </DockPanel>
+
+          <!-- Running -->
+          <StackPanel IsVisible="{Binding WorkingCopy.RebaseWizard.IsRunningStep}"
+                      VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12">
+            <ProgressBar IsIndeterminate="True" Width="240" Height="4" />
+            <TextBlock Text="Running interactive rebase…" FontSize="13" Opacity="0.75"
+                       HorizontalAlignment="Center" />
+          </StackPanel>
+
+          <!-- Conflicts -->
+          <DockPanel IsVisible="{Binding WorkingCopy.RebaseWizard.IsConflictsStep}">
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Right" Margin="0,12,0,0">
+              <Button Content="Abort rebase" Classes="Ghost"
+                      Command="{Binding WorkingCopy.RebaseWizard.AbortRebaseCommand}" />
+              <Button Content="Resume" Classes="Primary"
+                      Command="{Binding WorkingCopy.RebaseWizard.ResumeRebaseCommand}"
+                      IsEnabled="{Binding WorkingCopy.RebaseWizard.IsBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+            </StackPanel>
+            <StackPanel Spacing="10" VerticalAlignment="Center" MaxWidth="560" HorizontalAlignment="Center">
+              <TextBlock Text="Resolve merge conflicts in another tool (for example VS Code), stage the resolved files, then resume."
+                         TextWrapping="Wrap" FontSize="13" />
+              <TextBlock Text="{Binding WorkingCopy.RebaseWizard.ConflictDetail}" TextWrapping="Wrap"
+                         FontSize="12" Opacity="0.7"
+                         IsVisible="{Binding WorkingCopy.RebaseWizard.ConflictDetail, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+          </DockPanel>
+
+          <!-- Review -->
+          <DockPanel IsVisible="{Binding WorkingCopy.RebaseWizard.IsReviewStep}">
+            <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,12,0,0">
+              <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                <Button Content="Done" Classes="Ghost" Command="{Binding WorkingCopy.CloseRebaseWizardCommand}" />
+                <Button Content="Force push with lease" Classes="Primary"
+                        Command="{Binding WorkingCopy.ForcePushAfterRebaseCommand}"
+                        IsEnabled="{Binding WorkingCopy.RebaseWizard.HasUpstream}"
+                        ToolTip.Tip="Requires an upstream tracking branch. Uses git push --force-with-lease." />
+              </StackPanel>
+            </StackPanel>
+            <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+              <DockPanel Grid.Column="0">
+                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6" Spacing="2">
+                  <TextBlock Text="BEFORE" Classes="PanelHeader" Opacity="0.7" />
+                  <TextBlock Text="{Binding WorkingCopy.RebaseWizard.BeforeSummary}" FontSize="11" Opacity="0.65" />
+                </StackPanel>
+                <ListBox ItemsSource="{Binding WorkingCopy.RebaseWizard.BeforeCommits}" Background="Transparent">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:RebaseReviewCommitViewModel">
+                      <Grid ColumnDefinitions="64,*,Auto" Margin="4,3">
+                        <TextBlock Grid.Column="0" Text="{Binding ShortOid}" FontFamily="{DynamicResource ForgeCodeFont}" FontSize="11" Opacity="0.7" />
+                        <TextBlock Grid.Column="1" Text="{Binding Subject}" TextTrimming="CharacterEllipsis" FontSize="12" />
+                        <TextBlock Grid.Column="2" Text="{Binding StatDisplay}" FontSize="11" Opacity="0.65" Margin="8,0,0,0" />
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </DockPanel>
+              <DockPanel Grid.Column="1">
+                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6" Spacing="2">
+                  <TextBlock Text="AFTER" Classes="PanelHeader" Opacity="0.7" />
+                  <TextBlock Text="{Binding WorkingCopy.RebaseWizard.AfterSummary}" FontSize="11" Opacity="0.65" />
+                </StackPanel>
+                <ListBox ItemsSource="{Binding WorkingCopy.RebaseWizard.AfterCommits}" Background="Transparent">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:RebaseReviewCommitViewModel">
+                      <Grid ColumnDefinitions="64,*,Auto" Margin="4,3">
+                        <TextBlock Grid.Column="0" Text="{Binding ShortOid}" FontFamily="{DynamicResource ForgeCodeFont}" FontSize="11" Opacity="0.7" />
+                        <TextBlock Grid.Column="1" Text="{Binding Subject}" TextTrimming="CharacterEllipsis" FontSize="12" />
+                        <TextBlock Grid.Column="2" Text="{Binding StatDisplay}" FontSize="11" Opacity="0.65" Margin="8,0,0,0" />
+                      </Grid>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </DockPanel>
+            </Grid>
           </DockPanel>
         </DockPanel>
       </Border>

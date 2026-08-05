@@ -30,6 +30,24 @@ public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGatePr
             CodeReviewrMeters.PushMs.Record(sw.Elapsed.TotalMilliseconds);
         }, ct);
 
+    public Task ForcePushWithLeaseAsync(string repositoryPath, IProgress<string>? progress, CancellationToken ct = default) =>
+        gates.For(repositoryPath).RunNetworkAsync(async token =>
+        {
+            var sw = Stopwatch.StartNew();
+            var options = new GitProcessOptions
+            {
+                Timeout = NetworkTimeout,
+                OnStdoutLine = line => progress?.Report(line),
+                OnStderrLine = line => progress?.Report(line),
+            };
+            await runner.RunAsync(
+                repositoryPath,
+                ["push", "--force-with-lease", "--progress"],
+                options,
+                token).ConfigureAwait(false);
+            CodeReviewrMeters.PushMs.Record(sw.Elapsed.TotalMilliseconds);
+        }, ct);
+
     public Task PullAsync(string repositoryPath, PullMode mode, IProgress<string>? progress, CancellationToken ct = default) =>
         gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
         {

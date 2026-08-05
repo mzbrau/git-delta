@@ -82,6 +82,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         IGitBranchService branches,
         IGitRemoteService remotes,
         IGitConflictService conflicts,
+        IGitRebaseService rebase,
         IGitStashService stash,
         IGitHistoryService history,
         ISettingsStore settings,
@@ -114,6 +115,15 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         _fsmonitor = fsmonitor;
         _watcher = watcher;
         PendingReview = pendingReview;
+        RebaseWizard = new RebaseWizardViewModel(
+            branches,
+            history,
+            rebase,
+            stash,
+            confirm,
+            notifications,
+            () => WorkingCopyChangeCount,
+            () => RefreshAsync());
         _warmStore = new DiffWarmStore(DiffWarmStore.ClampConcurrency(settings.Current.DiffPrefetchConcurrency));
         ViewMode = settings.Current.DefaultDiffMode;
         _ignoreWhitespace = settings.Current.IgnoreWhitespace;
@@ -128,10 +138,18 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 _notifications.Info("Status is slow. Enable Git fsmonitor for this repository?",
                     () => _ = EnableFsmonitorAsync(), "Enable"));
         PendingReview.AttachHost(this);
+        RebaseWizard.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(RebaseWizardViewModel.OwnsInProgressRebase))
+                OnPropertyChanged(nameof(CanUseInProgressBanner));
+        };
     }
 
     /// <summary>PR-parity AI review + local-only comments surface for File Status (pending changes).</summary>
     public PendingChangesReviewViewModel PendingReview { get; }
+
+    /// <summary>Interactive rebase wizard (shown as an in-app overlay).</summary>
+    public RebaseWizardViewModel RebaseWizard { get; }
 
     /// <summary>Called when the main window is activated so the watcher can debounce a soft refresh.</summary>
     public void NotifyWindowActivated()
@@ -210,6 +228,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [ObservableProperty] private bool _isPushing;
     [ObservableProperty] private bool _isPulling;
     [ObservableProperty] private bool _isFetching;
+    [ObservableProperty] private bool _showRebaseWizard;
     [ObservableProperty] private int _selectedFileCount;
     [ObservableProperty] private bool _hasStagedSelection;
     [ObservableProperty] private bool _hasUnstagedSelection;
@@ -413,6 +432,25 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     public bool IsRemoteBusy => IsPushing || IsPulling || IsFetching || IsStashing;
 
+    /// <summary>True when the current branch is not main/master and a repository is open.</summary>
+    public bool CanRebase =>
+        _repoPath is not null
+        && !string.IsNullOrWhiteSpace(CurrentBranch)
+        && !RebaseWizardViewModel.IsProtectedBranchName(CurrentBranch);
+
+    public string? RebaseDisabledReason =>
+        _repoPath is null ? "Open a repository to rebase."
+        : RebaseWizardViewModel.IsProtectedBranchName(CurrentBranch)
+            ? "Interactive rebase is not available on main or master."
+            : null;
+
+    /// <summary>
+    /// When the rebase wizard owns an in-progress rebase, the main banner Abort/Continue buttons
+    /// are disabled so the wizard remains the sole controller.
+    /// </summary>
+    public bool CanUseInProgressBanner =>
+        !(ShowRebaseWizard && RebaseWizard.OwnsInProgressRebase);
+
     public bool IsFileStatusMode => WorkspaceMode == WorkspaceMode.FileStatus;
     public bool IsHistoryMode => WorkspaceMode == WorkspaceMode.History;
     public bool IsStashMode => WorkspaceMode == WorkspaceMode.Stash;
@@ -488,7 +526,17 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     public string? SelectedCommitDecorations =>
         SelectedCommit is { Decorations.Count: > 0 } c ? c.DecorationsDisplay : null;
 
-    partial void OnCurrentBranchChanged(string? value) => OnPropertyChanged(nameof(CommitButtonLabel));
+    partial void OnCurrentBranchChanged(string? value)
+    {
+        OnPropertyChanged(nameof(CommitButtonLabel));
+        OnPropertyChanged(nameof(CanRebase));
+        OnPropertyChanged(nameof(RebaseDisabledReason));
+        OpenRebaseWizardCommand.NotifyCanExecuteChanged();
+    }
+
+    partial void OnShowRebaseWizardChanged(bool value) =>
+        OnPropertyChanged(nameof(CanUseInProgressBanner));
+
     partial void OnIsCommittingChanged(bool value) => NotifyCanCommitChanged();
     partial void OnCommitMessageChanged(string value) => NotifyCanCommitChanged();
 
@@ -1112,6 +1160,98 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         catch (Exception ex)
         {
             _notifications.Error($"View Remote failed: {ex.Message}", exception: ex);
+        }
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRebase))]
+    private async Task OpenRebaseWizardAsync()
+    {
+        if (_repoPath is null || !CanRebase) return;
+
+        // Refresh remotes so base branches / origin/HEAD reflect the latest remote tips.
+        if (!IsRemoteBusy)
+        {
+            IsFetching = true;
+            try
+            {
+                await _branches.FetchAsync(_repoPath);
+                await LoadBranchesAsync();
+            }
+            catch (Exception ex)
+            {
+                _notifications.Error($"Fetch failed: {ex.Message}", null, ex);
+            }
+            finally
+            {
+                IsFetching = false;
+            }
+        }
+
+        string? upstream = null;
+        try
+        {
+            var listed = await _branches.ListBranchesAsync(_repoPath);
+            upstream = listed.FirstOrDefault(b => b.IsCurrent)?.Upstream
+                ?? listed.FirstOrDefault(b =>
+                    string.Equals(b.Name, CurrentBranch, StringComparison.Ordinal))?.Upstream;
+        }
+        catch
+        {
+            // Wizard can still open; force-push will be disabled without upstream.
+        }
+
+        await RebaseWizard.OpenAsync(_repoPath, CurrentBranch, upstream);
+        ShowRebaseWizard = true;
+        OnPropertyChanged(nameof(CanUseInProgressBanner));
+    }
+
+    [RelayCommand]
+    private async Task CloseRebaseWizardAsync()
+    {
+        if (!ShowRebaseWizard) return;
+        if (!await RebaseWizard.RequestCloseAsync())
+            return;
+
+        ShowRebaseWizard = false;
+        OnPropertyChanged(nameof(CanUseInProgressBanner));
+        await RefreshAsync();
+    }
+
+    /// <summary>
+    /// Closes the rebase review overlay, then force-pushes with lease using the toolbar Push spinner.
+    /// </summary>
+    [RelayCommand]
+    private async Task ForcePushAfterRebaseAsync()
+    {
+        if (_repoPath is null || !RebaseWizard.HasUpstream || IsRemoteBusy) return;
+
+        ShowRebaseWizard = false;
+        OnPropertyChanged(nameof(CanUseInProgressBanner));
+        RebaseWizard.Reset();
+        // Preserve eligibility so a failure toast can retry after the overlay is gone.
+        RebaseWizard.HasUpstream = true;
+
+        IsPushing = true;
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            await _remotes.ForcePushWithLeaseAsync(_repoPath, null);
+            CodeReviewrMeters.PushMs.Record(sw.Elapsed.TotalMilliseconds);
+            _notifications.Info("Force-with-lease push completed");
+            await RefreshAsync();
+        }
+        catch (GitException ex)
+        {
+            var guidance = RebaseWizardViewModel.BuildForcePushGuidance(ex);
+            _notifications.Error(guidance, () => _ = ForcePushAfterRebaseAsync(), ex);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Force push failed: {ex.Message}", () => _ = ForcePushAfterRebaseAsync(), ex);
+        }
+        finally
+        {
+            IsPushing = false;
         }
     }
 
@@ -3534,7 +3674,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [RelayCommand]
     private async Task AbortInProgressAsync()
     {
-        if (_repoPath is null) return;
+        if (_repoPath is null || !CanUseInProgressBanner) return;
         await _conflicts.AbortAsync(_repoPath);
         await RefreshAsync();
     }
@@ -3542,7 +3682,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [RelayCommand]
     private async Task ContinueInProgressAsync()
     {
-        if (_repoPath is null) return;
+        if (_repoPath is null || !CanUseInProgressBanner) return;
         await _conflicts.ContinueAsync(_repoPath);
         await RefreshAsync();
     }
