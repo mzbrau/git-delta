@@ -56,14 +56,34 @@ internal sealed class AiReviewCoordinator(
         return ToSnapshot(run, briefing);
     }
 
-    public async Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default)
+    public async ValueTask<AiRunSnapshot?> TryGetMatchingCachedRunAsync(
+        AiReviewRequest request,
+        CancellationToken ct = default)
     {
-        if (_runsBySession.TryGetValue(request.SessionKey, out var existing) && existing.Session is not null)
-            return;
+        if (IsWorkingCopyScope(request.Scope))
+        {
+            if (string.IsNullOrWhiteSpace(request.RepositoryPath))
+                return null;
+
+            var treeOid = await workingCopyMaterialiser
+                .WriteTreeAsync(request.RepositoryPath, request.Scope, ct)
+                .ConfigureAwait(false);
+            request = request with { HeadSha = treeOid };
+        }
 
         var run = await resultStore.GetLatestRunAsync(request.SessionKey, ct).ConfigureAwait(false);
         if (run is null)
-            return;
+            return null;
+
+        if (!string.Equals(run.HeadSha, request.HeadSha, StringComparison.Ordinal) ||
+            !string.Equals(run.MergeBaseSha, request.MergeBaseSha, StringComparison.Ordinal))
+            return null;
+
+        if (_runsBySession.TryGetValue(request.SessionKey, out var existing) && existing.Session is not null)
+        {
+            var existingBriefing = existing.ChangeBriefing;
+            return ToSnapshot(run, existingBriefing);
+        }
 
         var prResult = await resultStore.GetPrResultForRunAsync(run.Id, ct).ConfigureAwait(false);
         var briefing = prResult is null ? null : Deserialize<AiChangeBriefingResult>(prResult.PayloadJson);
@@ -73,7 +93,11 @@ internal sealed class AiReviewCoordinator(
         context.StartedUtc = run.StartedUtc;
         context.FinishedUtc = run.FinishedUtc;
         context.ErrorMessage = run.ErrorMessage;
+        return ToSnapshot(run, briefing);
     }
+
+    public async Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default) =>
+        _ = await TryGetMatchingCachedRunAsync(request, ct).ConfigureAwait(false);
 
     public ValueTask<IReadOnlyList<IDiffAnnotation>> GetAnnotationsAsync(FileDiffKey key, CancellationToken ct = default)
     {
@@ -93,15 +117,66 @@ internal sealed class AiReviewCoordinator(
         return ValueTask.FromResult<IReadOnlyList<IDiffAnnotation>>(results);
     }
 
-    public async ValueTask<AiFileBriefingResult?> GetFileBriefingAsync(string sessionKey, string path, CancellationToken ct = default)
+    public async ValueTask<AiFileBriefingResult?> GetFileBriefingAsync(
+        string sessionKey,
+        string path,
+        string? beforeBlobOid = null,
+        string? afterBlobOid = null,
+        CancellationToken ct = default)
     {
         var run = await resultStore.GetLatestRunAsync(sessionKey, ct).ConfigureAwait(false);
         if (run is null)
             return null;
 
-        var files = await resultStore.ListFileResultsForRunAsync(run.Id, ct).ConfigureAwait(false);
-        var match = files.FirstOrDefault(f => string.Equals(f.Path, path, StringComparison.Ordinal));
-        return match?.SummaryJson is null ? null : Deserialize<AiFileBriefingResult>(match.SummaryJson);
+        var rulesHash = AiCacheKeys.Hash(EffectiveRules());
+        var instructionsHash = AiCacheKeys.Hash(run.AdHocInstructions);
+        var model = settingsStore.Current.AiModelOverride;
+
+        var exact = await TryGetFileBriefingByOidsAsync(
+                sessionKey, path, beforeBlobOid, afterBlobOid, model, rulesHash, instructionsHash, ct)
+            .ConfigureAwait(false);
+        if (exact is not null)
+            return exact;
+
+        // Pull-request eager briefings are keyed with null blob OIDs (facts omit them). When the
+        // caller supplies concrete diff OIDs and the exact key misses, accept that null-OID record
+        // rather than falling back to a path-only hit from an unrelated change.
+        if (beforeBlobOid is not null || afterBlobOid is not null)
+        {
+            return await TryGetFileBriefingByOidsAsync(
+                    sessionKey, path, beforeBlobOid: null, afterBlobOid: null, model, rulesHash, instructionsHash, ct)
+                .ConfigureAwait(false);
+        }
+
+        return null;
+    }
+
+    private async ValueTask<AiFileBriefingResult?> TryGetFileBriefingByOidsAsync(
+        string sessionKey,
+        string path,
+        string? beforeBlobOid,
+        string? afterBlobOid,
+        string? model,
+        string rulesHash,
+        string instructionsHash,
+        CancellationToken ct)
+    {
+        var cacheKey = AiCacheKeys.ComputeFileKey(
+            path,
+            beforeBlobOid,
+            afterBlobOid,
+            AiPromptCatalog.PromptVersion,
+            model,
+            rulesHash,
+            instructionsHash);
+
+        var match = await resultStore.GetFileResultByCacheKeyAsync(cacheKey, ct).ConfigureAwait(false);
+        if (match is null ||
+            !string.Equals(match.SessionKey, sessionKey, StringComparison.Ordinal) ||
+            !string.Equals(match.Path, path, StringComparison.Ordinal))
+            return null;
+
+        return match.SummaryJson is null ? null : Deserialize<AiFileBriefingResult>(match.SummaryJson);
     }
 
     public async ValueTask<IReadOnlyList<AiAnnotationResult>> GetFileAnnotationsAsync(
