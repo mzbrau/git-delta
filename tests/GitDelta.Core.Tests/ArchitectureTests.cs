@@ -107,4 +107,30 @@ public sealed class ArchitectureTests
             .Select(a => a.Name);
         Assert.That(aiRefs, Does.Contain("GitHub.Copilot.SDK"));
     }
+
+    [Test]
+    public void CliWrap_May_Only_Be_Referenced_From_Git()
+    {
+        var forbidden = new[]
+        {
+            typeof(FilePath).Assembly,
+            typeof(GitDelta.Diff.PatchParser).Assembly,
+            typeof(GitDelta.GitHub.GitHubClient).Assembly,
+            typeof(GitDelta.Review.RepositoryLocator).Assembly,
+            typeof(GitDelta.Persistence.PlatformTokenStore).Assembly,
+            typeof(GitDelta.AI.AiPromptCatalog).Assembly,
+        };
+
+        foreach (var assembly in forbidden)
+        {
+            var refs = assembly.GetReferencedAssemblies().Select(a => a.Name);
+            Assert.That(refs, Does.Not.Contain("CliWrap"),
+                $"{assembly.GetName().Name} must not reference CliWrap (use IGitProcessRunner / GitProcessOptions.StdoutFilePath instead)");
+        }
+
+        var gitRefs = typeof(GitDelta.Git.GitProcessRunner).Assembly
+            .GetReferencedAssemblies()
+            .Select(a => a.Name);
+        Assert.That(gitRefs, Does.Contain("CliWrap"));
+    }
 }

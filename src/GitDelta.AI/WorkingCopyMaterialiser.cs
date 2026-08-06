@@ -1,5 +1,4 @@
 using System.Formats.Tar;
-using CliWrap;
 using GitDelta.Core;
 using GitDelta.Core.Abstractions;
 using GitDelta.Core.AI;
@@ -140,7 +139,7 @@ public sealed class WorkingCopyMaterialiser(
                 var result = await runner.RunAsync(
                         repositoryPath,
                         ["archive", "--format=tar", treeOid],
-                        new GitProcessOptions { StdoutTarget = PipeTarget.ToFile(tarPath) },
+                        new GitProcessOptions { StdoutFilePath = tarPath },
                         token)
                     .ConfigureAwait(false);
 

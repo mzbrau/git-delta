@@ -85,7 +85,10 @@ public sealed class GitProcessRunner : IGitProcessRunner
             ? CancellationTokenSource.CreateLinkedTokenSource(ct)
             : null;
 
-        var stdoutTarget = options.StdoutTarget ?? BuildTextTarget(stdoutBuilder, options.OnStdoutLine);
+        var stdoutTarget = options.StdoutTarget
+            ?? (options.StdoutFilePath is { } filePath
+                ? PipeTarget.ToFile(filePath)
+                : BuildTextTarget(stdoutBuilder, options.OnStdoutLine));
         var stderrTarget = BuildTextTarget(stderrBuilder, options.OnStderrLine);
 
         stdoutTarget = new ByteCountingPipeTarget(stdoutTarget, n =>
