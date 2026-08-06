@@ -66,6 +66,10 @@ public partial class MainWindowViewModel : ObservableObject
                 ? DiffWarmStore.DefaultConcurrency
                 : _settings.Current.DiffPrefetchConcurrency);
         WorkingCopy.SetDiffPrefetchConcurrency(_diffPrefetchConcurrency);
+        _diffPrefetchDripDelayMs = Math.Clamp(_settings.Current.DiffPrefetchDripDelayMs, 0, 5000);
+        _diffPrefetchIndicatorThrottleMs = Math.Clamp(_settings.Current.DiffPrefetchIndicatorThrottleMs, 50, 5000);
+        _diffPrefetchPriorityPaths = Math.Clamp(_settings.Current.DiffPrefetchPriorityPaths, 1, 500);
+        _diffPrefetchNeighborRadius = Math.Clamp(_settings.Current.DiffPrefetchNeighborRadius, 0, 64);
 
         WorkingCopy.PropertyChanged += (_, e) =>
         {
@@ -160,6 +164,10 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _theme = "System";
     [ObservableProperty] private bool _simulateSlowGit;
     [ObservableProperty] private int _diffPrefetchConcurrency = DiffWarmStore.DefaultConcurrency;
+    [ObservableProperty] private int _diffPrefetchDripDelayMs = 300;
+    [ObservableProperty] private int _diffPrefetchIndicatorThrottleMs = 400;
+    [ObservableProperty] private int _diffPrefetchPriorityPaths = 48;
+    [ObservableProperty] private int _diffPrefetchNeighborRadius = 16;
     [ObservableProperty] private double _navigatorWidth;
     [ObservableProperty] private double _fileListWidth;
     [ObservableProperty] private bool _isNavigatorCollapsed;
@@ -704,6 +712,58 @@ public partial class MainWindowViewModel : ObservableObject
         _settings.Update(s => s.DiffPrefetchConcurrency = clamped);
         _ = _settings.SaveAsync();
         WorkingCopy.SetDiffPrefetchConcurrency(clamped);
+    }
+
+    partial void OnDiffPrefetchDripDelayMsChanged(int value)
+    {
+        var clamped = Math.Clamp(value, 0, 5000);
+        if (clamped != value)
+        {
+            DiffPrefetchDripDelayMs = clamped;
+            return;
+        }
+
+        _settings.Update(s => s.DiffPrefetchDripDelayMs = clamped);
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnDiffPrefetchIndicatorThrottleMsChanged(int value)
+    {
+        var clamped = Math.Clamp(value, 50, 5000);
+        if (clamped != value)
+        {
+            DiffPrefetchIndicatorThrottleMs = clamped;
+            return;
+        }
+
+        _settings.Update(s => s.DiffPrefetchIndicatorThrottleMs = clamped);
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnDiffPrefetchPriorityPathsChanged(int value)
+    {
+        var clamped = Math.Clamp(value, 1, 500);
+        if (clamped != value)
+        {
+            DiffPrefetchPriorityPaths = clamped;
+            return;
+        }
+
+        _settings.Update(s => s.DiffPrefetchPriorityPaths = clamped);
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnDiffPrefetchNeighborRadiusChanged(int value)
+    {
+        var clamped = Math.Clamp(value, 0, 64);
+        if (clamped != value)
+        {
+            DiffPrefetchNeighborRadius = clamped;
+            return;
+        }
+
+        _settings.Update(s => s.DiffPrefetchNeighborRadius = clamped);
+        _ = _settings.SaveAsync();
     }
 
     partial void OnDevelopmentFolderChanged(string value)

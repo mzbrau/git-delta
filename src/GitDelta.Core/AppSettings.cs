@@ -16,7 +16,7 @@ public sealed record AppSettings
 {
     public string? GitExecutablePath { get; set; }
     public string Theme { get; set; } = "System";
-    public double FontSize { get; set; } = 13;
+    public double FontSize { get; set; } = 11;
     public DiffViewMode DefaultDiffMode { get; set; } = DiffViewMode.Unified;
     public bool IgnoreWhitespace { get; set; }
     public bool ShowWhitespace { get; set; }
@@ -50,6 +50,30 @@ public sealed record AppSettings
     /// Max parallel background diff prefetch operations (clamped 1–8). Default 4.
     /// </summary>
     public int DiffPrefetchConcurrency { get; set; } = 4;
+
+    /// <summary>
+    /// Pause in milliseconds after each background file warm in the drip phase (clamped 0–5000).
+    /// Default 300. Lower fills the list faster; higher is gentler on slow machines.
+    /// </summary>
+    public int DiffPrefetchDripDelayMs { get; set; } = 100;
+
+    /// <summary>
+    /// Minimum milliseconds between file-list cache/stat indicator refreshes while dripping
+    /// (clamped 50–5000). Default 400.
+    /// </summary>
+    public int DiffPrefetchIndicatorThrottleMs { get; set; } = 400;
+
+    /// <summary>
+    /// How many files are enqueued immediately (selection + neighbors first) before the paced
+    /// drip starts (clamped 1–500). Default 48.
+    /// </summary>
+    public int DiffPrefetchPriorityPaths { get; set; } = 48;
+
+    /// <summary>
+    /// How many list neighbors above/below the selected file are included in the priority burst
+    /// (clamped 0–64). Default 16.
+    /// </summary>
+    public int DiffPrefetchNeighborRadius { get; set; } = 16;
 
     /// <summary>
     /// Maximum raw unified-diff patch size (bytes) that will be buffered from Git.

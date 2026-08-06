@@ -386,4 +386,120 @@ public sealed class WorkingCopyViewModelSnappyTests
         // Should not throw when no repo is open.
         vm.NotifyWindowActivated();
     }
+
+    [Test]
+    public async Task MultiSelect_Sets_Empty_Detail_Without_Overlay_Duplicate()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("dir/a.txt"), Unstaged("dir/b.txt"), Unstaged("c.txt")]));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            vm.SetFileSelection([vm.UnstagedFiles[0], vm.UnstagedFiles[1]]);
+
+            Assert.That(vm.SelectedFileCount, Is.EqualTo(2));
+            Assert.That(vm.SelectedFile, Is.Null);
+            Assert.That(vm.DiffEmptyMessage, Is.EqualTo("2 files selected"));
+            Assert.That(vm.DiffOverlayMessage, Is.Null.Or.Empty);
+            Assert.That(vm.DiffEmptyDetail, Is.Not.Null.And.Not.Empty);
+            Assert.That(vm.DiffEmptyDetail, Does.Contain("a.txt"));
+            Assert.That(vm.DiffEmptyDetail, Does.Contain("b.txt"));
+
+            vm.SetFileSelection([vm.UnstagedFiles[0]]);
+            Assert.That(vm.DiffEmptyDetail, Is.Null.Or.Empty);
+            Assert.That(vm.DiffEmptyMessage, Is.EqualTo("Select a file to view its diff"));
+
+            vm.SetFileSelection([]);
+            Assert.That(vm.DiffEmptyDetail, Is.Null.Or.Empty);
+            Assert.That(vm.DiffOverlayMessage, Is.Null.Or.Empty);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task MultiSelect_Caps_Empty_Detail_With_Overflow()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            var entries = Enumerable.Range(0, 25)
+                .Select(i => Unstaged($"f{i:D2}.txt"))
+                .ToList();
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status(entries));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            vm.SetFileSelection(vm.UnstagedFiles.ToList());
+
+            Assert.That(vm.SelectedFileCount, Is.EqualTo(25));
+            Assert.That(vm.DiffEmptyMessage, Is.EqualTo("25 files selected"));
+            Assert.That(vm.DiffOverlayMessage, Is.Null.Or.Empty);
+            Assert.That(vm.DiffEmptyDetail, Does.Contain("…and 5 more"));
+            Assert.That(vm.DiffEmptyDetail!.Split('\n').Length, Is.EqualTo(21)); // 20 names + overflow line
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task Prefetch_Drips_Beyond_Priority_Cap()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            var entries = Enumerable.Range(0, 20)
+                .Select(i => Unstaged($"file{i:D3}.txt"))
+                .ToList();
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status(entries));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
+
+            _settings.Current.Returns(new AppSettings
+            {
+                DiffPrefetchPriorityPaths = 8,
+                DiffPrefetchDripDelayMs = 0,
+                DiffPrefetchIndicatorThrottleMs = 50,
+            });
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            // Priority enqueues ≤8; drip should start additional warms beyond that.
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            var calls = 0;
+            while (DateTime.UtcNow < deadline)
+            {
+                calls = _diff.ReceivedCalls()
+                    .Count(c => c.GetMethodInfo().Name == nameof(IGitDiffService.GetDiffAsync));
+                if (calls > 8)
+                    break;
+                await Task.Delay(50);
+            }
+
+            Assert.That(calls, Is.GreaterThan(8), "Drip phase should warm files beyond the priority cap");
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
 }

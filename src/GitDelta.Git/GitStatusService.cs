@@ -23,24 +23,35 @@ public sealed class GitStatusService(IGitProcessRunner runner, IRepositoryGatePr
             // concurrent index write make the result appear newer than what was actually read.
             var epochAtStart = gate.CurrentEpoch;
 
+            using var activity = GitDeltaActivity.Source.StartActivity("git.status");
             var sw = Stopwatch.StartNew();
-            var result = await runner.RunAsync(
-                repositoryPath,
-                ["status", "--porcelain=v2", "--branch", "--untracked-files=all", "-z"],
-                options: null,
-                token).ConfigureAwait(false);
-            GitDeltaMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
+            try
+            {
+                var result = await runner.RunAsync(
+                    repositoryPath,
+                    ["status", "--porcelain=v2", "--branch", "--untracked-files=all", "-z"],
+                    options: null,
+                    token).ConfigureAwait(false);
 
-            var parsed = PorcelainStatusParser.Parse(result.Stdout);
-            var inProgress = GitRepositoryPaths.DetectInProgress(repositoryPath);
+                var parsed = PorcelainStatusParser.Parse(result.Stdout);
+                var inProgress = GitRepositoryPaths.DetectInProgress(repositoryPath);
 
-            return new RepositoryStatus(
-                parsed.Staged,
-                parsed.Unstaged,
-                parsed.Conflicted,
-                inProgress,
-                parsed.CurrentBranch,
-                epochAtStart);
+                activity?.SetTag("status.staged_count", parsed.Staged.Count);
+                activity?.SetTag("status.unstaged_count", parsed.Unstaged.Count);
+                activity?.SetTag("status.conflicted_count", parsed.Conflicted.Count);
+
+                return new RepositoryStatus(
+                    parsed.Staged,
+                    parsed.Unstaged,
+                    parsed.Conflicted,
+                    inProgress,
+                    parsed.CurrentBranch,
+                    epochAtStart);
+            }
+            finally
+            {
+                GitDeltaMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
+            }
         }, ct);
     }
 }

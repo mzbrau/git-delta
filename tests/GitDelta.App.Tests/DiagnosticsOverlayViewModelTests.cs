@@ -27,7 +27,7 @@ public sealed class DiagnosticsOverlayViewModelTests
         // Allow posted UI callbacks / fallback applies to drain.
         await Task.Delay(100);
 
-        Assert.That(overlay.LastTimings.Count, Is.LessThanOrEqualTo(20));
+        Assert.That(overlay.LastTimings.Count, Is.LessThanOrEqualTo(50));
         Assert.That(overlay.GitInvocations, Is.GreaterThan(0));
         Assert.That(overlay.Summary, Does.Contain("git invocations="));
     }

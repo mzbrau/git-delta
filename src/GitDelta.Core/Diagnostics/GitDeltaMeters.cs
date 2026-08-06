@@ -38,6 +38,45 @@ public static class GitDeltaMeters
     public static readonly Histogram<double> PullMs =
         Meter.CreateHistogram<double>("pull.duration_ms", "ms", "Pull duration");
 
+    public static readonly Histogram<double> WcRefreshMs =
+        Meter.CreateHistogram<double>("wc.refresh.duration_ms", "ms", "Working-copy refresh end-to-end duration");
+
+    public static readonly Histogram<double> WcFileListsRebuildMs =
+        Meter.CreateHistogram<double>("wc.filelists.rebuild.duration_ms", "ms", "File list rebuild (filter + entries) duration");
+
+    public static readonly Histogram<double> WcFileListsLayoutMs =
+        Meter.CreateHistogram<double>("wc.filelists.layout.duration_ms", "ms", "File list UI layout after rebuild duration");
+
+    public static readonly Histogram<double> WcCacheIndicatorsMs =
+        Meter.CreateHistogram<double>("wc.cache.indicators.duration_ms", "ms", "UpdateFileCacheIndicators duration");
+
+    public static readonly Histogram<double> WcPrefetchMs =
+        Meter.CreateHistogram<double>("wc.prefetch.duration_ms", "ms", "Working-copy diff prefetch enqueue duration");
+
+    public static readonly Histogram<double> WcPrefetchEnqueueMs =
+        Meter.CreateHistogram<double>("wc.prefetch.enqueue.duration_ms", "ms", "Working-copy diff prefetch enqueue loop duration");
+
+    public static readonly Histogram<double> WcStageMs =
+        Meter.CreateHistogram<double>("wc.stage.duration_ms", "ms", "Stage/unstage end-to-end (optimistic + git + refresh)");
+
+    public static readonly Histogram<double> WcStageOptimisticMs =
+        Meter.CreateHistogram<double>("wc.stage.optimistic.duration_ms", "ms", "Optimistic file-list rebuild during stage/unstage");
+
+    public static readonly Histogram<double> WcStageInvalidateMs =
+        Meter.CreateHistogram<double>("wc.stage.invalidate.duration_ms", "ms", "Warm-store soft-invalidate during stage/unstage");
+
+    public static readonly Histogram<double> WcFileListsFilterMs =
+        Meter.CreateHistogram<double>("wc.filelists.filter.duration_ms", "ms", "ApplyFileFilter + entry rebuild duration");
+
+    public static readonly Histogram<double> WcBranchesLoadMs =
+        Meter.CreateHistogram<double>("wc.branches.load.duration_ms", "ms", "Branch list load duration");
+
+    public static readonly Histogram<double> WcStashesLoadMs =
+        Meter.CreateHistogram<double>("wc.stashes.load.duration_ms", "ms", "Stash list load duration");
+
+    public static readonly Histogram<double> UiFileListResizeMs =
+        Meter.CreateHistogram<double>("ui.filelist.resize.duration_ms", "ms", "File-list column resize layout duration");
+
     public static readonly Counter<long> GitInvocations =
         Meter.CreateCounter<long>("git.invocations", description: "git process invocations");
 

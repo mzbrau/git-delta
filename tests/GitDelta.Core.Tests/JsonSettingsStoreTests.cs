@@ -21,6 +21,10 @@ public sealed class JsonSettingsStoreTests
                 s.DefaultDiffMode = DiffViewMode.SideBySide;
                 s.SimulateSlowGit = true;
                 s.DiffPrefetchConcurrency = 6;
+                s.DiffPrefetchDripDelayMs = 100;
+                s.DiffPrefetchIndicatorThrottleMs = 200;
+                s.DiffPrefetchPriorityPaths = 24;
+                s.DiffPrefetchNeighborRadius = 8;
             });
             store.AddRecentRepository("/repo/a");
             store.AddRecentRepository("/repo/b");
@@ -34,6 +38,10 @@ public sealed class JsonSettingsStoreTests
             Assert.That(loaded.Current.DefaultDiffMode, Is.EqualTo(DiffViewMode.SideBySide));
             Assert.That(loaded.Current.SimulateSlowGit, Is.True);
             Assert.That(loaded.Current.DiffPrefetchConcurrency, Is.EqualTo(6));
+            Assert.That(loaded.Current.DiffPrefetchDripDelayMs, Is.EqualTo(100));
+            Assert.That(loaded.Current.DiffPrefetchIndicatorThrottleMs, Is.EqualTo(200));
+            Assert.That(loaded.Current.DiffPrefetchPriorityPaths, Is.EqualTo(24));
+            Assert.That(loaded.Current.DiffPrefetchNeighborRadius, Is.EqualTo(8));
             Assert.That(loaded.Current.RecentRepositories, Is.EqualTo(new[] { "/repo/b", "/repo/a" }));
         }
         finally
