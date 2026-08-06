@@ -658,93 +658,23 @@ public partial class ReviewViewModel : ObservableObject
         _settings.Current.AiExcludedRepositories.Contains(
             _session.Detail.Summary.NameWithOwner, StringComparer.OrdinalIgnoreCase);
 
-    public string AiProgressText
-    {
-        get
-        {
-            var progress = AiProgress;
-            if (progress is null) return "";
+    public string AiProgressText => AiReviewSessionViewModel.FormatProgressText(AiProgress);
 
-            var stage = progress.Stage.ToString();
-            var elapsed = progress.Elapsed < TimeSpan.FromHours(1)
-                ? progress.Elapsed.ToString(@"mm\:ss")
-                : progress.Elapsed.ToString(@"h\:mm\:ss");
-            var turns = progress.TurnBudget is > 0
-                ? $"{progress.TurnsUsed}/{progress.TurnBudget} turns"
-                : $"{progress.TurnsUsed} turns";
-            var files = progress.FilesTotal > 0
-                ? $" · {progress.FilesCompleted}/{progress.FilesTotal} files"
-                : "";
-            var message = string.IsNullOrWhiteSpace(progress.Message) ? "" : $" — {progress.Message}";
-            return $"{stage} · {elapsed} · {turns}{files}{message}";
-        }
-    }
+    public string AiStatusDialogTitle => AiReviewSessionViewModel.StatusDialogTitle(AiRunState);
 
-    public string AiStatusDialogTitle => AiRunState switch
-    {
-        AiRunState.Running => "AI review in progress",
-        AiRunState.Complete => "AI review complete",
-        AiRunState.Failed => "AI review failed",
-        AiRunState.Incomplete => "AI review incomplete",
-        AiRunState.PausedBudget => "AI review paused",
-        _ => "AI review status",
-    };
-
-    public string AiDiagnosticsText
-    {
-        get
-        {
-            var settings = _settings.Current;
-            var runTimeout = settings.AiRunTimeoutSeconds <= 0
-                ? "unlimited"
-                : $"{settings.AiRunTimeoutSeconds}s";
-            var lines = new List<string>
-            {
-                $"State: {AiRunState}",
-                $"Turn idle timeout: {settings.AiTurnTimeoutSeconds}s",
-                $"Run timeout: {runTimeout}",
-                $"Turn budget: {settings.AiTurnBudget}",
-            };
-
-            if (AiProgress is { } progress)
-            {
-                lines.Add($"Stage: {progress.Stage}");
-                lines.Add($"Elapsed: {progress.Elapsed:g}");
-                lines.Add($"Turns used: {progress.TurnsUsed}");
-                if (!string.IsNullOrWhiteSpace(progress.Message))
-                    lines.Add($"Progress: {progress.Message}");
-            }
-
-            if (!string.IsNullOrWhiteSpace(AiCopilotSessionId))
-                lines.Add($"Copilot session: {AiCopilotSessionId}");
-
-            if (!string.IsNullOrWhiteSpace(AiLastError))
-                lines.Add($"Error: {AiLastError}");
-
-            if (!string.IsNullOrWhiteSpace(AiActivityLog))
-            {
-                lines.Add("");
-                lines.Add("--- Activity log ---");
-                lines.Add(AiActivityLog.TrimEnd());
-            }
-
-            return string.Join(Environment.NewLine, lines);
-        }
-    }
+    public string AiDiagnosticsText =>
+        AiReviewSessionViewModel.FormatDiagnosticsText(
+            _settings.Current,
+            AiRunState,
+            AiProgress,
+            AiCopilotSessionId,
+            AiLastError,
+            AiActivityLog);
 
     public bool HasAiDiagnostics =>
-        !string.IsNullOrWhiteSpace(AiLastError) ||
-        !string.IsNullOrWhiteSpace(AiActivityLog) ||
-        AiRunState is AiRunState.Failed or AiRunState.Incomplete or AiRunState.Running;
+        AiReviewSessionViewModel.HasDiagnostics(AiRunState, AiLastError, AiActivityLog);
 
-    public string AiButtonLabel => AiRunState switch
-    {
-        AiRunState.Running => "Reviewing…",
-        AiRunState.Incomplete or AiRunState.PausedBudget => "Resume AI review",
-        AiRunState.Complete => "Re-run AI review",
-        AiRunState.Failed => "Retry AI review",
-        _ => "AI review",
-    };
+    public string AiButtonLabel => AiReviewSessionViewModel.ButtonLabel(AiRunState);
 
     public bool AiButtonEnabled =>
         _session is not null &&
@@ -3630,49 +3560,17 @@ public partial class ReviewViewModel : ObservableObject
         return System.Text.Encoding.UTF8.GetString(bytes, offset, bytes.Length - offset);
     }
 
-    private DiffOptions BuildDiffOptions()
-    {
-        var baseOptions = _settings.Current.ToDiffOptions() with
-        {
-            IgnoreAllSpace = IgnoreWhitespace,
-            ContextLines = ShowFullFile ? 100_000 : Math.Max(1, ContextLines),
-        };
-        return baseOptions;
-    }
+    private DiffOptions BuildDiffOptions() =>
+        DiffPresentation.BuildDiffOptions(_settings.Current, IgnoreWhitespace, ShowFullFile, ContextLines);
 
-    private FileDiff EnsureIntraLine(FileDiff diff)
-    {
-        if (HasAnyIntraLineSpans(diff))
-            return diff;
-        return IntraLineEnricher.Enrich(diff, _intraLine);
-    }
-
-    private static bool HasAnyIntraLineSpans(FileDiff diff)
-    {
-        foreach (var hunk in diff.Hunks)
-        {
-            foreach (var line in hunk.Lines)
-            {
-                if (line.IntraLine is not null)
-                    return true;
-            }
-        }
-
-        return false;
-    }
+    private FileDiff EnsureIntraLine(FileDiff diff) =>
+        DiffPresentation.EnsureIntraLine(diff, _intraLine);
 
     private IReadOnlyList<DiffRow> BuildProjectedRows(
         FileDiff diff,
         DiffViewMode viewMode,
-        bool showFullFile)
-    {
-        const int collapseThreshold = 8;
-        var threshold = showFullFile ? 0 : collapseThreshold;
-        ISet<(int HunkIndex, int LineIndexInHunk)> expanded = new HashSet<(int, int)>();
-        return viewMode == DiffViewMode.SideBySide
-            ? SideBySideRowProjector.Project(diff, threshold, _intraLine, expanded)
-            : UnifiedRowProjector.Project(diff, threshold, _intraLine, expanded);
-    }
+        bool showFullFile) =>
+        DiffPresentation.ProjectRows(diff, viewMode, showFullFile, _intraLine);
 
     private void ProjectRows(FileDiff diff)
     {

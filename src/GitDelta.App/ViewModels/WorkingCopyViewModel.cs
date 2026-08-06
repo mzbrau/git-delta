@@ -81,8 +81,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private readonly Dictionary<string, bool> _fileStatusExpandState = new(StringComparer.Ordinal);
     private readonly Dictionary<string, bool> _historyExpandState = new(StringComparer.Ordinal);
     private readonly HashSet<(int HunkIndex, int LineIndexInHunk)> _expandedCollapses = [];
-    private const int DefaultCollapseThreshold = 8;
-    private const int FullFileContextLines = 100_000;
     private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp",
@@ -3646,15 +3644,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         ImageAfter = null;
     }
 
-    private DiffOptions BuildDiffOptions()
-    {
-        var baseOptions = _settings.Current.ToDiffOptions() with
-        {
-            IgnoreAllSpace = IgnoreWhitespace,
-            ContextLines = ShowFullFile ? FullFileContextLines : Math.Max(1, ContextLines),
-        };
-        return baseOptions;
-    }
+    private DiffOptions BuildDiffOptions() =>
+        DiffPresentation.BuildDiffOptions(_settings.Current, IgnoreWhitespace, ShowFullFile, ContextLines);
 
     private void UpdateDiffStats(FileDiff? diff)
     {
@@ -3671,30 +3662,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         SelectedRemovedLines = removed;
     }
 
-    /// <summary>
-    /// Prefer spans already set by <see cref="IntraLineEnricher"/> (git path); only enrich
-    /// untracked / unenriched diffs.
-    /// </summary>
-    private FileDiff EnsureIntraLine(FileDiff diff)
-    {
-        if (HasAnyIntraLineSpans(diff))
-            return diff;
-        return IntraLineEnricher.Enrich(diff, _intraLine);
-    }
-
-    private static bool HasAnyIntraLineSpans(FileDiff diff)
-    {
-        foreach (var hunk in diff.Hunks)
-        {
-            foreach (var line in hunk.Lines)
-            {
-                if (line.IntraLine is not null)
-                    return true;
-            }
-        }
-
-        return false;
-    }
+    private FileDiff EnsureIntraLine(FileDiff diff) =>
+        DiffPresentation.EnsureIntraLine(diff, _intraLine);
 
     private HashSet<(int HunkIndex, int LineIndexInHunk)> SnapshotExpandedCollapses() =>
         _expandedCollapses.Count == 0
@@ -3705,13 +3674,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         FileDiff diff,
         DiffViewMode viewMode,
         bool showFullFile,
-        ISet<(int HunkIndex, int LineIndexInHunk)> expanded)
-    {
-        var threshold = showFullFile ? 0 : DefaultCollapseThreshold;
-        return viewMode == DiffViewMode.SideBySide
-            ? SideBySideRowProjector.Project(diff, threshold, _intraLine, expanded)
-            : UnifiedRowProjector.Project(diff, threshold, _intraLine, expanded);
-    }
+        ISet<(int HunkIndex, int LineIndexInHunk)> expanded) =>
+        DiffPresentation.ProjectRows(diff, viewMode, showFullFile, _intraLine, expanded);
 
     private void ProjectRows(FileDiff diff)
     {
