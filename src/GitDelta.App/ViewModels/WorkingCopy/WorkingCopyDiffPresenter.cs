@@ -32,8 +32,9 @@ public partial class WorkingCopyViewModel
     public async Task LoadDiffForSelectionAsync(FileItemViewModel? file)
     {
         var cts = new CancellationTokenSource();
-        _vm._diffCts?.Cancel();
-        _vm._diffCts = cts;
+        var previous = Interlocked.Exchange(ref _vm._diffCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
         _vm._markdownCts?.Cancel();
         _vm._markdownCts = null;
         var ct = cts.Token;
@@ -148,7 +149,7 @@ public partial class WorkingCopyViewModel
         {
             // Only the current load may clear the spinner; a superseded load's finally must
             // not hide loading for the newer request.
-            if (ReferenceEquals(_vm._diffCts, cts))
+            if (Interlocked.CompareExchange(ref _vm._diffCts, null, cts) == cts)
             {
                 _vm.IsLoadingDiff = false;
                 _vm.IsDiffRefreshing = false;
@@ -157,6 +158,7 @@ public partial class WorkingCopyViewModel
                 _vm.OnPropertyChanged(nameof(_vm.DiffFooterText));
                 if (!ct.IsCancellationRequested && ReferenceEquals(_vm.SelectedFile, file))
                     _vm.PendingReview.OnFileSelectionChanged(file, _vm._currentDiff);
+                cts.Dispose();
             }
         }
     }

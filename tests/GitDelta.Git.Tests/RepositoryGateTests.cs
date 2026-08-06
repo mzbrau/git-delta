@@ -38,7 +38,7 @@ public sealed class RepositoryGateTests
         var gate = new RepositoryGate();
         var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var readEntered = 0;
+        var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var write = gate.RunWorktreeWriteAsync(async _ =>
         {
@@ -51,17 +51,18 @@ public sealed class RepositoryGateTests
 
         var read = gate.RunReadAsync(_ =>
         {
-            Interlocked.Exchange(ref readEntered, 1);
+            readEntered.TrySetResult();
             return Task.FromResult(1);
         }, CancellationToken.None);
 
-        await Task.Delay(75);
-        Assert.That(Volatile.Read(ref readEntered), Is.EqualTo(0));
+        var winner = await Task.WhenAny(readEntered.Task, Task.Delay(TimeSpan.FromMilliseconds(250)));
+        Assert.That(winner, Is.Not.EqualTo(readEntered.Task), "Read should remain blocked while worktree write is held.");
+        Assert.That(readEntered.Task.IsCompleted, Is.False);
 
         releaseWrite.SetResult();
         await write;
         Assert.That(await read.WaitAsync(TimeSpan.FromSeconds(2)), Is.EqualTo(1));
-        Assert.That(Volatile.Read(ref readEntered), Is.EqualTo(1));
+        await readEntered.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.That(gate.CurrentEpoch, Is.EqualTo(1));
     }
 
