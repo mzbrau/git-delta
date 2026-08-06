@@ -181,3 +181,29 @@ public sealed record AiInlineActionRequest(
     string SelectedLinesContext,
     int? StartLine = null,
     int? EndLine = null);
+
+/// <summary>One inventoriable change unit for Magic Commit (a hunk or whole-file change).</summary>
+public sealed record MagicCommitHunkItem(
+    string Id,
+    string Path,
+    int HunkIndex,
+    string Fingerprint,
+    string Header,
+    string Preview,
+    bool WholeFile);
+
+/// <summary>One planned commit: message plus hunk ids from the inventory.</summary>
+public sealed record MagicCommitPlanEntry(
+    string Message,
+    IReadOnlyList<string> HunkIds);
+
+/// <summary>Agent-proposed grouping of hunks into sequential commits.</summary>
+public sealed record MagicCommitPlan(IReadOnlyList<MagicCommitPlanEntry> Commits);
+
+/// <summary>One commit created by Magic Commit execution.</summary>
+public sealed record MagicCommitResultEntry(string Oid, string ShortOid, string Subject);
+
+/// <summary>Outcome of executing a <see cref="MagicCommitPlan"/>.</summary>
+public sealed record MagicCommitExecutionResult(
+    IReadOnlyList<MagicCommitResultEntry> Commits,
+    string? Error = null);

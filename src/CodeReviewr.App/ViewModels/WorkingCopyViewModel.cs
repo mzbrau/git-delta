@@ -41,6 +41,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private readonly ISyntaxTokenService? _syntaxTokens;
     private readonly IFsmonitorService _fsmonitor;
     private readonly IRepositoryWatcher _watcher;
+    private readonly IAiCommitAssistService _commitAssist;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     private CancellationTokenSource? _diffCts;
@@ -97,6 +98,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         IFsmonitorService fsmonitor,
         IRepositoryWatcher watcher,
         PendingChangesReviewViewModel pendingReview,
+        IAiCommitAssistService? commitAssist = null,
         ISyntaxTokenService? syntaxTokens = null)
     {
         _statusService = statusService;
@@ -116,6 +118,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         _stashDialog = stashDialog;
         _intraLine = intraLine;
         _syntaxTokens = syntaxTokens;
+        _commitAssist = commitAssist ?? NullAiCommitAssistService.Instance;
         _fsmonitor = fsmonitor;
         _watcher = watcher;
         PendingReview = pendingReview;
@@ -203,6 +206,16 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [ObservableProperty] private bool _pushAfterCommit;
     [ObservableProperty] private bool _isCommitting;
     [ObservableProperty] private string _hookOutput = "";
+    [ObservableProperty] private bool _isGeneratingCommitMessage;
+    [ObservableProperty] private bool _showMagicCommitDialog;
+    [ObservableProperty] private MagicCommitDialogStepKind _magicCommitDialogStep;
+    [ObservableProperty] private string _magicCommitInstructions = "";
+    [ObservableProperty] private bool _magicCommitStagedOnly = true;
+    [ObservableProperty] private string _magicCommitProgressText = "";
+    [ObservableProperty] private string _magicCommitActivityLog = "";
+    [ObservableProperty] private string _magicCommitError = "";
+    [ObservableProperty] private bool _isMagicCommitRunning;
+    private CancellationTokenSource? _magicCommitCts;
     [ObservableProperty] private bool _canStageFromDiff;
     [ObservableProperty] private string? _stagingDisabledReason;
     [ObservableProperty] private int _selectedHunkIndex = -1;
@@ -554,8 +567,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(CanRebase));
         OnPropertyChanged(nameof(RebaseDisabledReason));
         OnPropertyChanged(nameof(CanCherryPickHistoryCommit));
+        OnPropertyChanged(nameof(CanAddTicketFromBranch));
         OpenRebaseWizardCommand.NotifyCanExecuteChanged();
         CherryPickCommitCommand.NotifyCanExecuteChanged();
+        AddTicketFromBranchCommand.NotifyCanExecuteChanged();
         SyncSelectedHistoryBranchToCurrent();
     }
 
@@ -568,7 +583,11 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private void NotifyCanCommitChanged()
     {
         OnPropertyChanged(nameof(CanCommit));
+        OnPropertyChanged(nameof(CanGenerateCommitMessage));
+        OnPropertyChanged(nameof(CanStartMagicCommit));
         CommitCommand.NotifyCanExecuteChanged();
+        GenerateCommitMessageCommand.NotifyCanExecuteChanged();
+        StartMagicCommitCommand.NotifyCanExecuteChanged();
     }
     partial void OnStagingDisabledReasonChanged(string? value) => OnPropertyChanged(nameof(DiffFooterText));
     partial void OnIsLoadingDiffChanged(bool value)

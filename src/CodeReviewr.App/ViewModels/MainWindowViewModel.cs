@@ -126,6 +126,9 @@ public partial class MainWindowViewModel : ObservableObject
         _aiDisclosureAcknowledged = _settings.Current.AiDisclosureAcknowledged;
         _aiExportRetentionDays = _settings.Current.AiExportRetentionDays;
         _aiLargePrFileThreshold = _settings.Current.AiLargePrFileThreshold;
+        _ticketFromBranchRegex = string.IsNullOrWhiteSpace(_settings.Current.TicketFromBranchRegex)
+            ? TicketFromBranch.DefaultRegex
+            : _settings.Current.TicketFromBranchRegex;
     }
 
     public WorkingCopyViewModel WorkingCopy { get; }
@@ -182,6 +185,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private bool _aiDisclosureAcknowledged;
     [ObservableProperty] private int _aiExportRetentionDays = 14;
     [ObservableProperty] private int _aiLargePrFileThreshold = 30;
+    [ObservableProperty] private string _ticketFromBranchRegex = TicketFromBranch.DefaultRegex;
     [ObservableProperty] private bool _isTestingAiConnection;
     [ObservableProperty] private string? _aiConnectionTestResult;
     [ObservableProperty] private bool _isRefreshingAiModels;
@@ -717,6 +721,7 @@ public partial class MainWindowViewModel : ObservableObject
         _settings.Update(s => s.AiAssistanceEnabled = value);
         _ = _settings.SaveAsync();
         Review.NotifyAiButtonStateChanged();
+        WorkingCopy.NotifyAiCommitAssistVisibilityChanged();
     }
 
     partial void OnAiUseDedicatedCopilotTokenChanged(bool value)
@@ -801,6 +806,13 @@ public partial class MainWindowViewModel : ObservableObject
     partial void OnAiLargePrFileThresholdChanged(int value)
     {
         _settings.Update(s => s.AiLargePrFileThreshold = Math.Max(1, value));
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnTicketFromBranchRegexChanged(string value)
+    {
+        _settings.Update(s => s.TicketFromBranchRegex =
+            string.IsNullOrWhiteSpace(value) ? TicketFromBranch.DefaultRegex : value);
         _ = _settings.SaveAsync();
     }
 

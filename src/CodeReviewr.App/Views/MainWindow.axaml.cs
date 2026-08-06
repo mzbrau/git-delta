@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private bool _wcAiChatScrollSubscribed;
     private bool _wcAiChatRowSubscribed;
     private bool _wcAiProgressScrollSubscribed;
+    private bool _magicCommitActivityScrollSubscribed;
     private double _wcAiSidePanelWidth = 320;
     private bool _inlineCommentLayoutHooked;
     private bool _wcInlineCommentLayoutHooked;
@@ -108,6 +109,12 @@ public partial class MainWindow : Window
         {
             vm.WorkingCopy.PendingReview.AiActivityLogUpdated += ScrollWcAiProgressToEnd;
             _wcAiProgressScrollSubscribed = true;
+        }
+
+        if (!_magicCommitActivityScrollSubscribed)
+        {
+            vm.WorkingCopy.MagicCommitActivityLogUpdated += ScrollMagicCommitActivityToEnd;
+            _magicCommitActivityScrollSubscribed = true;
         }
 
         if (!_wcAiChatRowSubscribed)
@@ -898,6 +905,31 @@ public partial class MainWindow : Window
             if (this.FindControl<ScrollViewer>("WcAiProgressScrollViewer") is { } scroll)
                 scroll.Offset = new Avalonia.Vector(scroll.Offset.X, double.MaxValue);
         }, DispatcherPriority.Background);
+    }
+
+    private void ScrollMagicCommitActivityToEnd()
+    {
+        if (DataContext is not MainWindowViewModel vm || !vm.WorkingCopy.ShowMagicCommitDialog) return;
+        Dispatcher.UIThread.Post(() =>
+        {
+            var name = vm.WorkingCopy.ShowMagicCommitResults
+                ? "MagicCommitResultsScrollViewer"
+                : "MagicCommitProgressScrollViewer";
+            if (this.FindControl<ScrollViewer>(name) is { } scroll)
+                scroll.Offset = new Avalonia.Vector(scroll.Offset.X, double.MaxValue);
+        }, DispatcherPriority.Background);
+    }
+
+    private void OnRecentCommitMessageClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string message })
+            return;
+
+        if (RecentCommitMessagesButton.Flyout is FlyoutBase flyout)
+            flyout.Hide();
+
+        if (Vm.WorkingCopy.ApplyRecentCommitMessageCommand.CanExecute(message))
+            Vm.WorkingCopy.ApplyRecentCommitMessageCommand.Execute(message);
     }
 
     private void OnWcReviewPropertyChangedForAiChat(object? sender, PropertyChangedEventArgs e)

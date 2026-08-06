@@ -15,6 +15,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AiWorkQueue>();
         services.AddSingleton<IAgentClient, CopilotAgentClient>();
         services.AddSingleton<IAIReviewService, AiReviewCoordinator>();
+        services.AddSingleton<IAiCommitAssistService, AiCommitAssistService>();
         return services;
     }
 
@@ -35,6 +36,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<AiWorkQueue>();
         services.AddSingleton<IAgentClient>(_ => new FakeAgentClient(scriptFactory));
         services.AddSingleton<IAIReviewService, AiReviewCoordinator>();
+        services.AddSingleton<IAiCommitAssistService, AiCommitAssistService>();
         return services;
     }
 }

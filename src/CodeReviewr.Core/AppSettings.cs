@@ -122,6 +122,12 @@ public sealed record AppSettings
     /// <summary>File-count threshold that triggers pre-flight confirmation before a run.</summary>
     public int AiLargePrFileThreshold { get; set; } = 30;
 
+    /// <summary>
+    /// Regex used by "Add ticket from branch". Capture group 1 should be the ticket key.
+    /// Default matches <c>bugfix/SMITH-123/3</c> → <c>SMITH-123</c>.
+    /// </summary>
+    public string TicketFromBranchRegex { get; set; } = TicketFromBranch.DefaultRegex;
+
     /// <summary>Root folder scanned for local Git repositories (Phase 2).</summary>
     public string? DevelopmentFolder { get; set; }
 
