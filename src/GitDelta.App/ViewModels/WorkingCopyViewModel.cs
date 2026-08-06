@@ -43,6 +43,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private readonly IRepositoryWatcher _watcher;
     private readonly IAiCommitAssistService _commitAssist;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly WorkingCopyDiffPresenter _diff;
+    private readonly WorkingCopyStatusController _status;
 
     private CancellationTokenSource? _diffCts;
     private CancellationTokenSource? _prefetchCts;
@@ -110,6 +112,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         IAiCommitAssistService? commitAssist = null,
         ISyntaxTokenService? syntaxTokens = null)
     {
+        _diff = new WorkingCopyDiffPresenter(this);
+        _status = new WorkingCopyStatusController(this);
         _statusService = statusService;
         _diffService = diffService;
         _staging = staging;
@@ -859,143 +863,24 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
     }
 
-    private void RebuildFileListsTimed(RepositoryStatus status, string reason)
-    {
-        using var activity = GitDeltaActivity.Source.StartActivity("wc.filelists.rebuild");
-        activity?.SetTag("wc.rebuild_reason", reason);
-        var sw = Stopwatch.StartNew();
-        try
-        {
-            RebuildFileLists(status);
-            activity?.SetTag("wc.staged_count", _allStaged.Count);
-            activity?.SetTag("wc.unstaged_count", _allUnstaged.Count);
-            activity?.SetTag("wc.conflicted_count", _allConflicted.Count);
-            activity?.SetTag("wc.total_count", _allStaged.Count + _allUnstaged.Count + _allConflicted.Count);
-            activity?.SetTag("wc.visible_entry_count",
-                StagedFileEntries.Count + UnstagedFileEntries.Count + ConflictedFileEntries.Count);
-            ScheduleFileListLayoutTiming();
-        }
-        finally
-        {
-            GitDeltaMeters.WcFileListsRebuildMs.Record(sw.Elapsed.TotalMilliseconds);
-        }
-    }
+    private void RebuildFileListsTimed(RepositoryStatus status, string reason) => _status.RebuildFileListsTimed(status, reason);
 
-    private void RebuildFileLists(RepositoryStatus status)
-    {
-        // Preserve AI classifications across VM recreation so file-list icons survive status refresh.
-        var classifications = CaptureAiClassifications();
 
-        _allStaged.Clear();
-        _allUnstaged.Clear();
-        _allConflicted.Clear();
+    private void RebuildFileLists(RepositoryStatus status) => _status.RebuildFileLists(status);
 
-        var pendingPaths = _pending.Select(p => p.Path.Value).ToHashSet(StringComparer.Ordinal);
-
-        foreach (var e in status.Staged)
-        {
-            if (pendingPaths.Contains(e.Path.Value) && _pending.Any(p => p.Path.Equals(e.Path) && p.WasUnstage))
-                continue;
-            _allStaged.Add(FileItemViewModel.From(e, isStagedList: true));
-        }
-
-        foreach (var e in status.Unstaged)
-        {
-            if (pendingPaths.Contains(e.Path.Value) && _pending.Any(p => p.Path.Equals(e.Path) && !p.WasUnstage))
-                continue;
-            _allUnstaged.Add(FileItemViewModel.From(e, isStagedList: false));
-        }
-
-        // Optimistic overlays: move predicted staged/unstaged
-        foreach (var p in _pending.Where(p => !p.WasUnstage))
-        {
-            var path = p.Path.Value;
-            if (_allUnstaged.All(f => f.Path.Value != path)
-                && _allStaged.All(f => f.Path.Value != path))
-                _allStaged.Add(new FileItemViewModel(p.Path, ChangeKind.Modified, isStagedList: true, isPartial: true, isOptimistic: true));
-        }
-
-        foreach (var p in _pending.Where(p => p.WasUnstage))
-        {
-            var path = p.Path.Value;
-            if (_allUnstaged.All(f => f.Path.Value != path)
-                && _allStaged.All(f => f.Path.Value != path))
-                _allUnstaged.Add(new FileItemViewModel(p.Path, ChangeKind.Modified, isStagedList: false, isPartial: true, isOptimistic: true));
-        }
-
-        foreach (var e in status.Conflicted)
-            _allConflicted.Add(FileItemViewModel.From(e, isStagedList: false));
-
-        ApplyAiClassifications(classifications);
-
-        WorkingCopyChangeCount = _allStaged.Count + _allUnstaged.Count + _allConflicted.Count;
-        ApplyFileFilter();
-    }
 
     /// <summary>
     /// Measures time from file-list rebuild until the next UI layout/render pass
     /// (Avalonia realize + measure of file-list rows).
     /// </summary>
-    private void ScheduleFileListLayoutTiming()
-    {
-        var parentContext = Activity.Current?.Context ?? default;
-        var visibleCount = StagedFileEntries.Count + UnstagedFileEntries.Count + ConflictedFileEntries.Count;
-        var sw = Stopwatch.StartNew();
-        try
-        {
-            var dispatcher = Dispatcher.UIThread;
-            void Record()
-            {
-                var ms = sw.Elapsed.TotalMilliseconds;
-                GitDeltaMeters.WcFileListsLayoutMs.Record(ms);
-                if (ms < FileListLayoutActivityMs)
-                    return;
+    private void ScheduleFileListLayoutTiming() => _status.ScheduleFileListLayoutTiming();
 
-                using var activity = GitDeltaActivity.Source.StartActivity(
-                    "wc.filelists.layout",
-                    ActivityKind.Internal,
-                    parentContext);
-                activity?.SetTag("wc.visible_entry_count", visibleCount);
-                activity?.SetTag("wc.layout_ms", ms);
-            }
 
-            if (Application.Current is null)
-            {
-                Record();
-                return;
-            }
+    private Dictionary<string, AiChangeClassification> CaptureAiClassifications() => _status.CaptureAiClassifications();
 
-            dispatcher.Post(Record, DispatcherPriority.Loaded);
-        }
-        catch (InvalidOperationException)
-        {
-            GitDeltaMeters.WcFileListsLayoutMs.Record(sw.Elapsed.TotalMilliseconds);
-        }
-    }
 
-    private Dictionary<string, AiChangeClassification> CaptureAiClassifications()
-    {
-        var map = new Dictionary<string, AiChangeClassification>(StringComparer.Ordinal);
-        foreach (var file in _allStaged.Concat(_allUnstaged).Concat(_allConflicted))
-        {
-            if (file.AiChangeClassification is { } classification)
-                map.TryAdd(file.Path.Value, classification);
-        }
+    private void ApplyAiClassifications(Dictionary<string, AiChangeClassification> classifications) => _status.ApplyAiClassifications(classifications);
 
-        return map;
-    }
-
-    private void ApplyAiClassifications(Dictionary<string, AiChangeClassification> classifications)
-    {
-        if (classifications.Count == 0)
-            return;
-
-        foreach (var file in _allStaged.Concat(_allUnstaged).Concat(_allConflicted))
-        {
-            if (classifications.TryGetValue(file.Path.Value, out var classification))
-                file.AiChangeClassification = classification;
-        }
-    }
 
     private void ApplyFileFilter()
     {
@@ -2297,260 +2182,42 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(IsContextLines25));
     }
 
-    public void ExpandCollapsedSection(int hunkIndex, int lineIndexInHunk)
-    {
-        if (!_expandedCollapses.Add((hunkIndex, lineIndexInHunk))) return;
-        if (_currentDiff is not null)
-            ProjectRows(_currentDiff);
-    }
+    public void ExpandCollapsedSection(int hunkIndex, int lineIndexInHunk) => _diff.ExpandCollapsedSection(hunkIndex, lineIndexInHunk);
 
-    private async Task LoadDiffForSelectionAsync(FileItemViewModel? file)
-    {
-        var cts = new CancellationTokenSource();
-        _diffCts?.Cancel();
-        _diffCts = cts;
-        _markdownCts?.Cancel();
-        _markdownCts = null;
-        var ct = cts.Token;
 
-        _expandedCollapses.Clear();
-        SelectedAddedLines = 0;
-        SelectedRemovedLines = 0;
-        ClearImagePreview();
-        if (file is null || _repoPath is null)
-        {
-            DiffRows.Clear();
-            _currentDiff = null;
-            ClearDiffCacheState();
-            DiffEmptyMessage = IsHistoryMode
-                ? SelectedCommit is null ? "Select a commit" : "Select a file to view its diff"
-                : "Select a file to view its diff";
-            OnPropertyChanged(nameof(DiffFooterText));
-            if (!IsHistoryMode && !IsStashMode)
-                PendingReview.OnFileSelectionChanged(null, null);
-            return;
-        }
+    private Task LoadDiffForSelectionAsync(FileItemViewModel? file) => _diff.LoadDiffForSelectionAsync(file);
 
-        if (IsStashMode)
-        {
-            await LoadStashDiffAsync(file, cts, ct);
-            return;
-        }
-
-        if (IsHistoryMode)
-        {
-            await LoadCommitDiffAsync(file, cts, ct);
-            return;
-        }
-
-        var target = IsCombinedReviewMode
-            ? DiffTarget.HeadToWorktree
-            : file.IsStagedList ? DiffTarget.HeadToIndex : DiffTarget.IndexToWorktree;
-
-        CanStageFromDiff = target is DiffTarget.IndexToWorktree or DiffTarget.HeadToIndex;
-        StagingDisabledReason = target == DiffTarget.HeadToWorktree
-            ? "Combined review mode is read-only. Partial staging requires the staged/unstaged lists."
-            : file.IsConflicted ? "Conflicted files cannot be staged here. Resolve externally or open mergetool."
-            : null;
-        OnPropertyChanged(nameof(CanStageLines));
-        OnPropertyChanged(nameof(CanUnstageLines));
-        OnPropertyChanged(nameof(CanDiscardLines));
-
-        var options = BuildDiffOptions();
-        var key = FileStatusWarmKey(file.Path, target, options);
-
-        try
-        {
-            using var loadActivity = GitDeltaActivity.Source.StartActivity("diff.load");
-            loadActivity?.SetTag("diff.path", file.Path.Value);
-            loadActivity?.SetTag("diff.target", target.ToString());
-            loadActivity?.SetTag("diff.view_mode", ViewMode.ToString());
-
-            var sw = Stopwatch.StartNew();
-            if (file.Kind == ChangeKind.Untracked)
-            {
-                await LoadTrackedDiffWithSwrAsync(
-                    file,
-                    key,
-                    target,
-                    force: false,
-                    factory: token => LoadUntrackedFileDiffAsync(_repoPath, file.Path, target, token),
-                    cts,
-                    ct);
-            }
-            else
-            {
-                await LoadTrackedDiffWithSwrAsync(
-                    file,
-                    key,
-                    target,
-                    force: false,
-                    factory: token => _diffService.GetDiffAsync(_repoPath, file.Path, target.AsWorkingCopy(), options, token),
-                    cts,
-                    ct);
-            }
-
-            loadActivity?.SetTag("diff.row_count", DiffRows.Count);
-            GitDeltaMeters.DiffGenerationMs.Record(sw.Elapsed.TotalMilliseconds);
-        }
-        catch (OperationCanceledException) { }
-        catch (DiffTooLargeException ex)
-        {
-            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
-                return;
-            SelectedAddedLines = 0;
-            SelectedRemovedLines = 0;
-            ClearImagePreview();
-            DiffRows.Clear();
-            _currentDiff = null;
-            ClearDiffCacheState();
-            DiffEmptyMessage = ex.Message;
-            _notifications.Error(ex.Message, exception: ex);
-        }
-        catch (Exception ex)
-        {
-            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
-                return;
-            SelectedAddedLines = 0;
-            SelectedRemovedLines = 0;
-            ClearImagePreview();
-            DiffRows.Clear();
-            _currentDiff = null;
-            ClearDiffCacheState();
-            _notifications.Error($"Diff failed: {ex.Message}", () => _ = LoadDiffForSelectionAsync(file), ex);
-        }
-        finally
-        {
-            // Only the current load may clear the spinner; a superseded load's finally must
-            // not hide loading for the newer request.
-            if (ReferenceEquals(_diffCts, cts))
-            {
-                IsLoadingDiff = false;
-                IsDiffRefreshing = false;
-                UpdateDiffCacheState(key);
-                UpdateFileCacheIndicators();
-                OnPropertyChanged(nameof(DiffFooterText));
-                if (!ct.IsCancellationRequested && ReferenceEquals(SelectedFile, file))
-                    PendingReview.OnFileSelectionChanged(file, _currentDiff);
-            }
-        }
-    }
 
     /// <summary>
     /// Stale-while-revalidate load: paint a warm (possibly stale) hit immediately, then refresh in
     /// the background when needed. Only clears the viewer when there is no usable cache — including
     /// keeping a same-path painted (or alternate-target warm) diff across stage/unstage target flips.
     /// </summary>
-    private async Task LoadTrackedDiffWithSwrAsync(
+    private Task LoadTrackedDiffWithSwrAsync(
         FileItemViewModel file,
         DiffWarmKey key,
         DiffTarget target,
         bool force,
         Func<CancellationToken, Task<FileDiff>> factory,
         CancellationTokenSource cts,
-        CancellationToken ct)
-    {
-        DiffWarmEntry? entry = null;
-        var hasWarmHit = _warmStore.TryGetCompleted(key, out entry) && entry is not null;
-        var needsRefresh = force || !hasWarmHit || entry!.IsStale;
+        CancellationToken ct) => _diff.LoadTrackedDiffWithSwrAsync(file, key, target, force, factory, cts, ct);
 
-        if (hasWarmHit)
-        {
-            IsLoadingDiff = false;
-            ApplyDiffCacheState(entry!);
-            await PresentDiffAsync(file, entry!.Diff, target, cts, ct);
-            if (!needsRefresh)
-                return;
 
-            IsDiffRefreshing = true;
-        }
-        else if (TryGetAlternateTargetWarmEntry(key, out var altEntry) && altEntry is not null)
-        {
-            // Stage/unstage flips DiffTarget; reuse the previous target's cached diff as a stand-in.
-            IsLoadingDiff = false;
-            IsDiffRefreshing = true;
-            ApplyDiffCacheState(altEntry with { IsStale = true });
-            await PresentDiffAsync(file, altEntry.Diff with { Scope = target.AsWorkingCopy() }, target, cts, ct);
-        }
-        else if (HasPaintedDiffForPath(file.Path.Value))
-        {
-            // Keep whatever is already on screen for this path until the new target arrives.
-            IsLoadingDiff = false;
-            IsDiffRefreshing = true;
-            if (_currentDiff is not null && _currentDiff.Scope.WorkingCopyTargetOrNull() != target)
-            {
-                _currentDiff = _currentDiff with { Scope = target.AsWorkingCopy() };
-                OnPropertyChanged(nameof(CanStageLines));
-                OnPropertyChanged(nameof(CanUnstageLines));
-                OnPropertyChanged(nameof(CanDiscardLines));
-            }
+    private bool HasPaintedDiffForPath(string path) => _diff.HasPaintedDiffForPath(path);
 
-            if (_diffCacheCompletedAt is { } at)
-                DiffCacheAgeText = FormatCacheAge(at);
-            HasDiffCache = DiffRows.Count > 0;
-        }
-        else
-        {
-            DiffRows.Clear();
-            _currentDiff = null;
-            ClearDiffCacheState();
-            IsLoadingDiff = true;
-            IsDiffRefreshing = false;
-        }
-
-        var loadTask = _warmStore.GetOrStart(key, factory, force);
-        var diff = await loadTask.WaitAsync(ct);
-        ct.ThrowIfCancellationRequested();
-        if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
-            return;
-        await PresentDiffAsync(file, diff, target, cts, ct);
-        if (ReferenceEquals(_diffCts, cts))
-            UpdateDiffCacheState(key);
-    }
-
-    private bool HasPaintedDiffForPath(string path)
-    {
-        if (DiffRows.Count == 0 || _currentDiff is null)
-            return false;
-
-        return string.Equals(_currentDiff.NewPath.Value, path, StringComparison.Ordinal)
-               || string.Equals(_currentDiff.OldPath.Value, path, StringComparison.Ordinal);
-    }
 
     /// <summary>
     /// Looks up a completed warm entry for the same path/scope/options under an alternate
     /// <see cref="DiffTarget"/> (used when stage/unstage flips IndexToWorktree ↔ HeadToIndex).
     /// </summary>
-    private bool TryGetAlternateTargetWarmEntry(DiffWarmKey key, out DiffWarmEntry? entry)
-    {
-        foreach (var alt in AlternateDiffScopes(key.DiffScope))
-        {
-            var altKey = new DiffWarmKey(key.Scope, key.Path, alt, key.Options);
-            if (_warmStore.TryGetCompleted(altKey, out entry) && entry is not null)
-                return true;
-        }
+    private bool TryGetAlternateTargetWarmEntry(DiffWarmKey key, out DiffWarmEntry? entry) => _diff.TryGetAlternateTargetWarmEntry(key, out entry);
 
-        entry = null;
-        return false;
-    }
 
-    private static IEnumerable<DiffScope> AlternateDiffScopes(DiffScope scope)
-    {
-        if (scope is not DiffScope.WorkingCopy wc)
-            yield break;
+    private static IEnumerable<DiffScope> AlternateDiffScopes(DiffScope scope) => WorkingCopyDiffPresenter.AlternateDiffScopes(scope);
 
-        foreach (var alt in AlternateDiffTargets(wc.Target))
-            yield return alt.AsWorkingCopy();
-    }
 
-    private static IEnumerable<DiffTarget> AlternateDiffTargets(DiffTarget target) =>
-        target switch
-        {
-            DiffTarget.IndexToWorktree => [DiffTarget.HeadToIndex, DiffTarget.HeadToWorktree],
-            DiffTarget.HeadToIndex => [DiffTarget.IndexToWorktree, DiffTarget.HeadToWorktree],
-            DiffTarget.HeadToWorktree => [DiffTarget.IndexToWorktree, DiffTarget.HeadToIndex],
-            _ => [],
-        };
+    private static IEnumerable<DiffTarget> AlternateDiffTargets(DiffTarget target) => WorkingCopyDiffPresenter.AlternateDiffTargets(target);
+
 
     [RelayCommand]
     private async Task ForceRefreshDiffAsync()
@@ -2637,388 +2304,55 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
     }
 
-    private async Task RevalidateSelectedDiffAfterStatusAsync(
+    private Task RevalidateSelectedDiffAfterStatusAsync(
         RepositoryStatus? previousStatus,
-        RepositoryStatus currentStatus)
-    {
-        if (!IsFileStatusMode || SelectedFile is null)
-            return;
+        RepositoryStatus currentStatus) => _diff.RevalidateSelectedDiffAfterStatusAsync(previousStatus, currentStatus);
 
-        if (!IsPathInWorkingLists(SelectedFile.Path.Value, SelectedFile.IsStagedList))
-        {
-            _warmStore.InvalidatePath(SelectedFile.Path.Value);
-            DiffRows.Clear();
-            _currentDiff = null;
-            ClearDiffCacheState();
-            ClearImagePreview();
-            DiffEmptyMessage = "Select a file to view its diff";
-            SelectedAddedLines = 0;
-            SelectedRemovedLines = 0;
-            IsLoadingDiff = false;
-            IsDiffRefreshing = false;
-            OnPropertyChanged(nameof(DiffFooterText));
-            PendingReview.OnFileSelectionChanged(null, null);
-            return;
-        }
 
-        if (IsSelectedFileContentUnchanged(previousStatus, currentStatus, SelectedFile))
-        {
-            // Remapped FileItemViewModel — refresh band/guidance without wiping AI annotations.
-            PendingReview.OnFileSelectionChanged(SelectedFile, _currentDiff);
-            return;
-        }
+    private void SoftInvalidateChangedPaths(RepositoryStatus? previous, RepositoryStatus current) => _diff.SoftInvalidateChangedPaths(previous, current);
 
-        await LoadDiffForSelectionAsync(SelectedFile);
-    }
 
-    private void SoftInvalidateChangedPaths(RepositoryStatus? previous, RepositoryStatus current)
-    {
-        if (previous is null)
-        {
-            _warmStore.SoftInvalidateScope("fs");
-            return;
-        }
+    private static Dictionary<string, string> BuildPathOidFingerprint(RepositoryStatus status) => WorkingCopyDiffPresenter.BuildPathOidFingerprint(status);
 
-        var prev = BuildPathOidFingerprint(previous);
-        var curr = BuildPathOidFingerprint(current);
-        foreach (var (path, fingerprint) in curr)
-        {
-            if (!prev.TryGetValue(path, out var old) || !string.Equals(old, fingerprint, StringComparison.Ordinal))
-                _warmStore.SoftInvalidatePath(path);
-        }
-
-        foreach (var path in prev.Keys)
-        {
-            if (!curr.ContainsKey(path))
-                _warmStore.SoftInvalidatePath(path);
-        }
-    }
-
-    private static Dictionary<string, string> BuildPathOidFingerprint(RepositoryStatus status)
-    {
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        void Add(StatusEntry e)
-        {
-            var fp = $"{e.Kind}|{e.HeadOid?.Value}|{e.IndexOid?.Value}|{e.WorktreeOid?.Value}|{e.IsStaged}|{e.IsUnstaged}";
-            if (map.TryGetValue(e.Path.Value, out var existing))
-                map[e.Path.Value] = existing + ";" + fp;
-            else
-                map[e.Path.Value] = fp;
-        }
-
-        foreach (var e in status.Staged) Add(e);
-        foreach (var e in status.Unstaged) Add(e);
-        foreach (var e in status.Conflicted) Add(e);
-        return map;
-    }
 
     private static bool IsSelectedFileContentUnchanged(
         RepositoryStatus? previous,
         RepositoryStatus current,
-        FileItemViewModel selected)
-    {
-        if (previous is null)
-            return false;
+        FileItemViewModel selected) => WorkingCopyDiffPresenter.IsSelectedFileContentUnchanged(previous, current, selected);
 
-        var path = selected.Path.Value;
-        var prev = BuildPathOidFingerprint(previous);
-        var curr = BuildPathOidFingerprint(current);
-        return prev.TryGetValue(path, out var oldFp)
-               && curr.TryGetValue(path, out var newFp)
-               && string.Equals(oldFp, newFp, StringComparison.Ordinal);
-    }
 
-    private bool IsPathInWorkingLists(string path, bool preferStaged)
-    {
-        bool Match(FileItemViewModel f) =>
-            string.Equals(f.Path.Value, path, StringComparison.Ordinal);
+    private bool IsPathInWorkingLists(string path, bool preferStaged) => _diff.IsPathInWorkingLists(path, preferStaged);
 
-        if (preferStaged && _allStaged.Any(Match)) return true;
-        if (!preferStaged && _allUnstaged.Any(Match)) return true;
-        if (_allStaged.Any(Match) || _allUnstaged.Any(Match) || _allConflicted.Any(Match))
-            return true;
-        return false;
-    }
 
-    private void ClearDiffCacheState()
-    {
-        _diffCacheCompletedAt = null;
-        HasDiffCache = false;
-        DiffCacheAgeText = null;
-    }
+    private void ClearDiffCacheState() => _diff.ClearDiffCacheState();
 
-    private void ApplyDiffCacheState(DiffWarmEntry entry)
-    {
-        _diffCacheCompletedAt = entry.CompletedAt;
-        HasDiffCache = true;
-        DiffCacheAgeText = FormatCacheAge(entry.CompletedAt);
-    }
 
-    private void UpdateDiffCacheState(DiffWarmKey key)
-    {
-        if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry) && entry is not null)
-            ApplyDiffCacheState(entry);
-        else
-            ClearDiffCacheState();
-    }
+    private void ApplyDiffCacheState(DiffWarmEntry entry) => _diff.ApplyDiffCacheState(entry);
 
-    private static string FormatCacheAge(DateTimeOffset completedAt)
-    {
-        var ago = DateTimeOffset.UtcNow - completedAt;
-        if (ago.TotalSeconds < 5) return "Cached just now";
-        if (ago.TotalMinutes < 1) return $"Cached {(int)ago.TotalSeconds}s ago";
-        if (ago.TotalHours < 1) return $"Cached {(int)ago.TotalMinutes}m ago";
-        if (ago.TotalDays < 1) return $"Cached {(int)ago.TotalHours}h ago";
-        return $"Cached {(int)ago.TotalDays}d ago";
-    }
 
-    private void UpdateFileCacheIndicators()
-    {
-        using var activity = GitDeltaActivity.Source.StartActivity("wc.cache.indicators");
-        var sw = Stopwatch.StartNew();
-        try
-        {
-            var options = BuildDiffOptions();
-            var scanned = 0;
-            var statsApplied = 0;
+    private void UpdateDiffCacheState(DiffWarmKey key) => _diff.UpdateDiffCacheState(key);
 
-            void UpdateFs(FileItemViewModel file)
-            {
-                scanned++;
-                var target = IsCombinedReviewMode
-                    ? DiffTarget.HeadToWorktree
-                    : file.IsStagedList ? DiffTarget.HeadToIndex : DiffTarget.IndexToWorktree;
-                var key = FileStatusWarmKey(file.Path, target, options);
-                if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry) && entry is not null)
-                {
-                    if (!file.HasCachedDiff)
-                        file.HasCachedDiff = true;
-                    if (file.IsDiffStale != entry.IsStale)
-                        file.IsDiffStale = entry.IsStale;
-                    var stats = FileChangeStats.FromDiff(entry.Diff);
-                    if (file.LinesAdded != stats.LinesAdded
-                        || file.LinesRemoved != stats.LinesRemoved
-                        || file.ChangePercent != stats.ChangePercent)
-                    {
-                        file.ApplyChangeStats(stats);
-                        statsApplied++;
-                    }
-                }
-                else
-                {
-                    if (file.HasCachedDiff)
-                        file.HasCachedDiff = false;
-                    if (file.IsDiffStale)
-                        file.IsDiffStale = false;
-                }
-            }
 
-            foreach (var f in _allStaged) UpdateFs(f);
-            foreach (var f in _allUnstaged) UpdateFs(f);
-            foreach (var f in _allConflicted) UpdateFs(f);
+    private static string FormatCacheAge(DateTimeOffset completedAt) => WorkingCopyDiffPresenter.FormatCacheAge(completedAt);
 
-            if (SelectedStash is { } stash)
-            {
-                foreach (var file in StashFiles)
-                {
-                    scanned++;
-                    var key = StashWarmKey(stash.Index, file.Path, options);
-                    if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry) && entry is not null)
-                    {
-                        if (!file.HasCachedDiff)
-                            file.HasCachedDiff = true;
-                        if (file.IsDiffStale != entry.IsStale)
-                            file.IsDiffStale = entry.IsStale;
-                        var stats = FileChangeStats.FromDiff(entry.Diff);
-                        if (file.LinesAdded != stats.LinesAdded
-                            || file.LinesRemoved != stats.LinesRemoved
-                            || file.ChangePercent != stats.ChangePercent)
-                        {
-                            file.ApplyChangeStats(stats);
-                            statsApplied++;
-                        }
-                    }
-                    else
-                    {
-                        if (file.HasCachedDiff)
-                            file.HasCachedDiff = false;
-                        if (file.IsDiffStale)
-                            file.IsDiffStale = false;
-                    }
-                }
-            }
 
-            if (SelectedCommit is { } commit)
-            {
-                foreach (var file in _allHistoryFiles)
-                {
-                    scanned++;
-                    var key = HistoryWarmKey(commit.Oid, file.Path, options);
-                    if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry) && entry is not null)
-                    {
-                        if (!file.HasCachedDiff)
-                            file.HasCachedDiff = true;
-                        if (file.IsDiffStale != entry.IsStale)
-                            file.IsDiffStale = entry.IsStale;
-                        var stats = FileChangeStats.FromDiff(entry.Diff);
-                        if (file.LinesAdded != stats.LinesAdded
-                            || file.LinesRemoved != stats.LinesRemoved
-                            || file.ChangePercent != stats.ChangePercent)
-                        {
-                            file.ApplyChangeStats(stats);
-                            statsApplied++;
-                        }
-                    }
-                    else
-                    {
-                        if (file.HasCachedDiff)
-                            file.HasCachedDiff = false;
-                        if (file.IsDiffStale)
-                            file.IsDiffStale = false;
-                    }
-                }
-            }
+    private void UpdateFileCacheIndicators() => _diff.UpdateFileCacheIndicators();
 
-            activity?.SetTag("wc.staged_count", _allStaged.Count);
-            activity?.SetTag("wc.unstaged_count", _allUnstaged.Count);
-            activity?.SetTag("wc.conflicted_count", _allConflicted.Count);
-            activity?.SetTag("indicators.scanned_count", scanned);
-            activity?.SetTag("indicators.stats_applied_count", statsApplied);
-        }
-        finally
-        {
-            GitDeltaMeters.WcCacheIndicatorsMs.Record(sw.Elapsed.TotalMilliseconds);
-        }
-    }
 
-    private async Task PresentDiffAsync(
+    private Task PresentDiffAsync(
         FileItemViewModel file,
         FileDiff diff,
         DiffTarget target,
         CancellationTokenSource cts,
-        CancellationToken ct)
-    {
-        using var presentActivity = GitDeltaActivity.Source.StartActivity("diff.present");
-        presentActivity?.SetTag("diff.path", file.Path.Value);
-        presentActivity?.SetTag("diff.view_mode", ViewMode.ToString());
-        var presentSw = Stopwatch.StartNew();
+        CancellationToken ct) => _diff.PresentDiffAsync(file, diff, target, cts, ct);
 
-        var viewMode = ViewMode;
-        var showFullFile = ShowFullFile;
-        var expanded = SnapshotExpandedCollapses();
 
-        // Enrich + project off the UI thread — ApplyIntraLine/projectors are CPU-bound.
-        IReadOnlyList<DiffRow> rows;
-        FileDiff enriched;
-        using (var projectActivity = GitDeltaActivity.Source.StartActivity("diff.project"))
-        {
-            var projectSw = Stopwatch.StartNew();
-            (enriched, rows) = await Task.Run(() =>
-            {
-                var withIntra = EnsureIntraLine(diff);
-                var projected = BuildProjectedRows(withIntra, viewMode, showFullFile, expanded);
-                return (withIntra, projected);
-            }, ct).ConfigureAwait(true);
-            GitDeltaMeters.DiffProjectMs.Record(projectSw.Elapsed.TotalMilliseconds);
-            projectActivity?.SetTag("diff.row_count", rows.Count);
-        }
-
-        ct.ThrowIfCancellationRequested();
-        // A newer selection may have started while we awaited projection.
-        if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
-            return;
-
-        var sameContent = _currentDiff is not null
-                          && string.Equals(_currentDiff.OldContent.Value, enriched.OldContent.Value, StringComparison.Ordinal)
-                          && string.Equals(_currentDiff.NewContent.Value, enriched.NewContent.Value, StringComparison.Ordinal)
-                          && _currentDiffTarget == target
-                          && DiffRows.Count == rows.Count
-                          && !IsImagePath(file.Path.Value)
-                          && !enriched.IsBinary;
-
-        _currentDiff = enriched;
-        _currentDiffTarget = target;
-        UpdateDiffStats(_currentDiff);
-        NotifyMarkdownPreviewStateChanged();
-
-        if (IsImagePath(file.Path.Value))
-        {
-            ClearSyntaxTokens();
-            ClearMarkdownPreviewText();
-            await LoadImagePreviewAsync(file, _currentDiff, target, ct);
-            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
-                return;
-            DiffRows.Reset([]);
-            DiffEmptyMessage = "";
-        }
-        else if (_currentDiff.IsBinary)
-        {
-            ClearSyntaxTokens();
-            ClearMarkdownPreviewText();
-            DiffRows.Reset([]);
-            DiffEmptyMessage = "Binary file";
-            IsImagePreview = false;
-        }
-        else if (sameContent)
-        {
-            // Keep painted rows — avoids InvalidateMeasure/paint-cache thrash on soft focus refresh.
-            DiffEmptyMessage = "Select a file to view its diff";
-            presentActivity?.SetTag("diff.row_count", rows.Count);
-            presentActivity?.SetTag("diff.present_skipped", true);
-        }
-        else
-        {
-            DiffEmptyMessage = "Select a file to view its diff";
-            DiffRows.Reset(rows);
-            presentActivity?.SetTag("diff.row_count", rows.Count);
-            // Tokenise once per selected FileDiff; view-mode switches reuse these tokens.
-            await LoadSyntaxTokensAsync(file, _currentDiff, target, ct);
-            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
-                return;
-            if (ShowMarkdownPreviewPane)
-                await LoadMarkdownPreviewTextAsync(file, _currentDiff, target, ct);
-            else
-                ClearMarkdownPreviewText();
-        }
-
-        if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
-            return;
-
-        GitDeltaMeters.DiffPresentMs.Record(presentSw.Elapsed.TotalMilliseconds);
-        OnPropertyChanged(nameof(CanStageLines));
-        OnPropertyChanged(nameof(CanUnstageLines));
-        OnPropertyChanged(nameof(CanDiscardLines));
-        RequestPendingDiffScrollIfAny();
-    }
-
-    private async Task LoadMarkdownPreviewTextAsync(
+    private Task LoadMarkdownPreviewTextAsync(
         FileItemViewModel file,
         FileDiff diff,
         DiffTarget target,
-        CancellationToken ct)
-    {
-        if (!MarkdownPath.IsMarkdownPath(file.Path.Value))
-        {
-            ClearMarkdownPreviewText();
-            return;
-        }
+        CancellationToken ct) => _diff.LoadMarkdownPreviewTextAsync(file, diff, target, ct);
 
-        try
-        {
-            var text = await ReadSideTextAsync(diff.NewContent, file, target, sideIsNew: true, ct)
-                .ConfigureAwait(false);
-            ct.ThrowIfCancellationRequested();
-            await InvokeOnUiAsync(() => MarkdownPreviewText = text);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            await InvokeOnUiAsync(ClearMarkdownPreviewText);
-        }
-    }
 
     private void ClearMarkdownPreviewText() => MarkdownPreviewText = null;
 
@@ -3031,354 +2365,78 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(MarkdownPreviewEmptyMessage));
     }
 
-    private void ClearSyntaxTokens()
-    {
-        LeftSyntaxTokens = null;
-        RightSyntaxTokens = null;
-    }
+    private void ClearSyntaxTokens() => _diff.ClearSyntaxTokens();
 
-    private async Task LoadSyntaxTokensAsync(
+
+    private Task LoadSyntaxTokensAsync(
         FileItemViewModel file,
         FileDiff diff,
         DiffTarget target,
-        CancellationToken ct)
-    {
-        using var activity = GitDeltaActivity.Source.StartActivity("diff.syntax");
-        activity?.SetTag("diff.path", file.Path.Value);
+        CancellationToken ct) => _diff.LoadSyntaxTokensAsync(file, diff, target, ct);
 
-        if (_syntaxTokens is null || _repoPath is null)
-        {
-            ClearSyntaxTokens();
-            return;
-        }
 
-        try
-        {
-            var leftText = await ReadSideTextAsync(diff.OldContent, file, target, sideIsNew: false, ct)
-                .ConfigureAwait(false);
-            var rightText = await ReadSideTextAsync(diff.NewContent, file, target, sideIsNew: true, ct)
-                .ConfigureAwait(false);
-
-            ct.ThrowIfCancellationRequested();
-
-            FileSyntaxTokens? left = null;
-            FileSyntaxTokens? right = null;
-            if (leftText is not null)
-            {
-                left = await _syntaxTokens.TokeniseAsync(diff.OldContent, file.Path, leftText, ct)
-                    .ConfigureAwait(false);
-            }
-
-            if (rightText is not null)
-            {
-                right = await _syntaxTokens.TokeniseAsync(diff.NewContent, file.Path, rightText, ct)
-                    .ConfigureAwait(false);
-            }
-
-            await InvokeOnUiAsync(() =>
-            {
-                LeftSyntaxTokens = left;
-                RightSyntaxTokens = right;
-            });
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            await InvokeOnUiAsync(ClearSyntaxTokens);
-        }
-    }
-
-    private async Task<string?> ReadSideTextAsync(
+    private Task<string?> ReadSideTextAsync(
         ContentId content,
         FileItemViewModel file,
         DiffTarget target,
         bool sideIsNew,
-        CancellationToken ct)
-    {
-        if (_repoPath is null) return null;
+        CancellationToken ct) => _diff.ReadSideTextAsync(content, file, target, sideIsNew, ct);
 
-        if (sideIsNew
-            && (target is DiffTarget.IndexToWorktree or DiffTarget.HeadToWorktree
-                || file.Kind == ChangeKind.Untracked))
-        {
-            var worktreePath = RepositoryPathResolver.ResolveUnderRoot(_repoPath, file.Path);
-            if (System.IO.File.Exists(worktreePath))
-            {
-                var bytes = await System.IO.File.ReadAllBytesAsync(worktreePath, ct).ConfigureAwait(false);
-                return DecodeUtf8(bytes);
-            }
-        }
 
-        if (content.IsEmpty) return null;
-        var blob = await _objects.ReadBlobAsync(_repoPath, content, ct).ConfigureAwait(false);
-        return DecodeUtf8(blob);
-    }
+    private static string? DecodeUtf8(byte[]? bytes) => WorkingCopyDiffPresenter.DecodeUtf8(bytes);
 
-    private static string? DecodeUtf8(byte[]? bytes)
-    {
-        if (bytes is null || bytes.Length == 0) return null;
-        // Skip UTF-8 BOM if present.
-        var offset = bytes is [0xEF, 0xBB, 0xBF, ..] ? 3 : 0;
-        return System.Text.Encoding.UTF8.GetString(bytes, offset, bytes.Length - offset);
-    }
 
-    private async Task<FileDiff> LoadUntrackedFileDiffAsync(
+    private Task<FileDiff> LoadUntrackedFileDiffAsync(
         string repoPath,
         FilePath path,
         DiffTarget target,
-        CancellationToken ct)
-    {
-        var fullPath = RepositoryPathResolver.ResolveUnderRoot(repoPath, path);
-        if (!System.IO.File.Exists(fullPath))
-            return UntrackedFileDiff.Create(path, string.Empty, target);
+        CancellationToken ct) => _diff.LoadUntrackedFileDiffAsync(repoPath, path, target, ct);
 
-        var maxBytes = _settings.Current.MaxDiffPatchBytes;
-        var info = new System.IO.FileInfo(fullPath);
-        if (info.Length > maxBytes)
-            throw new DiffTooLargeException(maxBytes, info.Length);
 
-        var bytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
-        ct.ThrowIfCancellationRequested();
-        if (bytes.LongLength > maxBytes)
-            throw new DiffTooLargeException(maxBytes, bytes.LongLength);
-        return UntrackedFileDiff.Create(path, bytes, target);
-    }
+    private static DiffWarmKey FileStatusWarmKey(FilePath path, DiffTarget target, DiffOptions options) => WorkingCopyDiffPresenter.FileStatusWarmKey(path, target, options);
 
-    private static DiffWarmKey FileStatusWarmKey(FilePath path, DiffTarget target, DiffOptions options) =>
-        new("fs", path.Value, target.AsWorkingCopy(), options);
 
-    private static DiffWarmKey HistoryWarmKey(string oid, FilePath path, DiffOptions options) =>
-        new($"hist:{oid}", path.Value, DiffTarget.HeadToWorktree.AsWorkingCopy(), options);
+    private static DiffWarmKey HistoryWarmKey(string oid, FilePath path, DiffOptions options) => WorkingCopyDiffPresenter.HistoryWarmKey(oid, path, options);
 
-    private static DiffWarmKey StashWarmKey(int index, FilePath path, DiffOptions options) =>
-        new($"stash:{index}", path.Value, DiffTarget.HeadToWorktree.AsWorkingCopy(), options);
 
-    private void ScheduleFileStatusPrefetch()
-    {
-        if (_repoPath is null || !IsFileStatusMode) return;
-        _prefetchCts?.Cancel();
-        _prefetchCts = new CancellationTokenSource();
-        var ct = _prefetchCts.Token;
-        _ = PrefetchFileStatusDiffsAsync(ct);
-    }
+    private static DiffWarmKey StashWarmKey(int index, FilePath path, DiffOptions options) => WorkingCopyDiffPresenter.StashWarmKey(index, path, options);
 
-    private async Task PrefetchFileStatusDiffsAsync(CancellationToken ct)
-    {
-        if (_repoPath is null) return;
 
-        var options = BuildDiffOptions();
-        var settings = _settings.Current;
-        var priorityPaths = ClampPrefetchPriorityPaths(settings.DiffPrefetchPriorityPaths);
-        var ordered = BuildFileStatusPrefetchOrder(
-            ClampPrefetchNeighborRadius(settings.DiffPrefetchNeighborRadius));
-        var priorityCount = Math.Min(priorityPaths, ordered.Count);
-        var priority = ordered.GetRange(0, priorityCount);
-        var drip = ordered.Count > priorityCount
-            ? ordered.GetRange(priorityCount, ordered.Count - priorityCount)
-            : [];
+    private void ScheduleFileStatusPrefetch() => _diff.ScheduleFileStatusPrefetch();
 
-        using (var activity = GitDeltaActivity.Source.StartActivity("wc.prefetch"))
-        {
-            var sw = Stopwatch.StartNew();
-            try
-            {
-                activity?.SetTag("prefetch.path_count", priority.Count);
-                activity?.SetTag("prefetch.priority_cap", priorityPaths);
-                activity?.SetTag("prefetch.drip_total", drip.Count);
-                activity?.SetTag("prefetch.concurrency", _warmStore.MaxConcurrencyLimit);
-                activity?.SetTag(
-                    "prefetch.drip_delay_ms",
-                    ClampPrefetchDripDelayMs(settings.DiffPrefetchDripDelayMs));
-                var started = 0;
-                var enqueueSw = Stopwatch.StartNew();
-                foreach (var (path, target, kind) in priority)
-                {
-                    if (ct.IsCancellationRequested) break;
 
-                    var key = FileStatusWarmKey(path, target, options);
-                    if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry)
-                        && entry is { IsStale: false })
-                        continue;
+    private Task PrefetchFileStatusDiffsAsync(CancellationToken ct) => _diff.PrefetchFileStatusDiffsAsync(ct);
 
-                    _ = StartFileStatusWarm(path, target, kind, options);
-                    started++;
-                }
-
-                GitDeltaMeters.WcPrefetchEnqueueMs.Record(enqueueSw.Elapsed.TotalMilliseconds);
-                activity?.SetTag("prefetch.priority_count", started);
-                activity?.SetTag("prefetch.started_count", started);
-
-                await Task.Yield();
-                await InvokeOnUiAsync(UpdateFileCacheIndicators, "cache_indicators").ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                activity?.SetTag("prefetch.cancelled", true);
-            }
-            finally
-            {
-                GitDeltaMeters.WcPrefetchMs.Record(sw.Elapsed.TotalMilliseconds);
-            }
-        }
-
-        if (drip.Count == 0 || ct.IsCancellationRequested)
-            return;
-
-        using var dripActivity = GitDeltaActivity.Source.StartActivity("wc.prefetch.drip");
-        dripActivity?.SetTag("prefetch.drip_total", drip.Count);
-        var completed = 0;
-        var indicatorSw = Stopwatch.StartNew();
-        try
-        {
-            foreach (var (path, target, kind) in drip)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                var key = FileStatusWarmKey(path, target, options);
-                if (_warmStore.TryGetCompleted(key, out DiffWarmEntry? entry)
-                    && entry is { IsStale: false })
-                    continue;
-
-                try
-                {
-                    await StartFileStatusWarm(path, target, kind, options).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch
-                {
-                    // Individual warm failures should not stop the drip.
-                }
-
-                completed++;
-                var live = _settings.Current;
-                var indicatorThrottleMs = ClampPrefetchIndicatorThrottleMs(live.DiffPrefetchIndicatorThrottleMs);
-                var dripDelayMs = ClampPrefetchDripDelayMs(live.DiffPrefetchDripDelayMs);
-                if (indicatorSw.ElapsedMilliseconds >= indicatorThrottleMs)
-                {
-                    await InvokeOnUiAsync(UpdateFileCacheIndicators, "cache_indicators").ConfigureAwait(false);
-                    indicatorSw.Restart();
-                }
-
-                if (dripDelayMs > 0)
-                    await Task.Delay(dripDelayMs, ct).ConfigureAwait(false);
-            }
-
-            await InvokeOnUiAsync(UpdateFileCacheIndicators, "cache_indicators").ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            dripActivity?.SetTag("prefetch.cancelled", true);
-        }
-        finally
-        {
-            dripActivity?.SetTag("prefetch.drip_completed", completed);
-            dripActivity?.SetTag(
-                "prefetch.drip_delay_ms",
-                ClampPrefetchDripDelayMs(_settings.Current.DiffPrefetchDripDelayMs));
-        }
-    }
 
     private Task<FileDiff> StartFileStatusWarm(
         FilePath path,
         DiffTarget target,
         ChangeKind kind,
-        DiffOptions options)
-    {
-        var key = FileStatusWarmKey(path, target, options);
-        var repoPath = _repoPath!;
-        if (kind == ChangeKind.Untracked)
-        {
-            return _warmStore.GetOrStart(
-                key,
-                token => LoadUntrackedFileDiffAsync(repoPath, path, target, token));
-        }
+        DiffOptions options) => _diff.StartFileStatusWarm(path, target, kind, options);
 
-        return _warmStore.GetOrStart(
-            key,
-            token => _diffService.GetDiffAsync(repoPath, path, target.AsWorkingCopy(), options, token));
-    }
 
     /// <summary>
     /// Full warm order: selection neighborhood first, then remaining visible files.
     /// Caller takes the first priority-cap paths as priority; the rest drip.
     /// </summary>
     private List<(FilePath Path, DiffTarget Target, ChangeKind Kind)> BuildFileStatusPrefetchOrder(
-        int neighborRadius)
-    {
-        var result = new List<(FilePath, DiffTarget, ChangeKind)>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        int neighborRadius) => _diff.BuildFileStatusPrefetchOrder(neighborRadius);
 
-        void Add(FileItemViewModel file)
-        {
-            var target = IsCombinedReviewMode
-                ? DiffTarget.HeadToWorktree
-                : file.IsStagedList ? DiffTarget.HeadToIndex : DiffTarget.IndexToWorktree;
-            var key = $"{file.Path.Value}|{(int)target}|{file.IsStagedList}";
-            if (!seen.Add(key)) return;
-            result.Add((file.Path, target, file.Kind));
-        }
 
-        var visible = UnstagedFiles.Concat(StagedFiles).Concat(ConflictedFiles).ToList();
+    private static int ClampPrefetchDripDelayMs(int value) => WorkingCopyDiffPresenter.ClampPrefetchDripDelayMs(value);
 
-        if (SelectedFile is { } selected)
-        {
-            Add(selected);
-            var idx = visible.FindIndex(f =>
-                string.Equals(f.Path.Value, selected.Path.Value, StringComparison.Ordinal)
-                && f.IsStagedList == selected.IsStagedList);
-            if (idx >= 0)
-            {
-                for (var offset = 1; offset <= neighborRadius; offset++)
-                {
-                    if (idx - offset >= 0)
-                        Add(visible[idx - offset]);
-                    if (idx + offset < visible.Count)
-                        Add(visible[idx + offset]);
-                }
-            }
-        }
 
-        foreach (var f in visible)
-            Add(f);
+    private static int ClampPrefetchIndicatorThrottleMs(int value) => WorkingCopyDiffPresenter.ClampPrefetchIndicatorThrottleMs(value);
 
-        return result;
-    }
 
-    private static int ClampPrefetchDripDelayMs(int value) =>
-        Math.Clamp(value, PrefetchDripDelayMsMin, PrefetchDripDelayMsMax);
+    private static int ClampPrefetchPriorityPaths(int value) => WorkingCopyDiffPresenter.ClampPrefetchPriorityPaths(value);
 
-    private static int ClampPrefetchIndicatorThrottleMs(int value) =>
-        Math.Clamp(value, PrefetchIndicatorThrottleMsMin, PrefetchIndicatorThrottleMsMax);
 
-    private static int ClampPrefetchPriorityPaths(int value) =>
-        Math.Clamp(value, PrefetchPriorityPathsMin, PrefetchPriorityPathsMax);
+    private static int ClampPrefetchNeighborRadius(int value) => WorkingCopyDiffPresenter.ClampPrefetchNeighborRadius(value);
 
-    private static int ClampPrefetchNeighborRadius(int value) =>
-        Math.Clamp(value, PrefetchNeighborRadiusMin, PrefetchNeighborRadiusMax);
 
-    private void ApplyOptimisticFileLists()
-    {
-        if (_lastStatus is null) return;
-        using var activity = GitDeltaActivity.Source.StartActivity("wc.stage.optimistic");
-        var sw = Stopwatch.StartNew();
-        try
-        {
-            RebuildFileListsTimed(_lastStatus, "optimistic");
-            activity?.SetTag(
-                "wc.visible_entry_count",
-                StagedFileEntries.Count + UnstagedFileEntries.Count + ConflictedFileEntries.Count);
-        }
-        finally
-        {
-            GitDeltaMeters.WcStageOptimisticMs.Record(sw.Elapsed.TotalMilliseconds);
-        }
-    }
+    private void ApplyOptimisticFileLists() => _status.ApplyOptimisticFileLists();
+
 
     private void SoftInvalidatePathsTimed(IReadOnlyList<FilePath> paths)
     {
@@ -3662,26 +2720,21 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         SelectedRemovedLines = removed;
     }
 
-    private FileDiff EnsureIntraLine(FileDiff diff) =>
-        DiffPresentation.EnsureIntraLine(diff, _intraLine);
+    private FileDiff EnsureIntraLine(FileDiff diff) => _diff.EnsureIntraLine(diff);
 
-    private HashSet<(int HunkIndex, int LineIndexInHunk)> SnapshotExpandedCollapses() =>
-        _expandedCollapses.Count == 0
-            ? []
-            : new HashSet<(int HunkIndex, int LineIndexInHunk)>(_expandedCollapses);
+
+    private HashSet<(int HunkIndex, int LineIndexInHunk)> SnapshotExpandedCollapses() => _diff.SnapshotExpandedCollapses();
+
 
     private IReadOnlyList<DiffRow> BuildProjectedRows(
         FileDiff diff,
         DiffViewMode viewMode,
         bool showFullFile,
-        ISet<(int HunkIndex, int LineIndexInHunk)> expanded) =>
-        DiffPresentation.ProjectRows(diff, viewMode, showFullFile, _intraLine, expanded);
+        ISet<(int HunkIndex, int LineIndexInHunk)> expanded) => _diff.BuildProjectedRows(diff, viewMode, showFullFile, expanded);
 
-    private void ProjectRows(FileDiff diff)
-    {
-        var rows = BuildProjectedRows(diff, ViewMode, ShowFullFile, _expandedCollapses);
-        DiffRows.Reset(rows);
-    }
+
+    private void ProjectRows(FileDiff diff) => _diff.ProjectRows(diff);
+
 
     /// <summary>Refresh status, then reload the open diff only if a mutated path is the selection.</summary>
     private async Task RefreshAndMaybeReloadDiffAsync(IReadOnlyList<FilePath> mutatedPaths)

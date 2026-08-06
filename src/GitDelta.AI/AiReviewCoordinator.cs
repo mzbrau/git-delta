@@ -37,166 +37,66 @@ internal sealed class AiReviewCoordinator(
         Converters = { new JsonStringEnumConverter() },
     };
 
-    private readonly ConcurrentDictionary<string, RunContext> _runsBySession = new();
+    private readonly AiRunStateStore _runStore = new();
     private readonly ConcurrentDictionary<string, RepoObservers> _observersByRepo = new();
     private readonly ConcurrentDictionary<string, List<AiAnnotationResult>> _annotationsByBlob = new();
+    private AiReviewQueries? _queries;
+    private AiReviewChatActions? _chat;
+
+    private AiReviewQueries Queries => _queries ??= new AiReviewQueries(
+        resultStore,
+        settingsStore,
+        workingCopyMaterialiser,
+        _runStore,
+        _annotationsByBlob,
+        RegisterRunContext);
+
+    private AiReviewChatActions Chat => _chat ??= new AiReviewChatActions(
+        resultStore,
+        prompts,
+        RunTurnForTextAsync);
 
     // ---------------------------------------------------------------------
     // Cache-only reads (never touch the agent).
     // ---------------------------------------------------------------------
 
-    public async ValueTask<AiRunSnapshot?> GetCachedRunAsync(string sessionKey, CancellationToken ct = default)
-    {
-        var run = await resultStore.GetLatestRunAsync(sessionKey, ct).ConfigureAwait(false);
-        if (run is null)
-            return null;
+    public ValueTask<AiRunSnapshot?> GetCachedRunAsync(string sessionKey, CancellationToken ct = default) =>
+        Queries.GetCachedRunAsync(sessionKey, ct);
 
-        var prResult = await resultStore.GetPrResultForRunAsync(run.Id, ct).ConfigureAwait(false);
-        var briefing = prResult is null ? null : Deserialize<AiChangeBriefingResult>(prResult.PayloadJson);
-        return ToSnapshot(run, briefing);
-    }
-
-    public async ValueTask<AiRunSnapshot?> TryGetMatchingCachedRunAsync(
+    public ValueTask<AiRunSnapshot?> TryGetMatchingCachedRunAsync(
         AiReviewRequest request,
-        CancellationToken ct = default)
-    {
-        if (IsWorkingCopyScope(request.Scope))
-        {
-            if (string.IsNullOrWhiteSpace(request.RepositoryPath))
-                return null;
-
-            var treeOid = await workingCopyMaterialiser
-                .WriteTreeAsync(request.RepositoryPath, request.Scope, ct)
-                .ConfigureAwait(false);
-            request = request with { HeadSha = treeOid };
-        }
-
-        var run = await resultStore.GetLatestRunAsync(request.SessionKey, ct).ConfigureAwait(false);
-        if (run is null)
-            return null;
-
-        if (!string.Equals(run.HeadSha, request.HeadSha, StringComparison.Ordinal) ||
-            !string.Equals(run.MergeBaseSha, request.MergeBaseSha, StringComparison.Ordinal))
-            return null;
-
-        if (_runsBySession.TryGetValue(request.SessionKey, out var existing) && existing.Session is not null)
-        {
-            var existingBriefing = existing.ChangeBriefing;
-            return ToSnapshot(run, existingBriefing);
-        }
-
-        var prResult = await resultStore.GetPrResultForRunAsync(run.Id, ct).ConfigureAwait(false);
-        var briefing = prResult is null ? null : Deserialize<AiChangeBriefingResult>(prResult.PayloadJson);
-        var context = RegisterRunContext(request, run.Id, run.CopilotSessionId, briefing, run.State);
-        context.CacheKey = run.CacheKey;
-        context.TurnsUsed = run.TurnsUsed;
-        context.StartedUtc = run.StartedUtc;
-        context.FinishedUtc = run.FinishedUtc;
-        context.ErrorMessage = run.ErrorMessage;
-        return ToSnapshot(run, briefing);
-    }
+        CancellationToken ct = default) =>
+        Queries.TryGetMatchingCachedRunAsync(request, ct);
 
     public async Task AttachCachedRunAsync(AiReviewRequest request, CancellationToken ct = default) =>
         _ = await TryGetMatchingCachedRunAsync(request, ct).ConfigureAwait(false);
 
-    public ValueTask<IReadOnlyList<IDiffAnnotation>> GetAnnotationsAsync(FileDiffKey key, CancellationToken ct = default)
-    {
-        var results = new List<IDiffAnnotation>();
-        if (_annotationsByBlob.TryGetValue(key.OldContent.Value, out var oldAnnotations))
-        {
-            lock (oldAnnotations)
-                results.AddRange(oldAnnotations.Select(ToDiffAnnotation));
-        }
+    public ValueTask<IReadOnlyList<IDiffAnnotation>> GetAnnotationsAsync(FileDiffKey key, CancellationToken ct = default) =>
+        Queries.GetAnnotationsAsync(key, ct);
 
-        if (_annotationsByBlob.TryGetValue(key.NewContent.Value, out var newAnnotations))
-        {
-            lock (newAnnotations)
-                results.AddRange(newAnnotations.Select(ToDiffAnnotation));
-        }
-
-        return ValueTask.FromResult<IReadOnlyList<IDiffAnnotation>>(results);
-    }
-
-    public async ValueTask<AiFileBriefingResult?> GetFileBriefingAsync(
+    public ValueTask<AiFileBriefingResult?> GetFileBriefingAsync(
         string sessionKey,
         string path,
         string? beforeBlobOid = null,
         string? afterBlobOid = null,
-        CancellationToken ct = default)
-    {
-        var run = await resultStore.GetLatestRunAsync(sessionKey, ct).ConfigureAwait(false);
-        if (run is null)
-            return null;
+        CancellationToken ct = default) =>
+        Queries.GetFileBriefingAsync(sessionKey, path, beforeBlobOid, afterBlobOid, EffectiveRules, ct);
 
-        var rulesHash = AiCacheKeys.Hash(EffectiveRules());
-        var instructionsHash = AiCacheKeys.Hash(run.AdHocInstructions);
-        var model = settingsStore.Current.AiModelOverride;
-
-        var exact = await TryGetFileBriefingByOidsAsync(
-                sessionKey, path, beforeBlobOid, afterBlobOid, model, rulesHash, instructionsHash, ct)
-            .ConfigureAwait(false);
-        if (exact is not null)
-            return exact;
-
-        // Pull-request eager briefings are keyed with null blob OIDs (facts omit them). When the
-        // caller supplies concrete diff OIDs and the exact key misses, accept that null-OID record
-        // rather than falling back to a path-only hit from an unrelated change.
-        if (beforeBlobOid is not null || afterBlobOid is not null)
-        {
-            return await TryGetFileBriefingByOidsAsync(
-                    sessionKey, path, beforeBlobOid: null, afterBlobOid: null, model, rulesHash, instructionsHash, ct)
-                .ConfigureAwait(false);
-        }
-
-        return null;
-    }
-
-    private async ValueTask<AiFileBriefingResult?> TryGetFileBriefingByOidsAsync(
-        string sessionKey,
-        string path,
-        string? beforeBlobOid,
-        string? afterBlobOid,
-        string? model,
-        string rulesHash,
-        string instructionsHash,
-        CancellationToken ct)
-    {
-        var cacheKey = AiCacheKeys.ComputeFileKey(
-            path,
-            beforeBlobOid,
-            afterBlobOid,
-            AiPromptCatalog.PromptVersion,
-            model,
-            rulesHash,
-            instructionsHash);
-
-        var match = await resultStore.GetFileResultByCacheKeyAsync(cacheKey, ct).ConfigureAwait(false);
-        if (match is null ||
-            !string.Equals(match.SessionKey, sessionKey, StringComparison.Ordinal) ||
-            !string.Equals(match.Path, path, StringComparison.Ordinal))
-            return null;
-
-        return match.SummaryJson is null ? null : Deserialize<AiFileBriefingResult>(match.SummaryJson);
-    }
-
-    public async ValueTask<IReadOnlyList<AiAnnotationResult>> GetFileAnnotationsAsync(
+    public ValueTask<IReadOnlyList<AiAnnotationResult>> GetFileAnnotationsAsync(
         string sessionKey,
         string path,
         bool includeDismissed = false,
-        CancellationToken ct = default)
-    {
-        var records = await resultStore.ListAnnotationsAsync(sessionKey, path, includeDismissed, ct).ConfigureAwait(false);
-        return [.. records.Select(ToAnnotationResult)];
-    }
+        CancellationToken ct = default) =>
+        Queries.GetFileAnnotationsAsync(sessionKey, path, includeDismissed, ct);
 
     public Task SetAnnotationReadStateAsync(string annotationId, AiAnnotationReadState state, CancellationToken ct = default) =>
-        resultStore.SetAnnotationReadStateAsync(annotationId, state, ct);
+        Queries.SetAnnotationReadStateAsync(annotationId, state, ct);
 
-    public async ValueTask<IReadOnlyList<AiChatMessage>> GetChatHistoryAsync(string sessionKey, CancellationToken ct = default) =>
-        await resultStore.ListChatMessagesAsync(sessionKey, ct).ConfigureAwait(false);
+    public ValueTask<IReadOnlyList<AiChatMessage>> GetChatHistoryAsync(string sessionKey, CancellationToken ct = default) =>
+        Queries.GetChatHistoryAsync(sessionKey, ct);
 
     public Task ClearChatHistoryAsync(string sessionKey, CancellationToken ct = default) =>
-        resultStore.ClearChatMessagesAsync(sessionKey, ct);
+        Queries.ClearChatHistoryAsync(sessionKey, ct);
 
     public Task<AiConnectionProbeResult> TestConnectionAsync(CancellationToken ct = default) =>
         agentClient.ProbeAsync(ct);
@@ -240,7 +140,7 @@ internal sealed class AiReviewCoordinator(
                     var briefing = Deserialize<AiChangeBriefingResult>(cachedResult.PayloadJson);
                     var context = RegisterRunContext(request, cachedRun.Id, cachedRun.CopilotSessionId, briefing, AiRunState.Complete);
                     context.CacheKey = cacheKey;
-                    return ToSnapshot(cachedRun, briefing);
+                    return AiReviewQueries.ToSnapshot(cachedRun, briefing);
                 }
             }
         }
@@ -342,16 +242,9 @@ internal sealed class AiReviewCoordinator(
 
     public Task CancelAsync(string repositoryKey, CancellationToken ct = default)
     {
+        _ = ct;
         workQueue.CancelRepository(repositoryKey);
-        foreach (var context in _runsBySession.Values)
-        {
-            if (!string.Equals(context.RepositoryKey, repositoryKey, StringComparison.Ordinal))
-                continue;
-
-            context.UserCancelled = true;
-            context.RunCts?.Cancel();
-        }
-
+        _runStore.CancelRepository(repositoryKey);
         return Task.CompletedTask;
     }
 
@@ -387,100 +280,29 @@ internal sealed class AiReviewCoordinator(
     }
 
     public Task<string> AskAsync(AiQuestionRequest request, CancellationToken ct = default) =>
-        RunTurnForTextAsync(request.SessionKey, BuildExplanationPrompt(request), AiWorkPriority.ExplicitUser, ct);
+        Chat.AskAsync(request, ct);
 
-    private const int MaxChatHistoryMessages = 20;
+    public Task<string> RunInlineActionAsync(AiInlineActionRequest request, CancellationToken ct = default) =>
+        Chat.RunInlineActionAsync(request, ct);
 
-    private string BuildExplanationPrompt(
-        AiQuestionRequest request,
-        IReadOnlyList<AiChatMessage>? priorChat = null)
-    {
-        var context = new StringBuilder();
-        if (!string.IsNullOrEmpty(request.Path))
-        {
-            context.AppendLine($"Currently selected file: {request.Path}");
-            context.AppendLine(
-                "The reviewer's question most likely relates to this file. Answer in that file's context unless the question clearly refers to something else.");
-        }
-        else
-        {
-            context.AppendLine("No file is currently selected. Treat this as a pull-request-wide question.");
-        }
-
-        if (!string.IsNullOrEmpty(request.SelectedLinesContext))
-            context.AppendLine(request.SelectedLinesContext);
-
-        if (priorChat is { Count: > 0 })
-        {
-            context.AppendLine();
-            context.AppendLine("Conversation so far:");
-            foreach (var message in priorChat)
-                context.AppendLine($"{message.Role}: {message.Content}");
-        }
-
-        return prompts.GetExplanationPrompt(new Dictionary<string, string>
-        {
-            ["context"] = context.ToString(),
-            ["question"] = request.Question,
-        });
-    }
-
-    public Task<string> RunInlineActionAsync(AiInlineActionRequest request, CancellationToken ct = default)
-    {
-        var placeholders = new Dictionary<string, string>
-        {
-            ["context"] = $"File: {request.Path}",
-            ["action"] = request.Action,
-            ["selection"] = request.SelectedLinesContext,
-        };
-        return RunTurnForTextAsync(request.SessionKey, prompts.GetCommentSuggestionPrompt(placeholders), AiWorkPriority.ExplicitUser, ct);
-    }
-
-    public async Task<string> ChatAsync(AiQuestionRequest request, CancellationToken ct = default)
-    {
-        var prior = await resultStore.ListChatMessagesAsync(request.SessionKey, ct).ConfigureAwait(false);
-        IReadOnlyList<AiChatMessage> cappedPrior = prior.Count <= MaxChatHistoryMessages
-            ? prior
-            : prior.Skip(prior.Count - MaxChatHistoryMessages).ToList();
-
-        await resultStore.AppendChatMessageAsync(
-            request.SessionKey, new AiChatMessage("user", request.Question, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
-
-        var answer = await RunTurnForTextAsync(
-                request.SessionKey,
-                BuildExplanationPrompt(request, cappedPrior),
-                AiWorkPriority.ExplicitUser,
-                ct)
-            .ConfigureAwait(false);
-
-        await resultStore.AppendChatMessageAsync(
-            request.SessionKey, new AiChatMessage("assistant", answer, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
-
-        return answer;
-    }
+    public Task<string> ChatAsync(AiQuestionRequest request, CancellationToken ct = default) =>
+        Chat.ChatAsync(request, ct);
 
     public async Task ClearAiDataAsync(CancellationToken ct = default)
     {
         await resultStore.ClearAllAsync(ct).ConfigureAwait(false);
         await materialiser.ClearAllExportsAsync(ct).ConfigureAwait(false);
-        _runsBySession.Clear();
+        _runStore.Clear();
         _annotationsByBlob.Clear();
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        foreach (var context in _runsBySession.Values)
-        {
-            if (context.Session is not null)
-                await context.Session.DisposeAsync().ConfigureAwait(false);
-        }
-    }
+    public ValueTask DisposeAsync() => _runStore.DisposeSessionsAsync();
 
     // ---------------------------------------------------------------------
     // Run implementation.
     // ---------------------------------------------------------------------
 
-    private async Task RunChangeBriefingTurnAsync(RunContext context, CancellationToken ct)
+    private async Task RunChangeBriefingTurnAsync(AiActiveRunState context, CancellationToken ct)
     {
         NotifyProgress(context, AiRunStage.ChangeBriefing, "Waiting on: change briefing");
         NotifyActivityLog(context, "Waiting on: change briefing");
@@ -508,7 +330,7 @@ internal sealed class AiReviewCoordinator(
             throw new InvalidOperationException("The agent did not submit a change briefing.");
     }
 
-    private async Task RunFileBriefingTurnAsync(RunContext context, AiFileDepthRequest request, CancellationToken ct)
+    private async Task RunFileBriefingTurnAsync(AiActiveRunState context, AiFileDepthRequest request, CancellationToken ct)
     {
         context.CurrentFileRequest = new FileDepthContext(
             request.Path,
@@ -545,7 +367,7 @@ internal sealed class AiReviewCoordinator(
     }
 
     private async Task<AgentPermissionPolicy> OpenOrResumeSessionAsync(
-        RunContext context,
+        AiActiveRunState context,
         string? resumeSessionId,
         CancellationToken ct)
     {
@@ -592,7 +414,7 @@ internal sealed class AiReviewCoordinator(
 
     private static readonly TimeSpan SdkTurnWaitCeiling = TimeSpan.FromDays(1);
 
-    private async Task SendTurnWithBudgetAsync(RunContext context, string prompt, CancellationToken ct)
+    private async Task SendTurnWithBudgetAsync(AiActiveRunState context, string prompt, CancellationToken ct)
     {
         if (context.Session is null)
             throw new InvalidOperationException("The agent session has not been started.");
@@ -725,14 +547,14 @@ internal sealed class AiReviewCoordinator(
         }
     }
 
-    private static AiRunStage GuessStage(RunContext context) =>
+    private static AiRunStage GuessStage(AiActiveRunState context) =>
         context.CurrentFileRequest is not null
             ? AiRunStage.FileDepth
             : context.AwaitingChangeBriefing
                 ? AiRunStage.ChangeBriefing
                 : AiRunStage.ChangeBriefing;
 
-    private string ClassifyCancellation(RunContext context)
+    private string ClassifyCancellation(AiActiveRunState context)
     {
         if (context.UserCancelled)
             return "The review was cancelled.";
@@ -749,7 +571,7 @@ internal sealed class AiReviewCoordinator(
         return "The review was cancelled.";
     }
 
-    private void LogPermissionDenials(RunContext context, AgentPermissionPolicy? policy)
+    private void LogPermissionDenials(AiActiveRunState context, AgentPermissionPolicy? policy)
     {
         if (policy is null || policy.Denials.Count == 0)
             return;
@@ -766,7 +588,7 @@ internal sealed class AiReviewCoordinator(
         }
     }
 
-    private async Task<AiRunSnapshot> FinishRunAsync(RunContext context, AiRunState state, string? errorMessage, CancellationToken ct)
+    private async Task<AiRunSnapshot> FinishRunAsync(AiActiveRunState context, AiRunState state, string? errorMessage, CancellationToken ct)
     {
         context.State = state;
         context.ErrorMessage = errorMessage;
@@ -821,9 +643,9 @@ internal sealed class AiReviewCoordinator(
         return await completion.Task.ConfigureAwait(false);
     }
 
-    private async Task<RunContext> EnsureLiveSessionAsync(string sessionKey, CancellationToken ct)
+    private async Task<AiActiveRunState> EnsureLiveSessionAsync(string sessionKey, CancellationToken ct)
     {
-        if (!_runsBySession.TryGetValue(sessionKey, out var context))
+        if (!_runStore.TryGet(sessionKey, out var context))
         {
             throw new InvalidOperationException(
                 $"No AI review context for session '{sessionKey}'. Open the pull request after a completed AI review, or start a review first.");
@@ -871,32 +693,23 @@ internal sealed class AiReviewCoordinator(
         }
     }
 
-    private RunContext RegisterRunContext(
+    private AiActiveRunState RegisterRunContext(
         AiReviewRequest request,
         string runId,
         string? copilotSessionId,
         AiChangeBriefingResult? briefing,
-        AiRunState state)
-    {
-        var context = _runsBySession.GetOrAdd(request.SessionKey, static _ => new RunContext());
-        context.Request = request;
-        context.SessionKey = request.SessionKey;
-        context.RepositoryKey = request.RepositoryKey;
-        context.RepositoryPath = request.RepositoryPath;
-        context.HeadSha = request.HeadSha;
-        context.MergeBaseSha = request.MergeBaseSha;
-        context.AdHocInstructions = request.AdHocInstructions;
-        context.RunId = runId;
-        context.CopilotSessionId = copilotSessionId;
-        context.ChangeBriefing = briefing;
-        context.State = state;
-        context.Model = settingsStore.Current.AiModelOverride;
-        context.RulesHash = AiCacheKeys.Hash(EffectiveRules());
-        context.InstructionsHash = AiCacheKeys.Hash(request.AdHocInstructions);
-        return context;
-    }
+        AiRunState state) =>
+        _runStore.Register(
+            request,
+            runId,
+            copilotSessionId,
+            briefing,
+            state,
+            settingsStore.Current.AiModelOverride,
+            AiCacheKeys.Hash(EffectiveRules()),
+            AiCacheKeys.Hash(request.AdHocInstructions));
 
-    private void NotifyProgress(RunContext context, AiRunStage stage, string? message)
+    private void NotifyProgress(AiActiveRunState context, AiRunStage stage, string? message)
     {
         if (!_observersByRepo.TryGetValue(context.RepositoryKey, out var observers))
             return;
@@ -907,7 +720,7 @@ internal sealed class AiReviewCoordinator(
             context.FilesCompleted, context.FilesTotal, elapsed, message));
     }
 
-    private void NotifyActivityLog(RunContext context, string line)
+    private void NotifyActivityLog(AiActiveRunState context, string line)
     {
         if (!_observersByRepo.TryGetValue(context.RepositoryKey, out var observers))
             return;
@@ -968,23 +781,6 @@ internal sealed class AiReviewCoordinator(
             CopilotSessionId: null, TurnsUsed: 0, request.AdHocInstructions, ChangeBriefing: null, reason, now, now);
     }
 
-    private static AiRunSnapshot ToSnapshot(AiRunRecord run, AiChangeBriefingResult? briefing) => new(
-        run.Id, run.SessionKey, run.HeadSha, run.MergeBaseSha, run.State, run.CopilotSessionId,
-        run.TurnsUsed, run.AdHocInstructions, briefing, run.ErrorMessage, run.StartedUtc, run.FinishedUtc);
-
-    private static IDiffAnnotation ToDiffAnnotation(AiAnnotationResult result)
-    {
-        var content = new ContentId(result.BlobOid);
-        var range = new AnnotationRange(
-            new DiffAnchor(result.Side, content, result.StartLine),
-            new DiffAnchor(result.Side, content, result.EndLine));
-        return new AiDiffAnnotation(range, result);
-    }
-
-    private static AiAnnotationResult ToAnnotationResult(AiAnnotationRecord record) => new(
-        record.Id, record.Path, record.BlobOid, record.StartLine, record.EndLine,
-        Enum.Parse<DiffSide>(record.Side), Enum.Parse<AiAnnotationSeverity>(record.Severity), record.Body, record.ReadState);
-
     private static T? Deserialize<T>(string json) => JsonSerializer.Deserialize<T>(json, JsonOptions);
 
     private static string Serialize<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
@@ -993,7 +789,7 @@ internal sealed class AiReviewCoordinator(
     // Custom tools invoked by the agent.
     // ---------------------------------------------------------------------
 
-    private IReadOnlyList<AgentCustomTool> BuildTools(RunContext context) =>
+    private IReadOnlyList<AgentCustomTool> BuildTools(AiActiveRunState context) =>
     [
         new AgentCustomTool(
             "submit_change_briefing",
@@ -1009,7 +805,7 @@ internal sealed class AiReviewCoordinator(
             (argsJson, ct) => HandleAddAnnotation(context, argsJson, ct)),
     ];
 
-    private async Task<string> HandleSubmitChangeBriefing(RunContext context, string argsJson, CancellationToken ct)
+    private async Task<string> HandleSubmitChangeBriefing(AiActiveRunState context, string argsJson, CancellationToken ct)
     {
         try
         {
@@ -1046,7 +842,7 @@ internal sealed class AiReviewCoordinator(
         }
     }
 
-    private async Task<string> HandleSubmitFileBriefing(RunContext context, string argsJson, CancellationToken ct)
+    private async Task<string> HandleSubmitFileBriefing(AiActiveRunState context, string argsJson, CancellationToken ct)
     {
         try
         {
@@ -1084,7 +880,7 @@ internal sealed class AiReviewCoordinator(
         }
     }
 
-    private async Task<string> HandleAddAnnotation(RunContext context, string argsJson, CancellationToken ct)
+    private async Task<string> HandleAddAnnotation(AiActiveRunState context, string argsJson, CancellationToken ct)
     {
         try
         {
@@ -1158,49 +954,6 @@ internal sealed class AiReviewCoordinator(
         DiffSide Side,
         AiAnnotationSeverity Severity,
         string Body);
-
-    internal sealed record FileDepthContext(
-        string Path,
-        string? BeforeOid,
-        string? AfterOid,
-        int? ChangePercent,
-        int? LinesAdded,
-        int? LinesRemoved);
-
-    private sealed class RunContext
-    {
-        public AiReviewRequest Request = null!;
-        public string SessionKey = "";
-        public string RepositoryKey = "";
-        public string RepositoryPath = "";
-        public string HeadSha = "";
-        public string MergeBaseSha = "";
-        public string? RunId;
-        public string? CacheKey;
-        public string? CopilotSessionId;
-        public IAgentSession? Session;
-        public readonly SemaphoreSlim SessionGate = new(1, 1);
-        public string? MaterialisedPath;
-        public string? Model;
-        public string? RulesHash;
-        public string? InstructionsHash;
-        public string? AdHocInstructions;
-        public int TurnsUsed;
-        public int RunTimeoutSeconds;
-        public int FilesCompleted;
-        public int FilesTotal;
-        public bool UserCancelled;
-        public bool TurnIdleTimedOut;
-        public bool AwaitingChangeBriefing;
-        public AiRunState State = AiRunState.Idle;
-        public AiChangeBriefingResult? ChangeBriefing;
-        public string? ErrorMessage;
-        public DateTimeOffset StartedUtc;
-        public DateTimeOffset? FinishedUtc;
-        public CancellationTokenSource? RunCts;
-        public FileDepthContext? CurrentFileRequest;
-        public Action? ReportAgentActivity;
-    }
 
     private sealed class RepoObservers
     {

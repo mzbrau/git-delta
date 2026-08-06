@@ -5,7 +5,7 @@ namespace GitDelta.AI.Tests;
 
 public sealed class AnnotationBlobOidTests
 {
-    private static readonly AiReviewCoordinator.FileDepthContext File =
+    private static readonly FileDepthContext File =
         new("src/App.cs", "before-oid", "after-oid", 40, 10, 2);
 
     [Test]
@@ -49,7 +49,7 @@ public sealed class AnnotationBlobOidTests
     [Test]
     public void Resolve_SideNew_ButAfterOidNull_ReturnsNull()
     {
-        var deleted = new AiReviewCoordinator.FileDepthContext("gone.cs", "before-oid", null, 100, 0, 10);
+        var deleted = new FileDepthContext("gone.cs", "before-oid", null, 100, 0, 10);
         var oid = AiReviewCoordinator.ResolveAnnotationBlobOid("New", DiffSide.New, deleted);
         Assert.That(oid, Is.Null);
     }
