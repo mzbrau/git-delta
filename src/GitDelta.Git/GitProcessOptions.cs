@@ -18,9 +18,15 @@ public sealed class GitProcessOptions
 
     /// <summary>
     /// When set, stdout is routed to this target instead of being buffered into <see cref="GitCommandResult.Stdout"/>.
-    /// Use for genuinely large outputs (e.g. blob content) that must not be materialised as a single string.
+    /// Prefer <see cref="StdoutFilePath"/> from callers outside <c>GitDelta.Git</c> so they need not reference CliWrap.
     /// </summary>
     public PipeTarget? StdoutTarget { get; init; }
+
+    /// <summary>
+    /// When set, stdout is streamed to this file path (same effect as <c>PipeTarget.ToFile</c>).
+    /// Takes precedence over buffered string capture; ignored when <see cref="StdoutTarget"/> is also set.
+    /// </summary>
+    public string? StdoutFilePath { get; init; }
 
     /// <summary>
     /// When set, the process is cancelled and a <see cref="GitDelta.Core.DiffTooLargeException"/> is thrown

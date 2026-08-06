@@ -1,5 +1,4 @@
 using System.Formats.Tar;
-using CliWrap;
 using GitDelta.Core;
 using GitDelta.Core.Abstractions;
 using GitDelta.Git;
@@ -107,7 +106,7 @@ public sealed class ReviewTreeMaterialiser(
                 var result = await runner.RunAsync(
                         repositoryPath,
                         ["archive", "--format=tar", sha],
-                        new GitProcessOptions { StdoutTarget = PipeTarget.ToFile(tarPath) },
+                        new GitProcessOptions { StdoutFilePath = tarPath },
                         token)
                     .ConfigureAwait(false);
 
