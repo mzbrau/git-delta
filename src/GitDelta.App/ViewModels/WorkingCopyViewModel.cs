@@ -800,6 +800,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         _notifications.Info("core.fsmonitor enabled for this repository.");
     }
 
+    private int _refreshGeneration;
+
     [RelayCommand]
     /// <param name="clearAiReviewAfter">
     /// When true (in-app commit), clear AI triage/summary after sync so the button resets even if
@@ -808,9 +810,14 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     public async Task RefreshAsync(bool clearAiReviewAfter = false)
     {
         if (_repoPath is null) return;
+        var generation = Interlocked.Increment(ref _refreshGeneration);
         await _refreshGate.WaitAsync().ConfigureAwait(true);
         try
         {
+            // A newer refresh was scheduled while we waited — let that waiter do the work.
+            if (generation != Volatile.Read(ref _refreshGeneration))
+                return;
+
             if (_repoPath is null) return;
             using var activity = GitDeltaActivity.Source.StartActivity("wc.refresh");
             var sw = Stopwatch.StartNew();
@@ -818,6 +825,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             {
                 var previousStatus = _lastStatus;
                 var status = await _statusService.GetStatusAsync(_repoPath).ConfigureAwait(true);
+                if (generation != Volatile.Read(ref _refreshGeneration))
+                    return;
                 if (status.Epoch < _statusEpoch) return;
                 _statusEpoch = status.Epoch;
                 _lastStatus = status;

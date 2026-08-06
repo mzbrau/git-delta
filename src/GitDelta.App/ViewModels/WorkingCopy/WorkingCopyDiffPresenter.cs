@@ -1006,9 +1006,18 @@ public partial class WorkingCopyViewModel
         ISet<(int HunkIndex, int LineIndexInHunk)> expanded) =>
         DiffPresentation.ProjectRows(diff, viewMode, showFullFile, _vm._intraLine, expanded);
 
-    public void ProjectRows(FileDiff diff)
+    public void ProjectRows(FileDiff diff) => _ = ProjectRowsAsync(diff);
+
+    public async Task ProjectRowsAsync(FileDiff diff)
     {
-        var rows = BuildProjectedRows(diff, _vm.ViewMode, _vm.ShowFullFile, _vm._expandedCollapses);
+        var viewMode = _vm.ViewMode;
+        var showFullFile = _vm.ShowFullFile;
+        var expanded = SnapshotExpandedCollapses();
+        var rows = await Task.Run(() =>
+            BuildProjectedRows(diff, viewMode, showFullFile, expanded)).ConfigureAwait(true);
+        // Drop result if the painted diff changed while we projected.
+        if (!ReferenceEquals(_vm._currentDiff, diff))
+            return;
         _vm.DiffRows.Reset(rows);
     }
     }
