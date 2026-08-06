@@ -379,7 +379,9 @@ public partial class ReviewViewModel : ObservableObject
     partial void OnShowFullFileChanged(bool value)
     {
         OnPropertyChanged(nameof(FullFileToggleTooltip));
-        _ = ReloadSelectedDiffAsync();
+        // Presentation-only: reproject in memory — do not re-run git.
+        if (_currentDiff is not null)
+            ProjectRows(_currentDiff);
     }
 
     partial void OnShowMarkdownPreviewChanged(bool value)

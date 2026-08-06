@@ -5,7 +5,10 @@ using GitDelta.Core.Abstractions;
 namespace GitDelta.Git;
 
 /// <summary>Commit history listing and per-file commit diffs.</summary>
-public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitHistoryService
+public sealed class GitHistoryService(
+    IGitProcessRunner runner,
+    IRepositoryGateProvider gates,
+    ISettingsStore? settings = null) : IGitHistoryService
 {
     // Record = RS (\x1e), field = US (\x1f). Body may contain newlines; it must not contain RS/US.
     private const string LogFormat =
@@ -179,7 +182,9 @@ public sealed class GitHistoryService(IGitProcessRunner runner, IRepositoryGateP
             args.Add("--");
             args.Add(path.Value);
 
-            var result = await runner.RunAsync(repositoryPath, args, options: null, token)
+            var maxBytes = settings?.Current.MaxDiffPatchBytes ?? 32 * 1024 * 1024;
+            var processOptions = new GitProcessOptions { MaxStdoutBytes = maxBytes };
+            var result = await runner.RunAsync(repositoryPath, args, processOptions, token)
                 .ConfigureAwait(false);
             return result.Stdout;
         }, ct);
