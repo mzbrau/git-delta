@@ -16,6 +16,7 @@ public sealed class JsonSettingsStoreTests
             store.Update(s =>
             {
                 s.Theme = "Dark";
+                s.FontSize = 16;
                 s.ContextLines = 10;
                 s.IgnoreWhitespace = true;
                 s.DefaultDiffMode = DiffViewMode.SideBySide;
@@ -33,6 +34,7 @@ public sealed class JsonSettingsStoreTests
             var loaded = new JsonSettingsStore(path);
             loaded.Load();
             Assert.That(loaded.Current.Theme, Is.EqualTo("Dark"));
+            Assert.That(loaded.Current.FontSize, Is.EqualTo(16));
             Assert.That(loaded.Current.ContextLines, Is.EqualTo(10));
             Assert.That(loaded.Current.IgnoreWhitespace, Is.True);
             Assert.That(loaded.Current.DefaultDiffMode, Is.EqualTo(DiffViewMode.SideBySide));

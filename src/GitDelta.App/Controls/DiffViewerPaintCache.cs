@@ -47,7 +47,7 @@ public sealed partial class DiffViewer
         var segments = new List<(FormattedText Ft, double Width)>();
         if (tokens is null || oneBasedLine is null)
         {
-            var ft = CreateFormattedText(text, 12, fallback);
+            var ft = CreateFormattedText(text, FontSize, fallback);
             segments.Add((ft, ft.WidthIncludingTrailingWhitespace));
         }
         else
@@ -55,7 +55,7 @@ public sealed partial class DiffViewer
             var spans = tokens.ForLine(oneBasedLine.Value);
             if (spans.Count == 0)
             {
-                var ft = CreateFormattedText(text, 12, fallback);
+                var ft = CreateFormattedText(text, FontSize, fallback);
                 segments.Add((ft, ft.WidthIncludingTrailingWhitespace));
             }
             else
@@ -72,13 +72,13 @@ public sealed partial class DiffViewer
                     if (pos < start)
                     {
                         var gap = text[pos..start];
-                        var gapFt = CreateFormattedText(gap, 12, fallback);
+                        var gapFt = CreateFormattedText(gap, FontSize, fallback);
                         segments.Add((gapFt, gapFt.WidthIncludingTrailingWhitespace));
                     }
 
                     var mid = text.Substring(start, len);
                     var color = SyntaxScopePalette.BrushForScope(span.Scope, ActualThemeVariant) ?? fallback;
-                    var midFt = CreateFormattedText(mid, 12, color);
+                    var midFt = CreateFormattedText(mid, FontSize, color);
                     segments.Add((midFt, midFt.WidthIncludingTrailingWhitespace));
                     pos = start + len;
                 }
@@ -86,7 +86,7 @@ public sealed partial class DiffViewer
                 if (pos < text.Length)
                 {
                     var rest = text[pos..];
-                    var restFt = CreateFormattedText(rest, 12, fallback);
+                    var restFt = CreateFormattedText(rest, FontSize, fallback);
                     segments.Add((restFt, restFt.WidthIncludingTrailingWhitespace));
                 }
             }

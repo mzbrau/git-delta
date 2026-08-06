@@ -110,6 +110,9 @@ public sealed partial class DiffViewer : Control
     public static readonly StyledProperty<bool> ShowWhitespaceProperty =
         AvaloniaProperty.Register<DiffViewer, bool>(nameof(ShowWhitespace));
 
+    public static readonly StyledProperty<double> FontSizeProperty =
+        AvaloniaProperty.Register<DiffViewer, double>(nameof(FontSize), 12);
+
     public static readonly StyledProperty<double> RowHeightProperty =
         AvaloniaProperty.Register<DiffViewer, double>(nameof(RowHeight), 20);
 
@@ -236,6 +239,12 @@ public sealed partial class DiffViewer : Control
         set => SetValue(ShowWhitespaceProperty, value);
     }
 
+    public double FontSize
+    {
+        get => GetValue(FontSizeProperty);
+        set => SetValue(FontSizeProperty, value);
+    }
+
     public double RowHeight
     {
         get => GetValue(RowHeightProperty);
@@ -347,7 +356,7 @@ public sealed partial class DiffViewer : Control
     static DiffViewer()
     {
         AffectsRender<DiffViewer>(
-            RowsProperty, ViewModeProperty, ShowWhitespaceProperty, RowHeightProperty,
+            RowsProperty, ViewModeProperty, ShowWhitespaceProperty, FontSizeProperty, RowHeightProperty,
             EmptyMessageProperty, EmptyDetailProperty, ShowBrandWatermarkProperty, CanStageLinesProperty, CanUnstageLinesProperty, CanDiscardLinesProperty,
             LeftSyntaxTokensProperty, RightSyntaxTokensProperty, AnnotationsProperty, SelectedAnnotationProperty,
             CanAddLineCommentsProperty, InlineInsetAfterRowIndexProperty, InlineInsetHeightProperty);
@@ -423,6 +432,15 @@ public sealed partial class DiffViewer : Control
         {
             ClearContentCaches();
             ClampScroll();
+            InvalidateVisual();
+        }
+        else if (change.Property == FontSizeProperty)
+        {
+            _monoCharWidth = null;
+            ClearContentCaches();
+            RowHeight = Math.Max(16, Math.Round(FontSize * 20.0 / 12.0));
+            ClampScroll();
+            InvalidateMeasure();
             InvalidateVisual();
         }
         else if (change.Property == ViewModeProperty || change.Property == RowHeightProperty
@@ -940,7 +958,7 @@ public sealed partial class DiffViewer : Control
         if (_monoCharWidth is { } cached)
             return cached;
 
-        var ft = CreateFormattedText("M", 12, Brushes.Transparent);
+        var ft = CreateFormattedText("M", FontSize, Brushes.Transparent);
         _monoCharWidth = ft.WidthIncludingTrailingWhitespace;
         return _monoCharWidth.Value;
     }
@@ -1262,7 +1280,7 @@ public sealed partial class DiffViewer : Control
             System.Globalization.CultureInfo.CurrentCulture,
             FlowDirection.LeftToRight,
             _typeface,
-            11,
+            Math.Max(9, FontSize - 1),
             Brush("ForgeOnSurfaceVariantBrush", Brushes.LightGray));
         context.DrawText(ft, new Point(
             rect.X + (rect.Width - ft.Width) / 2,
@@ -1301,7 +1319,7 @@ public sealed partial class DiffViewer : Control
         if (!_gutterCache.TryGetValue(line.Value, out var ft))
         {
             var brush = Brush("ForgeDiffGutterTextBrush", Brushes.Gray);
-            ft = CreateFormattedText(line.Value.ToString(), 12, brush);
+            ft = CreateFormattedText(line.Value.ToString(), FontSize, brush);
             _gutterCache[line.Value] = ft;
         }
 
@@ -1312,7 +1330,7 @@ public sealed partial class DiffViewer : Control
     private double DrawText(DrawingContext ctx, string text, double x, double y, IBrush brush)
     {
         if (string.IsNullOrEmpty(text)) return 0;
-        var ft = CreateFormattedText(text, 12, brush);
+        var ft = CreateFormattedText(text, FontSize, brush);
         ctx.DrawText(ft, new Point(x, y + (RowHeight - ft.Height) / 2));
         return ft.WidthIncludingTrailingWhitespace;
     }
@@ -1321,7 +1339,7 @@ public sealed partial class DiffViewer : Control
     {
         if (!_prefixCache.TryGetValue((prefix, brush), out var ft))
         {
-            ft = CreateFormattedText(prefix, 12, brush);
+            ft = CreateFormattedText(prefix, FontSize, brush);
             _prefixCache[(prefix, brush)] = ft;
         }
 

@@ -16,7 +16,7 @@ public sealed record AppSettings
 {
     public string? GitExecutablePath { get; set; }
     public string Theme { get; set; } = "System";
-    public double FontSize { get; set; } = 11;
+    public double FontSize { get; set; } = 12;
     public DiffViewMode DefaultDiffMode { get; set; } = DiffViewMode.Unified;
     public bool IgnoreWhitespace { get; set; }
     public bool ShowWhitespace { get; set; }

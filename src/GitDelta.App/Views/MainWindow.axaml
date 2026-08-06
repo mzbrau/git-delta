@@ -1721,7 +1721,7 @@
                                        RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
                                        CanAddLineComments="True"
                                        AddLineCommentCommand="{Binding WorkingCopy.PendingReview.BeginLineCommentCommand}"
-                                       RowHeight="20"
+                                       FontSize="{Binding FontSize}"
                                        IsVisible="{Binding WorkingCopy.ShowDiffViewer}" />
 
                   <controls:MarkdownFilePreview Markdown="{Binding WorkingCopy.MarkdownPreviewText}"
@@ -2576,7 +2576,7 @@
                                      CanStageLines="False"
                                      CanUnstageLines="False"
                                      CanDiscardLines="False"
-                                     RowHeight="20"
+                                     FontSize="{Binding FontSize}"
                                      IsVisible="{Binding Review.ShowDiffViewer}" />
                 <controls:MarkdownFilePreview x:Name="PrMarkdownPreview"
                                               Markdown="{Binding Review.MarkdownPreviewText}"
@@ -3561,7 +3561,7 @@
                                      CanDiscardLines="False"
                                      LeftSyntaxTokens="{Binding WorkingCopy.LeftSyntaxTokens}"
                                      RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
-                                     RowHeight="20"
+                                     FontSize="{Binding FontSize}"
                                      IsVisible="{Binding WorkingCopy.ShowDiffViewer}" />
                 <controls:MarkdownFilePreview Markdown="{Binding WorkingCopy.MarkdownPreviewText}"
                                               EmptyMessage="{Binding WorkingCopy.MarkdownPreviewEmptyMessage}"
@@ -3799,6 +3799,14 @@
                         <core:DiffViewMode>SideBySide</core:DiffViewMode>
                         <core:DiffViewMode>Unified</core:DiffViewMode>
                       </ComboBox>
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                      <TextBlock Text="FONT SIZE" Classes="PanelHeader" Opacity="0.7" />
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Diff font size" VerticalAlignment="Center" FontSize="12" />
+                        <NumericUpDown Value="{Binding FontSize}" Minimum="8" Maximum="24"
+                                       Increment="1" Width="120" />
+                      </StackPanel>
                     </StackPanel>
                     <StackPanel Spacing="4">
                       <TextBlock Text="DIFF OPTIONS" Classes="PanelHeader" Opacity="0.7" />

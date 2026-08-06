@@ -59,6 +59,7 @@ public partial class MainWindowViewModel : ObservableObject
         NewGitHubHost = "github.com";
         NewEnterpriseHost = "";
         DefaultDiffMode = _settings.Current.DefaultDiffMode;
+        _fontSize = ClampFontSize(_settings.Current.FontSize);
         _theme = string.IsNullOrWhiteSpace(_settings.Current.Theme) ? "System" : _settings.Current.Theme;
         _simulateSlowGit = _settings.Current.SimulateSlowGit;
         _diffPrefetchConcurrency = DiffWarmStore.ClampConcurrency(
@@ -161,6 +162,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string _statusText = "Ready";
     [ObservableProperty] private bool _showSettings;
     [ObservableProperty] private DiffViewMode _defaultDiffMode;
+    [ObservableProperty] private double _fontSize = 12;
     [ObservableProperty] private string _theme = "System";
     [ObservableProperty] private bool _simulateSlowGit;
     [ObservableProperty] private int _diffPrefetchConcurrency = DiffWarmStore.DefaultConcurrency;
@@ -669,6 +671,22 @@ public partial class MainWindowViewModel : ObservableObject
         _ = _settings.SaveAsync();
         WorkingCopy.ViewMode = value;
     }
+
+    partial void OnFontSizeChanged(double value)
+    {
+        var clamped = ClampFontSize(value);
+        if (Math.Abs(clamped - value) > 0.001)
+        {
+            FontSize = clamped;
+            return;
+        }
+
+        _settings.Update(s => s.FontSize = clamped);
+        _ = _settings.SaveAsync();
+    }
+
+    private static double ClampFontSize(double value) =>
+        Math.Clamp(double.IsFinite(value) ? value : 12, 8, 24);
 
     partial void OnThemeChanged(string value)
     {
