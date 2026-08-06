@@ -713,9 +713,68 @@
                 <TextBox Classes="Forge" AcceptsReturn="True" Height="80"
                          Text="{Binding WorkingCopy.CommitMessage}"
                          PlaceholderText="Commit message..." />
-                <Button Classes="Primary" Content="{Binding WorkingCopy.CommitButtonLabel}"
-                        Command="{Binding WorkingCopy.CommitCommand}"
-                        IsEnabled="{Binding WorkingCopy.CanCommit}" />
+                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                  <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                    <Button x:Name="RecentCommitMessagesButton" Classes="IconOnly" Width="28" Height="28" Padding="4"
+                            ToolTip.Tip="Recent commit messages"
+                            Command="{Binding WorkingCopy.LoadRecentCommitMessagesCommand}">
+                      <Button.Flyout>
+                        <Flyout Placement="TopEdgeAlignedLeft">
+                          <Border Width="340" MaxHeight="280" Padding="4">
+                            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                          VerticalScrollBarVisibility="Auto">
+                              <ItemsControl ItemsSource="{Binding WorkingCopy.RecentCommitMessages}">
+                                <ItemsControl.ItemTemplate>
+                                  <DataTemplate x:DataType="x:String">
+                                    <Button Classes="Ghost" HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            Margin="0,1"
+                                            FontSize="11"
+                                            Content="{Binding}"
+                                            Tag="{Binding}"
+                                            Click="OnRecentCommitMessageClick"
+                                            ToolTip.Tip="{Binding}" />
+                                  </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                            </ScrollViewer>
+                          </Border>
+                        </Flyout>
+                      </Button.Flyout>
+                      <icons:MaterialIcon Kind="History" Width="16" Height="16" />
+                    </Button>
+                    <Button Classes="IconOnly" Width="28" Height="28" Padding="4"
+                            ToolTip.Tip="Generate commit message"
+                            IsVisible="{Binding WorkingCopy.AiCommitAssistVisible}"
+                            IsEnabled="{Binding WorkingCopy.CanGenerateCommitMessage}"
+                            Command="{Binding WorkingCopy.GenerateCommitMessageCommand}">
+                      <Panel>
+                        <icons:MaterialIcon Kind="Creation" Width="16" Height="16"
+                                            IsVisible="{Binding WorkingCopy.IsGeneratingCommitMessage, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+                        <ProgressBar Width="14" Height="14" IsIndeterminate="True"
+                                     IsVisible="{Binding WorkingCopy.IsGeneratingCommitMessage}" />
+                      </Panel>
+                    </Button>
+                    <Button Classes="IconOnly" Width="28" Height="28" Padding="4"
+                            ToolTip.Tip="Magic Commit — split into logical commits"
+                            IsVisible="{Binding WorkingCopy.AiCommitAssistVisible}"
+                            IsEnabled="{Binding WorkingCopy.CanStartMagicCommit}"
+                            Command="{Binding WorkingCopy.StartMagicCommitCommand}">
+                      <icons:MaterialIcon Kind="AutoFix" Width="16" Height="16" />
+                    </Button>
+                    <Button Classes="IconOnly" Width="28" Height="28" Padding="4"
+                            ToolTip.Tip="Add ticket from branch"
+                            IsEnabled="{Binding WorkingCopy.CanAddTicketFromBranch}"
+                            Command="{Binding WorkingCopy.AddTicketFromBranchCommand}">
+                      <icons:MaterialIcon Kind="TicketConfirmation" Width="16" Height="16" />
+                    </Button>
+                  </StackPanel>
+                  <Button Grid.Column="1" Classes="Primary"
+                          Content="{Binding WorkingCopy.CommitButtonLabel}"
+                          Command="{Binding WorkingCopy.CommitCommand}"
+                          IsEnabled="{Binding WorkingCopy.CanCommit}"
+                          HorizontalAlignment="Stretch" />
+                </Grid>
                 <StackPanel Orientation="Horizontal" Spacing="12">
                   <CheckBox Content="Amend" IsChecked="{Binding WorkingCopy.AmendCommit}" FontSize="11" />
                   <CheckBox Content="--no-verify" IsChecked="{Binding WorkingCopy.NoVerify}" FontSize="11" />
@@ -3768,11 +3827,18 @@
 
                 <!-- Git -->
                 <ScrollViewer IsVisible="{Binding IsSettingsGit}" HorizontalScrollBarVisibility="Disabled">
-                  <StackPanel Spacing="8">
+                  <StackPanel Spacing="12">
                     <TextBlock Text="GIT" Classes="PanelHeader" Opacity="0.7" />
                     <TextBlock Text="{Binding Diagnostics.GitPath, StringFormat=Path: {0}}" FontSize="12"
                                FontFamily="{DynamicResource ForgeCodeFont}" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding Diagnostics.GitVersion, StringFormat=Version: {0}}" FontSize="12" />
+                    <StackPanel Spacing="4">
+                      <TextBlock Text="Ticket from branch regex" FontSize="12" Opacity="0.7" />
+                      <TextBox Classes="Forge" Text="{Binding TicketFromBranchRegex}"
+                               FontFamily="{DynamicResource ForgeCodeFont}" />
+                      <TextBlock Text="Capture group 1 is inserted into the commit message. Default matches bugfix/SMITH-123/3 → SMITH-123."
+                                 FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                    </StackPanel>
                   </StackPanel>
                 </ScrollViewer>
 
@@ -4329,6 +4395,117 @@
                 </ListBox>
               </DockPanel>
             </Grid>
+          </DockPanel>
+        </DockPanel>
+      </Border>
+    </Border>
+
+    <!-- Magic Commit overlay -->
+    <Border IsVisible="{Binding WorkingCopy.ShowMagicCommitDialog}"
+            Background="{DynamicResource ForgeSettingsScrimBrush}" ZIndex="215">
+      <Border Width="720" Height="480" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
+              CornerRadius="10" Padding="16">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,10">
+            <icons:MaterialIcon Kind="AutoFix" Width="18" Height="18"
+                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+            <TextBlock Text="Magic Commit" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <!-- Instructions -->
+          <DockPanel IsVisible="{Binding WorkingCopy.ShowMagicCommitInstructions}">
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Right" Margin="0,8,0,0">
+              <Button Content="Cancel" Classes="Ghost" Command="{Binding WorkingCopy.CancelMagicCommitDialogCommand}" />
+              <Button Content="Start" Classes="Primary" Command="{Binding WorkingCopy.ConfirmMagicCommitCommand}" />
+            </StackPanel>
+            <StackPanel Spacing="10">
+              <TextBlock Text="Copilot will group your changes into logical commits. Optionally describe how you want them split."
+                         FontSize="12" Opacity="0.7" TextWrapping="Wrap" />
+              <TextBox Text="{Binding WorkingCopy.MagicCommitInstructions}" AcceptsReturn="True" MinHeight="100"
+                       TextWrapping="Wrap" VerticalAlignment="Stretch"
+                       PlaceholderText="e.g. Expect 3 commits: API, UI, and tests…" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="Scope" FontSize="12" Opacity="0.7" />
+                <RadioButton GroupName="MagicCommitScope" Content="Staged files only"
+                             IsChecked="{Binding WorkingCopy.MagicCommitStagedOnly}" />
+                <RadioButton GroupName="MagicCommitScope" Content="All pending changes"
+                             IsChecked="{Binding WorkingCopy.MagicCommitAllFiles}" />
+              </StackPanel>
+            </StackPanel>
+          </DockPanel>
+
+          <!-- Progress -->
+          <DockPanel IsVisible="{Binding WorkingCopy.ShowMagicCommitProgress}">
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Right" Margin="0,8,0,0">
+              <Button Content="Cancel" Classes="Ghost" Command="{Binding WorkingCopy.CancelMagicCommitDialogCommand}" />
+            </StackPanel>
+            <DockPanel>
+              <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" Height="4" Margin="0,0,0,10"
+                           HorizontalAlignment="Stretch" />
+              <SelectableTextBlock DockPanel.Dock="Top" Text="{Binding WorkingCopy.MagicCommitProgressText}" FontSize="12"
+                         TextWrapping="Wrap" Margin="0,0,0,8"
+                         Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+              <Border IsVisible="{Binding WorkingCopy.HasMagicCommitActivityLog}"
+                      Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      CornerRadius="6" Padding="10">
+                <ScrollViewer x:Name="MagicCommitProgressScrollViewer"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                  <SelectableTextBlock Text="{Binding WorkingCopy.MagicCommitActivityLog}" FontSize="11"
+                             FontFamily="Menlo, Consolas, monospace"
+                             TextWrapping="Wrap"
+                             Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                </ScrollViewer>
+              </Border>
+            </DockPanel>
+          </DockPanel>
+
+          <!-- Results -->
+          <DockPanel IsVisible="{Binding WorkingCopy.ShowMagicCommitResults}">
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                        HorizontalAlignment="Right" Margin="0,12,0,0">
+              <Button Content="Close" Classes="Primary" Command="{Binding WorkingCopy.CloseMagicCommitDialogCommand}" />
+            </StackPanel>
+            <DockPanel>
+              <StackPanel DockPanel.Dock="Top" Spacing="8" Margin="0,0,0,8">
+                <SelectableTextBlock Text="{Binding WorkingCopy.MagicCommitError}" FontSize="12"
+                           TextWrapping="Wrap"
+                           IsVisible="{Binding WorkingCopy.MagicCommitError, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}"
+                           Foreground="{DynamicResource ForgeErrorBrush}" />
+                <TextBlock Text="Created commits" FontSize="12" FontWeight="SemiBold"
+                           IsVisible="{Binding WorkingCopy.HasMagicCommitResults}" />
+                <ItemsControl ItemsSource="{Binding WorkingCopy.MagicCommitResults}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="ai:MagicCommitResultEntry">
+                      <Grid ColumnDefinitions="72,*" Margin="0,2">
+                        <TextBlock Grid.Column="0" Text="{Binding ShortOid}"
+                                   FontFamily="{DynamicResource ForgeCodeFont}" FontSize="11" Opacity="0.75" />
+                        <TextBlock Grid.Column="1" Text="{Binding Subject}" FontSize="12" TextWrapping="Wrap" />
+                      </Grid>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="No commits were created."
+                           FontSize="12" Opacity="0.65"
+                           IsVisible="{Binding WorkingCopy.HasMagicCommitResults, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+              </StackPanel>
+              <Border IsVisible="{Binding WorkingCopy.HasMagicCommitActivityLog}"
+                      Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      CornerRadius="6" Padding="10">
+                <ScrollViewer x:Name="MagicCommitResultsScrollViewer"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto">
+                  <SelectableTextBlock Text="{Binding WorkingCopy.MagicCommitActivityLog}" FontSize="11"
+                             FontFamily="Menlo, Consolas, monospace"
+                             TextWrapping="Wrap"
+                             Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                </ScrollViewer>
+              </Border>
+            </DockPanel>
           </DockPanel>
         </DockPanel>
       </Border>

@@ -28,6 +28,12 @@ public sealed class AiPromptCatalog
     public string GetCommentSuggestionPrompt(IReadOnlyDictionary<string, string> placeholders) =>
         Render("comment_suggestion.md", placeholders);
 
+    public string GetCommitMessagePrompt(IReadOnlyDictionary<string, string> placeholders) =>
+        Render("commit_message.md", placeholders);
+
+    public string GetMagicCommitPrompt(IReadOnlyDictionary<string, string> placeholders) =>
+        Render("magic_commit.md", placeholders);
+
     public string GetChatSystemMessage(IReadOnlyDictionary<string, string>? placeholders = null) =>
         Render("chat_system.md", placeholders ?? new Dictionary<string, string>());
 

@@ -133,6 +133,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         AiDisclosureAcknowledged = s.AiDisclosureAcknowledged,
         AiExportRetentionDays = s.AiExportRetentionDays,
         AiLargePrFileThreshold = s.AiLargePrFileThreshold,
+        TicketFromBranchRegex = s.TicketFromBranchRegex,
         DevelopmentFolder = s.DevelopmentFolder,
         RepositoryScanDepth = s.RepositoryScanDepth,
         RepositoryScanIgnore = [.. s.RepositoryScanIgnore],

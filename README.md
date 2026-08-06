@@ -2,7 +2,7 @@
 
 A fast, cross-platform Git client focused on code review.
 
-Built with .NET 10 and Avalonia 12. Phase 1 is a local Git client with a purpose-built virtualized diff viewer. See [Plan.md](Plan-Phase1.md) for the full design.
+Built with .NET 10 and Avalonia 12.
 
 ## Requirements
 
