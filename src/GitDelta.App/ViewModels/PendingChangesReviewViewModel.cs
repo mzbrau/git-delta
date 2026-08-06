@@ -319,93 +319,23 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         _host is not null &&
         _settings.Current.AiExcludedRepositories.Contains(RepositoryKey, StringComparer.OrdinalIgnoreCase);
 
-    public string AiProgressText
-    {
-        get
-        {
-            var progress = AiProgress;
-            if (progress is null) return "";
+    public string AiProgressText => AiReviewSessionViewModel.FormatProgressText(AiProgress);
 
-            var stage = progress.Stage.ToString();
-            var elapsed = progress.Elapsed < TimeSpan.FromHours(1)
-                ? progress.Elapsed.ToString(@"mm\:ss")
-                : progress.Elapsed.ToString(@"h\:mm\:ss");
-            var turns = progress.TurnBudget is > 0
-                ? $"{progress.TurnsUsed}/{progress.TurnBudget} turns"
-                : $"{progress.TurnsUsed} turns";
-            var files = progress.FilesTotal > 0
-                ? $" · {progress.FilesCompleted}/{progress.FilesTotal} files"
-                : "";
-            var message = string.IsNullOrWhiteSpace(progress.Message) ? "" : $" — {progress.Message}";
-            return $"{stage} · {elapsed} · {turns}{files}{message}";
-        }
-    }
+    public string AiStatusDialogTitle => AiReviewSessionViewModel.StatusDialogTitle(AiRunState);
 
-    public string AiStatusDialogTitle => AiRunState switch
-    {
-        AiRunState.Running => "AI review in progress",
-        AiRunState.Complete => "AI review complete",
-        AiRunState.Failed => "AI review failed",
-        AiRunState.Incomplete => "AI review incomplete",
-        AiRunState.PausedBudget => "AI review paused",
-        _ => "AI review status",
-    };
-
-    public string AiDiagnosticsText
-    {
-        get
-        {
-            var settings = _settings.Current;
-            var runTimeout = settings.AiRunTimeoutSeconds <= 0
-                ? "unlimited"
-                : $"{settings.AiRunTimeoutSeconds}s";
-            var lines = new List<string>
-            {
-                $"State: {AiRunState}",
-                $"Turn idle timeout: {settings.AiTurnTimeoutSeconds}s",
-                $"Run timeout: {runTimeout}",
-                $"Turn budget: {settings.AiTurnBudget}",
-            };
-
-            if (AiProgress is { } progress)
-            {
-                lines.Add($"Stage: {progress.Stage}");
-                lines.Add($"Elapsed: {progress.Elapsed:g}");
-                lines.Add($"Turns used: {progress.TurnsUsed}");
-                if (!string.IsNullOrWhiteSpace(progress.Message))
-                    lines.Add($"Progress: {progress.Message}");
-            }
-
-            if (!string.IsNullOrWhiteSpace(AiCopilotSessionId))
-                lines.Add($"Copilot session: {AiCopilotSessionId}");
-
-            if (!string.IsNullOrWhiteSpace(AiLastError))
-                lines.Add($"Error: {AiLastError}");
-
-            if (!string.IsNullOrWhiteSpace(AiActivityLog))
-            {
-                lines.Add("");
-                lines.Add("--- Activity log ---");
-                lines.Add(AiActivityLog.TrimEnd());
-            }
-
-            return string.Join(Environment.NewLine, lines);
-        }
-    }
+    public string AiDiagnosticsText =>
+        AiReviewSessionViewModel.FormatDiagnosticsText(
+            _settings.Current,
+            AiRunState,
+            AiProgress,
+            AiCopilotSessionId,
+            AiLastError,
+            AiActivityLog);
 
     public bool HasAiDiagnostics =>
-        !string.IsNullOrWhiteSpace(AiLastError) ||
-        !string.IsNullOrWhiteSpace(AiActivityLog) ||
-        AiRunState is AiRunState.Failed or AiRunState.Incomplete or AiRunState.Running;
+        AiReviewSessionViewModel.HasDiagnostics(AiRunState, AiLastError, AiActivityLog);
 
-    public string AiButtonLabel => AiRunState switch
-    {
-        AiRunState.Running => "Reviewing…",
-        AiRunState.Incomplete or AiRunState.PausedBudget => "Resume AI review",
-        AiRunState.Complete => "Re-run AI review",
-        AiRunState.Failed => "Retry AI review",
-        _ => "AI review",
-    };
+    public string AiButtonLabel => AiReviewSessionViewModel.ButtonLabel(AiRunState);
 
     public bool AiButtonEnabled =>
         _host is not null &&
