@@ -2779,18 +2779,23 @@ public partial class ReviewViewModel : ObservableObject
 
     private async Task RefreshInboxCoreAsync(bool silent)
     {
-        if (IsRefreshingInbox) return;
-
+        var cts = new CancellationTokenSource();
         _inboxCts?.Cancel();
-        _inboxCts = new CancellationTokenSource();
-        var ct = _inboxCts.Token;
+        _inboxCts = cts;
+        var ct = cts.Token;
         IsRefreshingInbox = true;
 
         try
         {
             var inbox = await _pullRequests.GetInboxAsync(ct).ConfigureAwait(false);
+            if (!ReferenceEquals(_inboxCts, cts))
+                return;
+
             await InvokeOnUiAsync(() =>
             {
+                if (!ReferenceEquals(_inboxCts, cts))
+                    return;
+
                 NeedsMyReview.Clear();
                 Reviewed.Clear();
                 MyPullRequests.Clear();
@@ -2811,19 +2816,25 @@ public partial class ReviewViewModel : ObservableObject
                 }
             });
 
+            if (!ReferenceEquals(_inboxCts, cts))
+                return;
+
             _lastInboxRefresh = DateTimeOffset.UtcNow;
             IsOffline = false;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) when (!silent)
         {
+            if (!ReferenceEquals(_inboxCts, cts))
+                return;
             IsOffline = true;
             _notifications.Error($"Failed to refresh pull requests: {ex.Message}",
                 () => _ = RefreshInboxAsync(), ex);
         }
         finally
         {
-            IsRefreshingInbox = false;
+            if (ReferenceEquals(_inboxCts, cts))
+                IsRefreshingInbox = false;
         }
     }
 
@@ -3572,9 +3583,16 @@ public partial class ReviewViewModel : ObservableObject
         bool showFullFile) =>
         DiffPresentation.ProjectRows(diff, viewMode, showFullFile, _intraLine);
 
-    private void ProjectRows(FileDiff diff)
+    private void ProjectRows(FileDiff diff) => _ = ProjectRowsAsync(diff);
+
+    private async Task ProjectRowsAsync(FileDiff diff)
     {
-        var rows = BuildProjectedRows(diff, ViewMode, ShowFullFile);
+        var viewMode = ViewMode;
+        var showFullFile = ShowFullFile;
+        var rows = await Task.Run(() =>
+            BuildProjectedRows(diff, viewMode, showFullFile)).ConfigureAwait(true);
+        if (!ReferenceEquals(_currentDiff, diff))
+            return;
         DiffRows.Reset(rows);
     }
 

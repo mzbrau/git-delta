@@ -49,37 +49,44 @@ public partial class WorkingCopyViewModel
         _vm._allUnstaged.Clear();
         _vm._allConflicted.Clear();
 
-        var pendingPaths = _vm._pending.Select(p => p.Path.Value).ToHashSet(StringComparer.Ordinal);
+        var pendingUnstage = new HashSet<string>(StringComparer.Ordinal);
+        var pendingStage = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var p in _vm._pending)
+        {
+            if (p.WasUnstage)
+                pendingUnstage.Add(p.Path.Value);
+            else
+                pendingStage.Add(p.Path.Value);
+        }
 
         foreach (var e in status.Staged)
         {
-            if (pendingPaths.Contains(e.Path.Value) && _vm._pending.Any(p => p.Path.Equals(e.Path) && p.WasUnstage))
+            if (pendingUnstage.Contains(e.Path.Value))
                 continue;
             _vm._allStaged.Add(FileItemViewModel.From(e, isStagedList: true));
         }
 
         foreach (var e in status.Unstaged)
         {
-            if (pendingPaths.Contains(e.Path.Value) && _vm._pending.Any(p => p.Path.Equals(e.Path) && !p.WasUnstage))
+            if (pendingStage.Contains(e.Path.Value))
                 continue;
             _vm._allUnstaged.Add(FileItemViewModel.From(e, isStagedList: false));
         }
 
+        var stagedPaths = _vm._allStaged.Select(f => f.Path.Value).ToHashSet(StringComparer.Ordinal);
+        var unstagedPaths = _vm._allUnstaged.Select(f => f.Path.Value).ToHashSet(StringComparer.Ordinal);
+
         // Optimistic overlays: move predicted staged/unstaged
-        foreach (var p in _vm._pending.Where(p => !p.WasUnstage))
+        foreach (var path in pendingStage)
         {
-            var path = p.Path.Value;
-            if (_vm._allUnstaged.All(f => f.Path.Value != path)
-                && _vm._allStaged.All(f => f.Path.Value != path))
-                _vm._allStaged.Add(new FileItemViewModel(p.Path, ChangeKind.Modified, isStagedList: true, isPartial: true, isOptimistic: true));
+            if (!unstagedPaths.Contains(path) && !stagedPaths.Contains(path))
+                _vm._allStaged.Add(new FileItemViewModel(FilePath.From(path), ChangeKind.Modified, isStagedList: true, isPartial: true, isOptimistic: true));
         }
 
-        foreach (var p in _vm._pending.Where(p => p.WasUnstage))
+        foreach (var path in pendingUnstage)
         {
-            var path = p.Path.Value;
-            if (_vm._allUnstaged.All(f => f.Path.Value != path)
-                && _vm._allStaged.All(f => f.Path.Value != path))
-                _vm._allUnstaged.Add(new FileItemViewModel(p.Path, ChangeKind.Modified, isStagedList: false, isPartial: true, isOptimistic: true));
+            if (!unstagedPaths.Contains(path) && !stagedPaths.Contains(path))
+                _vm._allUnstaged.Add(new FileItemViewModel(FilePath.From(path), ChangeKind.Modified, isStagedList: false, isPartial: true, isOptimistic: true));
         }
 
         foreach (var e in status.Conflicted)
