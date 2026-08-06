@@ -27,6 +27,10 @@ namespace GitDelta.App.Controls;
 public sealed class DiffViewer : Control
 {
     private readonly SelectableTextBlock _emptyMessage;
+    private readonly StackPanel _brandOverlay;
+    private readonly Image _brandLogo;
+    private readonly TextBlock _brandTitle;
+    private readonly TextBlock _brandCaption;
 
     public DiffViewer()
     {
@@ -37,8 +41,52 @@ public sealed class DiffViewer : Control
             TextWrapping = TextWrapping.Wrap,
             IsVisible = false,
         };
+        _brandLogo = new Image
+        {
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        try
+        {
+            using var stream = AssetLoader.Open(new Uri("avares://GitDelta.App/Assets/logo.png"));
+            _brandLogo.Source = new Bitmap(stream);
+        }
+        catch
+        {
+            // Brand hero still shows wordmark + caption without the logo.
+        }
+
+        _brandTitle = new TextBlock
+        {
+            Text = ProductInfo.DisplayName,
+            FontSize = 26,
+            FontWeight = FontWeight.SemiBold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+        };
+        _brandCaption = new TextBlock
+        {
+            FontSize = 14.5,
+            Opacity = 0.7,
+            LetterSpacing = 0.4,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 420,
+        };
+        _brandOverlay = new StackPanel
+        {
+            Spacing = 16,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsVisible = false,
+            Children = { _brandLogo, _brandTitle, _brandCaption },
+        };
+
         LogicalChildren.Add(_emptyMessage);
+        LogicalChildren.Add(_brandOverlay);
         VisualChildren.Add(_emptyMessage);
+        VisualChildren.Add(_brandOverlay);
         UpdateEmptyMessage();
     }
 
@@ -138,14 +186,13 @@ public sealed class DiffViewer : Control
     private readonly List<AnnotationHit> _annotationHits = [];
     private readonly List<AddCommentHit> _addCommentHits = [];
     private MinimapSnapshot? _minimapSnapshot;
-    private Bitmap? _brandWatermark;
     private readonly Typeface _typeface = new(
         new FontFamily("avares://GitDelta.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
 
     private const int PaintWarmRowsPerTick = 12;
     private const int PaintWarmViewportMultiplier = 2;
-    private const double BrandWatermarkOpacity = 0.12;
-    private const double BrandWatermarkSize = 200;
+    private const double BrandHeroLogoFraction = 0.8;
+    private const double BrandHeroReservedBelow = 88;
 
     private readonly record struct LinePaintKey(int RowIndex, byte Side, int Epoch);
     private readonly record struct DisplayTextKey(int RowIndex, byte Side, int ContentEpoch);
@@ -368,6 +415,7 @@ public sealed class DiffViewer : Control
                  || change.Property == ShowBrandWatermarkProperty)
         {
             UpdateEmptyMessage();
+            InvalidateMeasure();
             InvalidateVisual();
         }
         else if (change.Property == LeftSyntaxTokensProperty
@@ -402,44 +450,27 @@ public sealed class DiffViewer : Control
     private void UpdateEmptyMessage()
     {
         var empty = Rows is null || Rows.Count == 0;
-        _emptyMessage.IsVisible = empty;
-        if (empty)
+        var showBrand = empty && ShowBrandWatermark;
+
+        _brandOverlay.IsVisible = showBrand;
+        _emptyMessage.IsVisible = empty && !showBrand;
+
+        if (showBrand)
+        {
+            _brandCaption.Text = EmptyMessage;
+            _brandCaption.Foreground = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
+            _brandTitle.Foreground = Brush("ForgePrimaryBrush", Brushes.MediumPurple);
+            if (Application.Current?.TryGetResource("ForgeUiFont", ActualThemeVariant, out var font) == true
+                && font is FontFamily uiFont)
+            {
+                _brandTitle.FontFamily = uiFont;
+                _brandCaption.FontFamily = uiFont;
+            }
+        }
+        else if (empty)
         {
             _emptyMessage.Text = EmptyMessage;
             _emptyMessage.Foreground = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
-        }
-    }
-
-    private void DrawBrandWatermark(DrawingContext context, Size size)
-    {
-        var bitmap = _brandWatermark ??= LoadBrandWatermark();
-        if (bitmap is null)
-            return;
-
-        var logoSize = Math.Min(BrandWatermarkSize, Math.Min(size.Width, size.Height) * 0.45);
-        if (logoSize < 32)
-            return;
-
-        var dest = new Rect(
-            (size.Width - logoSize) / 2,
-            (size.Height - logoSize) / 2,
-            logoSize,
-            logoSize);
-
-        using (context.PushOpacity(BrandWatermarkOpacity))
-            context.DrawImage(bitmap, new Rect(bitmap.Size), dest);
-    }
-
-    private static Bitmap? LoadBrandWatermark()
-    {
-        try
-        {
-            using var stream = AssetLoader.Open(new Uri("avares://GitDelta.App/Assets/logo.png"));
-            return new Bitmap(stream);
-        }
-        catch
-        {
-            return null;
         }
     }
 
@@ -573,6 +604,13 @@ public sealed class DiffViewer : Control
         var height = double.IsInfinity(availableSize.Height) ? 0 : availableSize.Height;
         if (_emptyMessage.IsVisible)
             _emptyMessage.Measure(new Size(Math.Max(0, width - MinimapWidth - 32), height));
+        if (_brandOverlay.IsVisible)
+        {
+            var contentWidth = Math.Max(0, width - MinimapWidth);
+            ApplyBrandLogoSize(contentWidth, height);
+            _brandOverlay.Measure(new Size(contentWidth, height));
+        }
+
         return new Size(width, height);
     }
 
@@ -593,9 +631,35 @@ public sealed class DiffViewer : Control
             _emptyMessage.Arrange(default);
         }
 
+        if (_brandOverlay.IsVisible)
+        {
+            var contentLeft = MinimapWidth;
+            var contentWidth = Math.Max(0, finalSize.Width - contentLeft);
+            var contentHeight = finalSize.Height;
+            ApplyBrandLogoSize(contentWidth, contentHeight);
+            _brandOverlay.Measure(new Size(contentWidth, contentHeight));
+            var desired = _brandOverlay.DesiredSize;
+            var x = contentLeft + Math.Max(0, (contentWidth - desired.Width) / 2);
+            var y = Math.Max(0, (contentHeight - desired.Height) / 2);
+            _brandOverlay.Arrange(new Rect(x, y, desired.Width, desired.Height));
+        }
+        else
+        {
+            _brandOverlay.Arrange(default);
+        }
+
         _layoutSize = finalSize;
         ClampScroll(notify: false);
         return finalSize;
+    }
+
+    private void ApplyBrandLogoSize(double contentWidth, double contentHeight)
+    {
+        var logoSize = Math.Min(contentWidth, contentHeight) * BrandHeroLogoFraction;
+        logoSize = Math.Min(logoSize, Math.Max(32, contentHeight - BrandHeroReservedBelow));
+        logoSize = Math.Max(32, Math.Min(logoSize, contentWidth));
+        _brandLogo.Width = logoSize;
+        _brandLogo.Height = logoSize;
     }
 
     public IReadOnlyList<LineSelection> GetSelectedLineSelections()
@@ -627,11 +691,7 @@ public sealed class DiffViewer : Control
         context.FillRectangle(bg, new Rect(bounds.Size));
 
         if (rows is null || rows.Count == 0)
-        {
-            if (ShowBrandWatermark)
-                DrawBrandWatermark(context, bounds.Size);
             return;
-        }
 
         var contentLeft = MinimapWidth;
         var contentWidth = Math.Max(0, bounds.Width - contentLeft);
