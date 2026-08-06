@@ -502,4 +502,125 @@ public sealed class WorkingCopyViewModelSnappyTests
             try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
         }
     }
+
+    [Test]
+    public async Task RapidFileSwitch_SupersededLoad_DoesNotClearNewerSpinnerOrPaintStaleDiff()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            var aGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var bStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt"), Unstaged("b.txt")]));
+
+            _diff.GetDiffAsync(
+                    repo,
+                    Arg.Any<FilePath>(),
+                    Arg.Any<DiffScope>(),
+                    Arg.Any<DiffOptions>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(async ci =>
+                {
+                    var path = ci.ArgAt<FilePath>(1).Value;
+                    var ct = ci.ArgAt<CancellationToken>(4);
+                    if (path == "a.txt")
+                    {
+                        await aGate.Task.WaitAsync(ct);
+                        ct.ThrowIfCancellationRequested();
+                        return DiffFor("a.txt");
+                    }
+
+                    bStarted.TrySetResult();
+                    return DiffFor("b.txt");
+                });
+
+            var vm = CreateVm();
+            // Disable prefetch so selection loads are the only GetDiff calls.
+            _settings.Current.Returns(new AppSettings
+            {
+                DiffPrefetchPriorityPaths = 0,
+                DiffPrefetchNeighborRadius = 0,
+            });
+            await vm.OpenAsync(repo);
+
+            var fileA = vm.UnstagedFiles.First(f => f.Path.Value == "a.txt");
+            var fileB = vm.UnstagedFiles.First(f => f.Path.Value == "b.txt");
+
+            vm.SetFileSelection([fileA]);
+            await WaitUntilAsync(() => vm.IsLoadingDiff);
+
+            vm.SetFileSelection([fileB]);
+            await bStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await WaitUntilAsync(() => vm.DiffRows.Count > 0 && !vm.IsLoadingDiff);
+
+            // Release the superseded load; its finally must not clear the newer presentation.
+            aGate.TrySetResult();
+            await Task.Delay(50);
+
+            Assert.That(vm.IsLoadingDiff, Is.False);
+            Assert.That(vm.SelectedFile?.Path.Value, Is.EqualTo("b.txt"));
+            Assert.That(vm.DiffRows.Count, Is.GreaterThan(0));
+            Assert.That(
+                vm.DiffRows.Any(r =>
+                    r.RightText.Span.Contains("content of b.txt", StringComparison.Ordinal)
+                    || r.LeftText.Span.Contains("content of b.txt", StringComparison.Ordinal)),
+                Is.True,
+                "Painted rows must belong to the newer selection (b.txt), not the superseded a.txt load");
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task ShowFullFile_Reprojects_Without_Git_Reload()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt")]));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
+
+            _settings.Current.Returns(new AppSettings
+            {
+                DiffPrefetchPriorityPaths = 0,
+                DiffPrefetchNeighborRadius = 0,
+            });
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+            vm.SetFileSelection([vm.UnstagedFiles.First()]);
+            await WaitUntilAsync(() => vm.DiffRows.Count > 0 && !vm.IsLoadingDiff);
+
+            _diff.ClearReceivedCalls();
+            vm.ShowFullFile = !vm.ShowFullFile;
+            await Task.Delay(50);
+
+            await _diff.DidNotReceiveWithAnyArgs()
+                .GetDiffAsync(default!, default!, default!, default!, default);
+            Assert.That(vm.DiffRows.Count, Is.GreaterThan(0));
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 3000)
+    {
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (!condition())
+        {
+            if (Environment.TickCount64 >= deadline)
+                Assert.Fail("Timed out waiting for condition.");
+            await Task.Delay(20);
+        }
+    }
 }

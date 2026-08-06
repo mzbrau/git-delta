@@ -717,9 +717,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(FullFileToggleLabel));
         OnPropertyChanged(nameof(FullFileToggleTooltip));
         _expandedCollapses.Clear();
-        _warmStore.InvalidateAll();
-        _ = LoadDiffForSelectionAsync(SelectedFile);
-        ScheduleFileStatusPrefetch();
+        // Presentation-only: reproject in memory — do not wipe warm cache or re-run git.
+        if (_currentDiff is not null)
+            ProjectRows(_currentDiff);
     }
 
     public async Task OpenAsync(string path)
@@ -2308,11 +2308,12 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     private async Task LoadDiffForSelectionAsync(FileItemViewModel? file)
     {
+        var cts = new CancellationTokenSource();
         _diffCts?.Cancel();
-        _diffCts = new CancellationTokenSource();
+        _diffCts = cts;
         _markdownCts?.Cancel();
         _markdownCts = null;
-        var ct = _diffCts.Token;
+        var ct = cts.Token;
 
         _expandedCollapses.Clear();
         SelectedAddedLines = 0;
@@ -2334,13 +2335,13 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
         if (IsStashMode)
         {
-            await LoadStashDiffAsync(file, ct);
+            await LoadStashDiffAsync(file, cts, ct);
             return;
         }
 
         if (IsHistoryMode)
         {
-            await LoadCommitDiffAsync(file, ct);
+            await LoadCommitDiffAsync(file, cts, ct);
             return;
         }
 
@@ -2376,6 +2377,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                     target,
                     force: false,
                     factory: token => LoadUntrackedFileDiffAsync(_repoPath, file.Path, target, token),
+                    cts,
                     ct);
             }
             else
@@ -2386,6 +2388,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                     target,
                     force: false,
                     factory: token => _diffService.GetDiffAsync(_repoPath, file.Path, target.AsWorkingCopy(), options, token),
+                    cts,
                     ct);
             }
 
@@ -2395,6 +2398,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         catch (OperationCanceledException) { }
         catch (DiffTooLargeException ex)
         {
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
             SelectedAddedLines = 0;
             SelectedRemovedLines = 0;
             ClearImagePreview();
@@ -2406,6 +2411,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
         catch (Exception ex)
         {
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
             SelectedAddedLines = 0;
             SelectedRemovedLines = 0;
             ClearImagePreview();
@@ -2416,13 +2423,18 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
         finally
         {
-            IsLoadingDiff = false;
-            IsDiffRefreshing = false;
-            UpdateDiffCacheState(key);
-            UpdateFileCacheIndicators();
-            OnPropertyChanged(nameof(DiffFooterText));
-            if (!ct.IsCancellationRequested)
-                PendingReview.OnFileSelectionChanged(file, _currentDiff);
+            // Only the current load may clear the spinner; a superseded load's finally must
+            // not hide loading for the newer request.
+            if (ReferenceEquals(_diffCts, cts))
+            {
+                IsLoadingDiff = false;
+                IsDiffRefreshing = false;
+                UpdateDiffCacheState(key);
+                UpdateFileCacheIndicators();
+                OnPropertyChanged(nameof(DiffFooterText));
+                if (!ct.IsCancellationRequested && ReferenceEquals(SelectedFile, file))
+                    PendingReview.OnFileSelectionChanged(file, _currentDiff);
+            }
         }
     }
 
@@ -2437,6 +2449,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         DiffTarget target,
         bool force,
         Func<CancellationToken, Task<FileDiff>> factory,
+        CancellationTokenSource cts,
         CancellationToken ct)
     {
         DiffWarmEntry? entry = null;
@@ -2447,7 +2460,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         {
             IsLoadingDiff = false;
             ApplyDiffCacheState(entry!);
-            await PresentDiffAsync(file, entry!.Diff, target, ct);
+            await PresentDiffAsync(file, entry!.Diff, target, cts, ct);
             if (!needsRefresh)
                 return;
 
@@ -2459,7 +2472,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             IsLoadingDiff = false;
             IsDiffRefreshing = true;
             ApplyDiffCacheState(altEntry with { IsStale = true });
-            await PresentDiffAsync(file, altEntry.Diff with { Scope = target.AsWorkingCopy() }, target, ct);
+            await PresentDiffAsync(file, altEntry.Diff with { Scope = target.AsWorkingCopy() }, target, cts, ct);
         }
         else if (HasPaintedDiffForPath(file.Path.Value))
         {
@@ -2490,8 +2503,11 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         var loadTask = _warmStore.GetOrStart(key, factory, force);
         var diff = await loadTask.WaitAsync(ct);
         ct.ThrowIfCancellationRequested();
-        await PresentDiffAsync(file, diff, target, ct);
-        UpdateDiffCacheState(key);
+        if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+            return;
+        await PresentDiffAsync(file, diff, target, cts, ct);
+        if (ReferenceEquals(_diffCts, cts))
+            UpdateDiffCacheState(key);
     }
 
     private bool HasPaintedDiffForPath(string path)
@@ -2548,11 +2564,12 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             return;
         }
 
+        var cts = new CancellationTokenSource();
         _diffCts?.Cancel();
-        _diffCts = new CancellationTokenSource();
+        _diffCts = cts;
         _markdownCts?.Cancel();
         _markdownCts = null;
-        var ct = _diffCts.Token;
+        var ct = cts.Token;
         var file = SelectedFile;
 
         try
@@ -2568,6 +2585,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                     force: true,
                     factory: token => LoadStashFileDiffAsync(
                         _repoPath, stash.Index, file.Path, file.Kind, options, token),
+                    cts,
                     ct);
                 return;
             }
@@ -2583,6 +2601,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                     force: true,
                     factory: token => LoadHistoryFileDiffAsync(
                         _repoPath, commit.Oid, file.Path, file.Kind, options, token),
+                    cts,
                     ct);
                 return;
             }
@@ -2598,19 +2617,25 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 target,
                 force: true,
                 factory: token => _diffService.GetDiffAsync(_repoPath, file.Path, target.AsWorkingCopy(), fsOptions, token),
+                cts,
                 ct);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (!ReferenceEquals(_diffCts, cts))
+                return;
             _notifications.Error($"Diff refresh failed: {ex.Message}", () => _ = ForceRefreshDiffAsync(), ex);
         }
         finally
         {
-            IsLoadingDiff = false;
-            IsDiffRefreshing = false;
-            UpdateFileCacheIndicators();
-            OnPropertyChanged(nameof(DiffFooterText));
+            if (ReferenceEquals(_diffCts, cts))
+            {
+                IsLoadingDiff = false;
+                IsDiffRefreshing = false;
+                UpdateFileCacheIndicators();
+                OnPropertyChanged(nameof(DiffFooterText));
+            }
         }
     }
 
@@ -2872,6 +2897,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         FileItemViewModel file,
         FileDiff diff,
         DiffTarget target,
+        CancellationTokenSource cts,
         CancellationToken ct)
     {
         using var presentActivity = GitDeltaActivity.Source.StartActivity("diff.present");
@@ -2900,6 +2926,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
 
         ct.ThrowIfCancellationRequested();
+        // A newer selection may have started while we awaited projection.
+        if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+            return;
 
         var sameContent = _currentDiff is not null
                           && string.Equals(_currentDiff.OldContent.Value, enriched.OldContent.Value, StringComparison.Ordinal)
@@ -2919,6 +2948,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             ClearSyntaxTokens();
             ClearMarkdownPreviewText();
             await LoadImagePreviewAsync(file, _currentDiff, target, ct);
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
             DiffRows.Reset([]);
             DiffEmptyMessage = "";
         }
@@ -2944,11 +2975,16 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             presentActivity?.SetTag("diff.row_count", rows.Count);
             // Tokenise once per selected FileDiff; view-mode switches reuse these tokens.
             await LoadSyntaxTokensAsync(file, _currentDiff, target, ct);
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
             if (ShowMarkdownPreviewPane)
                 await LoadMarkdownPreviewTextAsync(file, _currentDiff, target, ct);
             else
                 ClearMarkdownPreviewText();
         }
+
+        if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+            return;
 
         GitDeltaMeters.DiffPresentMs.Record(presentSw.Elapsed.TotalMilliseconds);
         OnPropertyChanged(nameof(CanStageLines));
@@ -3091,7 +3127,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         return System.Text.Encoding.UTF8.GetString(bytes, offset, bytes.Length - offset);
     }
 
-    private static async Task<FileDiff> LoadUntrackedFileDiffAsync(
+    private async Task<FileDiff> LoadUntrackedFileDiffAsync(
         string repoPath,
         FilePath path,
         DiffTarget target,
@@ -3101,8 +3137,15 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         if (!System.IO.File.Exists(fullPath))
             return UntrackedFileDiff.Create(path, string.Empty, target);
 
+        var maxBytes = _settings.Current.MaxDiffPatchBytes;
+        var info = new System.IO.FileInfo(fullPath);
+        if (info.Length > maxBytes)
+            throw new DiffTooLargeException(maxBytes, info.Length);
+
         var bytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
+        if (bytes.LongLength > maxBytes)
+            throw new DiffTooLargeException(maxBytes, bytes.LongLength);
         return UntrackedFileDiff.Create(path, bytes, target);
     }
 
@@ -4500,7 +4543,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
     }
 
-    private async Task LoadStashDiffAsync(FileItemViewModel file, CancellationToken ct)
+    private async Task LoadStashDiffAsync(FileItemViewModel file, CancellationTokenSource cts, CancellationToken ct)
     {
         if (_repoPath is null || SelectedStash is null) return;
 
@@ -4521,7 +4564,11 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 force: false,
                 factory: token => LoadStashFileDiffAsync(
                     _repoPath, SelectedStash.Index, file.Path, file.Kind, options, token),
+                cts,
                 ct);
+
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
 
             if (IsImagePath(file.Path.Value))
             {
@@ -4544,22 +4591,35 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         {
             // ignored
         }
+        catch (DiffTooLargeException ex)
+        {
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
+            DiffEmptyMessage = ex.Message;
+            OnPropertyChanged(nameof(DiffFooterText));
+            _notifications.Error(ex.Message, exception: ex);
+        }
         catch (Exception ex)
         {
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
             DiffEmptyMessage = $"Failed to load stash diff: {ex.Message}";
             OnPropertyChanged(nameof(DiffFooterText));
         }
         finally
         {
-            IsLoadingDiff = false;
-            IsDiffRefreshing = false;
-            UpdateDiffCacheState(key);
-            UpdateFileCacheIndicators();
-            UpdateDiffOverlay();
+            if (ReferenceEquals(_diffCts, cts))
+            {
+                IsLoadingDiff = false;
+                IsDiffRefreshing = false;
+                UpdateDiffCacheState(key);
+                UpdateFileCacheIndicators();
+                UpdateDiffOverlay();
+            }
         }
     }
 
-    private async Task LoadCommitDiffAsync(FileItemViewModel file, CancellationToken ct)
+    private async Task LoadCommitDiffAsync(FileItemViewModel file, CancellationTokenSource cts, CancellationToken ct)
     {
         if (_repoPath is null || SelectedCommit is null) return;
 
@@ -4580,7 +4640,11 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 force: false,
                 factory: token => LoadHistoryFileDiffAsync(
                     _repoPath, SelectedCommit.Oid, file.Path, file.Kind, options, token),
+                cts,
                 ct);
+
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
 
             if (IsImagePath(file.Path.Value))
             {
@@ -4603,18 +4667,31 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         {
             // ignored
         }
+        catch (DiffTooLargeException ex)
+        {
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
+            DiffEmptyMessage = ex.Message;
+            OnPropertyChanged(nameof(DiffFooterText));
+            _notifications.Error(ex.Message, exception: ex);
+        }
         catch (Exception ex)
         {
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
             DiffEmptyMessage = $"Failed to load commit diff: {ex.Message}";
             OnPropertyChanged(nameof(DiffFooterText));
         }
         finally
         {
-            IsLoadingDiff = false;
-            IsDiffRefreshing = false;
-            UpdateDiffCacheState(key);
-            UpdateFileCacheIndicators();
-            UpdateDiffOverlay();
+            if (ReferenceEquals(_diffCts, cts))
+            {
+                IsLoadingDiff = false;
+                IsDiffRefreshing = false;
+                UpdateDiffCacheState(key);
+                UpdateFileCacheIndicators();
+                UpdateDiffOverlay();
+            }
         }
     }
 

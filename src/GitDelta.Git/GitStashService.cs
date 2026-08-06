@@ -7,7 +7,10 @@ using GitDelta.Git.Internal;
 namespace GitDelta.Git;
 
 /// <summary>Stash list, apply, push/pop, and per-file stash diffs.</summary>
-public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitStashService
+public sealed class GitStashService(
+    IGitProcessRunner runner,
+    IRepositoryGateProvider gates,
+    ISettingsStore? settings = null) : IGitStashService
 {
     private static readonly Regex StashRefIndex = new(@"^stash@\{(\d+)\}$", RegexOptions.Compiled);
 
@@ -115,7 +118,9 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGatePro
             args.Add("--");
             args.Add(path.Value);
 
-            var result = await runner.RunAsync(repositoryPath, args, options: null, token).ConfigureAwait(false);
+            var maxBytes = settings?.Current.MaxDiffPatchBytes ?? 32 * 1024 * 1024;
+            var processOptions = new GitProcessOptions { MaxStdoutBytes = maxBytes };
+            var result = await runner.RunAsync(repositoryPath, args, processOptions, token).ConfigureAwait(false);
             if (!string.IsNullOrWhiteSpace(result.Stdout))
                 return result.Stdout;
 
@@ -134,7 +139,11 @@ public sealed class GitStashService(IGitProcessRunner runner, IRepositoryGatePro
                     "--",
                     path.Value,
                 ],
-                new GitProcessOptions { AllowNonZeroExitCode = true },
+                new GitProcessOptions
+                {
+                    AllowNonZeroExitCode = true,
+                    MaxStdoutBytes = maxBytes,
+                },
                 token).ConfigureAwait(false);
             return untracked.Succeeded ? untracked.Stdout : "";
         }, ct);
