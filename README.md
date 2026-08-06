@@ -4,6 +4,18 @@ A fast, cross-platform Git client focused on code review.
 
 Built with .NET 10 and Avalonia 12.
 
+## Documentation
+
+User documentation (Docusaurus) lives under [`docs/`](docs/). The site project is [`docs/docusaurus/`](docs/docusaurus/).
+
+Published docs: [https://mzbrau.github.io/git-delta/](https://mzbrau.github.io/git-delta/)
+
+```bash
+cd docs/docusaurus
+npm install
+npm start
+```
+
 ## Requirements
 
 - **Git 2.30 or later, installed and available on the PATH.** GIT DELTA does not bundle Git; it drives the `git` command line directly so that credential helpers, hooks, `.gitattributes` filters (including Git LFS), and `core.fsmonitor` all behave exactly as they do in your terminal. If Git cannot be found, GIT DELTA will tell you at startup rather than failing part-way through an operation. The Git executable path can be overridden in settings for non-standard installations.
