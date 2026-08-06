@@ -2,10 +2,10 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $Version,
     [string] $RuntimeIdentifier = "win-x64",
-    [string] $PublishPath = "artifacts/publish/CodeReviewr-win-x64",
+    [string] $PublishPath = "artifacts/publish/GitDelta-win-x64",
     [string] $ReleasePath = "artifacts/release",
-    [string] $PackageId = "CodeReviewr",
-    [string] $MainExe = "CodeReviewr.App.exe",
+    [string] $PackageId = "GitDelta",
+    [string] $MainExe = "GitDelta.App.exe",
     [string] $RepoUrl = "",
     [string] $GitHubToken = "",
     [switch] $Prerelease,
@@ -57,7 +57,7 @@ function Test-PreviousVelopackReleaseExists {
     $apiUrl = Get-GitHubRepositoryApiUrl $RepositoryUrl
     $headers = @{
         "Accept" = "application/vnd.github+json"
-        "User-Agent" = "codereviewr-release-packaging"
+        "User-Agent" = "gitdelta-release-packaging"
     }
 
     if (-not [string]::IsNullOrWhiteSpace($Token)) {
@@ -91,7 +91,7 @@ function Test-PreviousVelopackReleaseExists {
 $publishPathResolved = Resolve-RepositoryPath $PublishPath
 $releasePathResolved = Resolve-RepositoryPath $ReleasePath
 $mainExePath = Join-Path $publishPathResolved $MainExe
-$iconPath = Join-Path $repoRoot "src/CodeReviewr.App/Assets/app.ico"
+$iconPath = Join-Path $repoRoot "src/GitDelta.App/Assets/app.ico"
 
 if (-not (Test-Path $publishPathResolved -PathType Container)) {
     throw "Publish path does not exist: $publishPathResolved"
@@ -141,12 +141,12 @@ if (-not $SkipDownload -and -not [string]::IsNullOrWhiteSpace($RepoUrl)) {
     --outputDir $releasePathResolved `
     --runtime $RuntimeIdentifier `
     --channel win `
-    --packAuthors "CodeReviewr contributors" `
-    --packTitle "CodeReviewr" `
+    --packAuthors "GIT DELTA contributors" `
+    --packTitle "GIT DELTA" `
     --icon $iconPath
 
 if ($LASTEXITCODE -ne 0) {
     throw "Velopack packaging failed with exit code $LASTEXITCODE."
 }
 
-Write-Host "CodeReviewr installer assets created in $releasePathResolved"
+Write-Host "GitDelta installer assets created in $releasePathResolved"

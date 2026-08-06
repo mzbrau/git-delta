@@ -1,6 +1,6 @@
 ### Overview & Scope
 
-Cross-platform desktop Git client focused on code review. Stack: .NET 10, Avalonia 12, CliWrap (`git` CLI), CommunityToolkit.Mvvm, Microsoft.Extensions.DependencyInjection, NUnit. Solution: `src/CodeReviewr.slnx`.
+Cross-platform desktop Git client focused on code review. Stack: .NET 10, Avalonia 12, CliWrap (`git` CLI), CommunityToolkit.Mvvm, Microsoft.Extensions.DependencyInjection, NUnit. Solution: `src/GitDelta.slnx`.
 
 This file applies to the whole repo: `src/`, `tests/`, root props, `.github/`. No nested `AGENTS.md`. Closest `AGENTS.md` wins if one is added later.
 
@@ -19,75 +19,75 @@ Not allowed: invent scripts/tools not in the repo; add LibGit2Sharp or ReactiveU
 Requires .NET 10 SDK and `git` on PATH (see `README.md`).
 
 ```bash
-dotnet restore src/CodeReviewr.slnx
+dotnet restore src/GitDelta.slnx
 ```
 
 ```bash
-dotnet build src/CodeReviewr.slnx -c Debug
+dotnet build src/GitDelta.slnx -c Debug
 ```
 
 ```bash
-dotnet build src/CodeReviewr.slnx -c Release
+dotnet build src/GitDelta.slnx -c Release
 ```
 
 No dedicated lint/format pipeline (no `.editorconfig`, `dotnet format` not used in CI). Treat Release build warnings-as-errors (`Directory.Build.props`) as the check.
 
 ```bash
-dotnet test src/CodeReviewr.slnx -c Debug
+dotnet test src/GitDelta.slnx -c Debug
 ```
 
 Prefer scoped / filtered tests while iterating:
 
 ```bash
-dotnet test tests/CodeReviewr.Core.Tests/CodeReviewr.Core.Tests.csproj -c Debug --no-restore
+dotnet test tests/GitDelta.Core.Tests/GitDelta.Core.Tests.csproj -c Debug --no-restore
 ```
 
 ```bash
-dotnet test tests/CodeReviewr.Git.Tests/CodeReviewr.Git.Tests.csproj -c Debug --no-restore
+dotnet test tests/GitDelta.Git.Tests/GitDelta.Git.Tests.csproj -c Debug --no-restore
 ```
 
 ```bash
-dotnet test tests/CodeReviewr.Diff.Tests/CodeReviewr.Diff.Tests.csproj -c Debug --no-restore
+dotnet test tests/GitDelta.Diff.Tests/GitDelta.Diff.Tests.csproj -c Debug --no-restore
 ```
 
 ```bash
-dotnet test tests/CodeReviewr.App.Tests/CodeReviewr.App.Tests.csproj -c Debug --no-restore
+dotnet test tests/GitDelta.App.Tests/GitDelta.App.Tests.csproj -c Debug --no-restore
 ```
 
 ```bash
-dotnet test tests/CodeReviewr.IntegrationTests/CodeReviewr.IntegrationTests.csproj -c Debug --no-restore
+dotnet test tests/GitDelta.IntegrationTests/GitDelta.IntegrationTests.csproj -c Debug --no-restore
 ```
 
 ```bash
-dotnet test tests/CodeReviewr.Core.Tests/CodeReviewr.Core.Tests.csproj -c Debug --no-restore --filter "FullyQualifiedName~Architecture"
+dotnet test tests/GitDelta.Core.Tests/GitDelta.Core.Tests.csproj -c Debug --no-restore --filter "FullyQualifiedName~Architecture"
 ```
 
 ```bash
-dotnet run --project src/CodeReviewr.App
+dotnet run --project src/GitDelta.App
 ```
 
 Publish (CI; slow) (unverified):
 
 ```bash
-dotnet publish src/CodeReviewr.App/CodeReviewr.App.csproj -c Release -r win-x64 --self-contained true -o ./artifacts/win-x64
+dotnet publish src/GitDelta.App/GitDelta.App.csproj -c Release -r win-x64 --self-contained true -o ./artifacts/win-x64
 ```
 
 ```bash
-dotnet publish src/CodeReviewr.App/CodeReviewr.App.csproj -c Release -r win-arm64 --self-contained true -o ./artifacts/win-arm64
+dotnet publish src/GitDelta.App/GitDelta.App.csproj -c Release -r win-arm64 --self-contained true -o ./artifacts/win-arm64
 ```
 
 Benchmarks (slow; not in CI) (unverified):
 
 ```bash
-dotnet run --project tests/CodeReviewr.Benchmarks -c Release
+dotnet run --project tests/GitDelta.Benchmarks -c Release
 ```
 
 ### Conventions & Patterns
 
-- Projects: `CodeReviewr.Core` (domain, settings, abstractions), `CodeReviewr.Git` (CliWrap + porcelain), `CodeReviewr.Diff` (patch/FileDiff/row projection/syntax), `CodeReviewr.GitHub` (GraphQL), `CodeReviewr.Persistence` (tokens + SQLite), `CodeReviewr.Review` (PR sessions / outbox / `IReviewTree`), `CodeReviewr.App` (Avalonia UI + DI root).
-- Tests mirror projects under `tests/`; shared fixtures in `tests/CodeReviewr.TestSupport` (`RepositoryBuilder`). `TestSupport` is not a test project.
-- Namespaces match assembly (`CodeReviewr.Core`, `CodeReviewr.Git`, …). Prefer file-scoped namespaces.
-- Git interfaces live in `src/CodeReviewr.Core/Abstractions/`; implementations in `Git` / `Diff`. Register via `AddCodeReviewrGit()` / `AddCodeReviewrDiff()` and `ServiceConfiguration.Build()`.
+- Projects: `GitDelta.Core` (domain, settings, abstractions), `GitDelta.Git` (CliWrap + porcelain), `GitDelta.Diff` (patch/FileDiff/row projection/syntax), `GitDelta.GitHub` (GraphQL), `GitDelta.Persistence` (tokens + SQLite), `GitDelta.Review` (PR sessions / outbox / `IReviewTree`), `GitDelta.App` (Avalonia UI + DI root).
+- Tests mirror projects under `tests/`; shared fixtures in `tests/GitDelta.TestSupport` (`RepositoryBuilder`). `TestSupport` is not a test project.
+- Namespaces match assembly (`GitDelta.Core`, `GitDelta.Git`, …). Prefer file-scoped namespaces.
+- Git interfaces live in `src/GitDelta.Core/Abstractions/`; implementations in `Git` / `Diff`. Register via `AddGitDeltaGit()` / `AddGitDeltaDiff()` and `ServiceConfiguration.Build()`.
 - MVVM: `CommunityToolkit.Mvvm` (`ObservableObject`, `[ObservableProperty]`, `[RelayCommand]`). Views under `Views/`, viewmodels under `ViewModels/`, custom controls under `Controls/`.
 - Package versions only in `Directory.Packages.props` (`ManagePackageVersionsCentrally`). Project files reference packages without `Version=`.
 - Target `net10.0`; nullable enabled; implicit usings on.

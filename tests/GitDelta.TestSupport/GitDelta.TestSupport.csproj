@@ -1,0 +1,10 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>GitDelta.TestSupport</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GitDelta.Core\GitDelta.Core.csproj" />
+    <ProjectReference Include="..\..\src\GitDelta.Git\GitDelta.Git.csproj" />
+  </ItemGroup>
+</Project>

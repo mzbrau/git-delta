@@ -53,7 +53,7 @@ jobs:
           "$env:USERPROFILE\.dotnet\tools" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Restore
-        run: dotnet restore src/CodeReviewr.slnx
+        run: dotnet restore src/GitDelta.slnx
 
       - name: Resolve release version
         id: version
@@ -65,7 +65,7 @@ jobs:
           }
 
           $tagVersion = $tag.Substring(1)
-          $minVerVersion = (dotnet msbuild src/CodeReviewr.App/CodeReviewr.App.csproj -target:MinVer -getProperty:MinVerVersion -nologo).Trim()
+          $minVerVersion = (dotnet msbuild src/GitDelta.App/GitDelta.App.csproj -target:MinVer -getProperty:MinVerVersion -nologo).Trim()
           if ([string]::IsNullOrWhiteSpace($minVerVersion) -or $minVerVersion.StartsWith("0.0.0-alpha.0.")) {
             throw "MinVer did not resolve a release version from tag $tag. Resolved: $minVerVersion"
           }
@@ -78,14 +78,14 @@ jobs:
           "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Build
-        run: dotnet build src/CodeReviewr.slnx --configuration Release --no-restore
+        run: dotnet build src/GitDelta.slnx --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test src/CodeReviewr.slnx --configuration Release --no-build --logger "console;verbosity=minimal"
+        run: dotnet test src/GitDelta.slnx --configuration Release --no-build --logger "console;verbosity=minimal"
 
       - name: Publish Windows folder
         shell: pwsh
-        run: ./scripts/publish-windows.ps1 -Configuration Release -RuntimeIdentifier win-x64 -OutputPath artifacts/publish/CodeReviewr-win-x64
+        run: ./scripts/publish-windows.ps1 -Configuration Release -RuntimeIdentifier win-x64 -OutputPath artifacts/publish/GitDelta-win-x64
 
       - name: Package Windows installer
         shell: pwsh
@@ -96,7 +96,7 @@ jobs:
           $packageArgs = @{
             Version = $version
             RuntimeIdentifier = "win-x64"
-            PublishPath = "artifacts/publish/CodeReviewr-win-x64"
+            PublishPath = "artifacts/publish/GitDelta-win-x64"
             ReleasePath = "artifacts/release"
             RepoUrl = "https://github.com/${{ github.repository }}"
             GitHubToken = $env:GITHUB_TOKEN
@@ -111,7 +111,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v5
         with:
-          name: CodeReviewr-win-x64-release-${{ steps.version.outputs.version }}
+          name: GitDelta-win-x64-release-${{ steps.version.outputs.version }}
           path: artifacts/release
 
       - name: Publish GitHub Release
@@ -128,7 +128,7 @@ jobs:
             "--channel", "win",
             "--publish",
             "--merge",
-            "--releaseName", "CodeReviewr $version",
+            "--releaseName", "GIT DELTA $version",
             "--tag", "${{ steps.version.outputs.tag }}",
             "--targetCommitish", "${{ steps.guard.outputs.tag_commit }}"
           )

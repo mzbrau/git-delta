@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>GitDelta.AI</RootNamespace>
+    <AssemblyName>GitDelta.AI</AssemblyName>
+    <!-- GHCP001: GitHub.Copilot.Rpc.PermissionDecision is marked evaluation-only by the SDK; this
+         is the SDK's own sanctioned way to return a permission decision from OnPermissionRequest. -->
+    <NoWarn>$(NoWarn);GHCP001</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="GitDelta.AI.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GitDelta.Core\GitDelta.Core.csproj" />
+    <ProjectReference Include="..\GitDelta.Git\GitDelta.Git.csproj" />
+    <ProjectReference Include="..\GitDelta.Diff\GitDelta.Diff.csproj" />
+    <ProjectReference Include="..\GitDelta.GitHub\GitDelta.GitHub.csproj" />
+    <ProjectReference Include="..\GitDelta.Review\GitDelta.Review.csproj" />
+    <ProjectReference Include="..\GitDelta.Persistence\GitDelta.Persistence.csproj" />
+    <PackageReference Include="GitHub.Copilot.SDK" />
+    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Prompts\**\*.md" />
+  </ItemGroup>
+</Project>

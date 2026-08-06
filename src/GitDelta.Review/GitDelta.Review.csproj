@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>GitDelta.Review</RootNamespace>
+    <AssemblyName>GitDelta.Review</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="GitDelta.Review.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GitDelta.Core\GitDelta.Core.csproj" />
+    <ProjectReference Include="..\GitDelta.Diff\GitDelta.Diff.csproj" />
+    <ProjectReference Include="..\GitDelta.Git\GitDelta.Git.csproj" />
+    <ProjectReference Include="..\GitDelta.GitHub\GitDelta.GitHub.csproj" />
+    <ProjectReference Include="..\GitDelta.Persistence\GitDelta.Persistence.csproj" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

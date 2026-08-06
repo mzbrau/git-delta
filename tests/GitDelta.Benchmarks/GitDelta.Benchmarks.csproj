@@ -1,0 +1,17 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GitDelta.Core\GitDelta.Core.csproj" />
+    <ProjectReference Include="..\..\src\GitDelta.Git\GitDelta.Git.csproj" />
+    <ProjectReference Include="..\..\src\GitDelta.Diff\GitDelta.Diff.csproj" />
+    <ProjectReference Include="..\GitDelta.TestSupport\GitDelta.TestSupport.csproj" />
+  </ItemGroup>
+</Project>

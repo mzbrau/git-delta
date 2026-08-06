@@ -1,0 +1,22 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:icons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
+             x:Class="GitDelta.App.App"
+             RequestedThemeVariant="Default">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://GitDelta.App/Themes/ForgeColors.axaml" />
+        <ResourceInclude Source="avares://GitDelta.App/Themes/ForgeTypography.axaml" />
+        <ResourceInclude Source="avares://LiveMarkdown.Avalonia/Defaults.axaml"/>
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+  <Application.Styles>
+    <FluentTheme />
+    <icons:MaterialIconStyles />
+    <StyleInclude Source="avares://GitDelta.App/Themes/ForgeControls.axaml" />
+    <StyleInclude Source="avares://LiveMarkdown.Avalonia/Styles.axaml"/>
+    <StyleInclude Source="avares://LiveMarkdown.Avalonia.Mermaid/Styles.axaml"/>
+  </Application.Styles>
+</Application>
