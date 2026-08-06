@@ -1,0 +1,10 @@
+created: 2026-08-06T18:00:14.917Z
+updated: 2026-08-06T18:00:14.917Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: viewer-core
+children: []
+parentPath:
+  - app-shell
+  - diff-viewer

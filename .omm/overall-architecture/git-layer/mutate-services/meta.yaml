@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:47.905Z
+updated: 2026-08-06T17:59:47.905Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: mutate-services
+children: []
+parentPath:
+  - git-layer

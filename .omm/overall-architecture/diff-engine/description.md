@@ -1,0 +1,1 @@
+Turns raw git patches into presentable diffs: PatchParser → FileDiff, IntraLineDiffer, Unified/SideBySide row projectors, TextMateSharp syntax tokens, MemoryDiffCache. UntrackedFileDiff synthesizes all-added diffs.

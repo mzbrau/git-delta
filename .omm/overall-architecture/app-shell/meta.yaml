@@ -1,0 +1,15 @@
+created: 2026-08-06T17:58:42.318Z
+updated: 2026-08-06T17:58:58.971Z
+update_count: 2
+last_field: diagram
+kind: nested-class
+title: app-shell
+children:
+  - diff-viewer
+  - entry-bootstrap
+  - main-vm
+  - main-window
+  - review-vm
+  - service-config
+  - working-copy-vm
+parentPath: []

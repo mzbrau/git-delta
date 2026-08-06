@@ -1,0 +1,1 @@
+Advisory AI only — AiReviewCoordinator, CopilotAgentClient, ReviewTreeMaterialiser / WorkingCopyMaterialiser, embedded Prompts/*.md, AiCommitAssistService. Results persist via IAiResultStore; UI overlays never mutate FileDiff caches.

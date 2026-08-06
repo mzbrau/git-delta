@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:45.616Z
+updated: 2026-08-06T17:59:45.617Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: copilot-client
+children: []
+parentPath:
+  - ai-layer

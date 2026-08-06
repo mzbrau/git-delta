@@ -1,0 +1,9 @@
+graph LR
+    process-runner["Process Runner\nGitProcessRunner.cs"]
+    repo-gate["Repository Gate\nRepositoryGate.cs"]
+    process-runner -->|"serialises via"| repo-gate
+    repo-gate -->|"read path"| status-diff["Status + Diff Raw\nGitStatusService / GitDiffRawService"]
+    repo-gate -->|"mutate path"| mutate-services["Staging Commit Branch\nGitStaging / Commit / Branch…"]
+    repo-gate -->|"watch"| watcher["Repository Watcher\nGitRepositoryWatcher.cs"]
+    classDef entry fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    class process-runner entry

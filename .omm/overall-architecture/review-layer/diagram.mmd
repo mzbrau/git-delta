@@ -1,0 +1,7 @@
+graph LR
+    review-service["Review Service\nReviewService.cs"]
+    review-service -->|"builds"| review-tree["Review Tree\nGitReviewTree"]
+    review-service -->|"lists files via"| diff-raw["Diff Raw Path\nIGitDiffService"]
+    review-service -->|"comments via"| comment-service["Comment Service\nReviewCommentService.cs"]
+    comment-service -->|"enqueues"| review-outbox["Review Outbox\nReviewOutbox.cs"]
+    review-outbox -->|"drains via"| mutation-executor["Mutation Executor\nReviewMutationExecutor.cs"]

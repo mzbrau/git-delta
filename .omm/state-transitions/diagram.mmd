@@ -1,0 +1,21 @@
+graph TD
+    no-repo["No Repository"]
+    no-repo -->|"OpenRepositoryPathAsync"| wc-idle["WC Idle\nstatus loaded"]
+    wc-idle -->|"select file"| wc-diff["WC Diff Showing"]
+    wc-idle -->|"toggle history"| history-mode["History Mode"]
+    wc-idle -->|"toggle stash"| stash-mode["Stash Mode"]
+    wc-idle -->|"IsPullRequestMode"| pr-inbox["PR Inbox"]
+    pr-inbox -->|"select PR"| pr-opening["Opening Session"]
+    pr-opening -->|"LocalCloneRequired"| clone-prompt["Clone Prompt"]
+    clone-prompt -->|"clone ok"| pr-opening
+    pr-opening -->|"session ready"| pr-review["PR Review Active"]
+    pr-review -->|"enqueue mutation"| outbox-pending["Outbox Pending"]
+    outbox-pending -->|"drain success"| pr-review
+    outbox-pending -->|"network fail"| offline["Offline Flagged"]
+    offline -->|"retry"| outbox-pending
+    pr-review -->|"StartReviewAsync"| ai-running["AI Review Running"]
+    ai-running -->|"persist overlays"| pr-review
+    classDef entry fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    classDef concern fill:#f38ba8,stroke:#f38ba8,color:#1e1e2e
+    class no-repo entry
+    class offline concern

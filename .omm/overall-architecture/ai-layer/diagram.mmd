@@ -1,0 +1,10 @@
+graph LR
+    coordinator["AI Review Coordinator\nAiReviewCoordinator.cs"]
+    coordinator -->|"sessions via"| copilot-client["Copilot Agent Client\nAgent/CopilotAgentClient.cs"]
+    coordinator -->|"exports trees via"| materialisers["Tree Materialisers\nReviewTree + WorkingCopy"]
+    coordinator -->|"loads prompts"| prompts["Prompt Pack\nPrompts/*.md"]
+    coordinator -->|"persists results"| ai-store["AI Result Store\nIAiResultStore"]
+    classDef external fill:#585b70,stroke:#585b70,color:#cdd6f4
+    classDef store fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+    class copilot-client external
+    class ai-store store

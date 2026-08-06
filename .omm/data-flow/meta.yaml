@@ -1,0 +1,22 @@
+created: 2026-08-06T18:00:27.477Z
+updated: 2026-08-06T18:00:47.338Z
+update_count: 7
+last_field: note
+git_commit: c5f80a1
+git_branch: feature/review/2
+children:
+  - ai-run
+  - ai-tables
+  - comment-overlay
+  - diff-load
+  - file-diff
+  - outbox-drain
+  - pr-open
+  - pr-session
+  - presentation
+  - raw-patch
+  - status-refresh
+  - syntax-paint
+  - tree-export
+  - warm-store
+  - wc-lists

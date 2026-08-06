@@ -1,0 +1,1 @@
+Avalonia desktop shell: Program.cs/App.axaml.cs entry, ServiceConfiguration DI root, MainWindow + MainWindowViewModel, WorkingCopy/Review viewmodels, DiffViewer custom control, dialogs, Serilog/OTEL bootstrap.

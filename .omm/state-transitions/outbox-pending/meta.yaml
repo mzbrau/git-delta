@@ -1,0 +1,8 @@
+created: 2026-08-06T18:01:23.966Z
+updated: 2026-08-06T18:01:23.967Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: outbox-pending
+children: []
+parentPath: []

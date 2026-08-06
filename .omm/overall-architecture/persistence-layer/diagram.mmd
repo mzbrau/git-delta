@@ -1,0 +1,10 @@
+graph LR
+    token-store["Platform Token Store\nPlatformTokenStore.cs"]
+    durable-db["Durable User Store\nSqliteDurableUserStore.cs"]
+    ai-result-store["AI Result Store\nSqliteAiResultStore.cs"]
+    local-comments["Local Comment Store\nSqliteLocalCommentStore.cs"]
+    cache-db["Disposable Cache\nSqliteDisposableCacheStore.cs"]
+    durable-db -->|"shares durable.db"| ai-result-store
+    durable-db -->|"shares durable.db"| local-comments
+    classDef store fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+    class token-store,durable-db,ai-result-store,local-comments,cache-db store

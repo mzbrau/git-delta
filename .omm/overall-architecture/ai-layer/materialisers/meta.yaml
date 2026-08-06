@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:45.753Z
+updated: 2026-08-06T17:59:45.754Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: materialisers
+children: []
+parentPath:
+  - ai-layer

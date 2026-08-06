@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:39.109Z
+updated: 2026-08-06T17:59:39.109Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: git-diff-service
+children: []
+parentPath:
+  - diff-engine

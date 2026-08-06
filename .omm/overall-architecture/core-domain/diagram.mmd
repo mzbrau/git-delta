@@ -1,0 +1,9 @@
+graph LR
+    abstractions["Abstractions\nAbstractions/"]
+    diff-model["Diff Model\nDiff/DiffModel.cs"]
+    settings["Settings\nSettings/"]
+    ai-contracts["AI Contracts\nAI/ + Abstractions/"]
+    abstractions -->|"implemented by layers"| diff-model
+    settings -->|"JSON prefs"| json-store["Json Settings Store\nSettings/JsonSettingsStore.cs"]
+    classDef store fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+    class json-store store

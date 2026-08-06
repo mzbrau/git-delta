@@ -1,0 +1,1 @@
+WorkingCopyViewModel and DiffViewer are large surface areas; drive-by refactors there are high-risk. Diff stdout is byte-capped (DiffTooLargeException). External index.lock is not gated — callers must retry on contention.

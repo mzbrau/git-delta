@@ -1,0 +1,7 @@
+graph LR
+    github-client["GitHub Client\nGitHubClient.cs"]
+    account-service["Account Service\nAccountService.cs"]
+    pr-service["Pull Request Service\nPullRequestService.cs"]
+    account-service -->|"validates via"| github-client
+    pr-service -->|"queries via"| github-client
+    github-client -->|"loads"| graphql-queries["GraphQL Documents\nQueries/**/*.graphql"]

@@ -1,0 +1,1 @@
+End-to-end data paths: WC status → file selection → raw patch → FileDiff cache → row projection → DiffViewer paint; PR open → session/tree → same diff path + comment overlays + outbox; AI materialise → durable results → annotation overlays.

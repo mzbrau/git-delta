@@ -1,0 +1,19 @@
+graph LR
+    app-shell["App Shell\nsrc/GitDelta.App/"]
+    app-shell -->|"binds ViewModels"| core-domain["Core Domain\nsrc/GitDelta.Core/"]
+    app-shell -->|"loads diffs via"| diff-engine["Diff Engine\nsrc/GitDelta.Diff/"]
+    app-shell -->|"opens sessions via"| review-layer["Review Layer\nsrc/GitDelta.Review/"]
+    app-shell -->|"starts AI via"| ai-layer["AI Layer\nsrc/GitDelta.AI/"]
+    review-layer -->|"reads patches via"| git-layer["Git Layer\nsrc/GitDelta.Git/"]
+    review-layer -->|"GraphQL + accounts"| github-layer["GitHub Layer\nsrc/GitDelta.GitHub/"]
+    review-layer -->|"outbox + stores"| persistence-layer["Persistence\nsrc/GitDelta.Persistence/"]
+    diff-engine -->|"raw patches from"| git-layer
+    ai-layer -->|"overlays only via"| review-layer
+    git-layer -->|"CliWrap spawn"| git-cli["git CLI\nexternal"]
+    github-layer -->|"Bearer GraphQL"| github-api["GitHub API\nexternal"]
+    classDef external fill:#585b70,stroke:#585b70,color:#cdd6f4
+    classDef entry fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    classDef store fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+    class app-shell entry
+    class persistence-layer store
+    class git-cli,github-api external

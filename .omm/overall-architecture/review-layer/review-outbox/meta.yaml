@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:42.765Z
+updated: 2026-08-06T17:59:42.766Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: review-outbox
+children: []
+parentPath:
+  - review-layer

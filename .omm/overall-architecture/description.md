@@ -1,0 +1,1 @@
+Cross-platform desktop Git client focused on code review. .NET 10 + Avalonia 12 shell composes domain Core with Git (CliWrap), Diff (patch/rows/syntax), GitHub GraphQL, Persistence (SQLite + OS vaults), Review (PR sessions), and AI (Copilot overlays). AppHost is a dev-only Aspire wrapper for OTLP.

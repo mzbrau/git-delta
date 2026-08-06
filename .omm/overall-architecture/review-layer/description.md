@@ -1,0 +1,1 @@
+PR review orchestration: ReviewService opens sessions (locate clone, fetch head, merge-base, file list), IReviewTree (GitReviewTree), ReviewCommentService + outbox mutations, ReviewMutationExecutor drain.

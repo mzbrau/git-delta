@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:50.328Z
+updated: 2026-08-06T17:59:50.328Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: github-client
+children: []
+parentPath:
+  - github-layer

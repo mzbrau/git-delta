@@ -1,0 +1,1 @@
+Domain model and contracts only — Abstractions (Git/diff/review/AI interfaces), Diff model types (FileDiff, DiffRow, annotations), Settings (JsonSettingsStore), caching/diagnostics helpers. No Avalonia, CliWrap, or Copilot SDK.

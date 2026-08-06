@@ -1,0 +1,1 @@
+UI/workspace state machine: no-repo → WC modes (status/history/stash) ↔ PR inbox → opening/clone → active review → outbox pending/offline; optional AI review running overlays on active PR or pending-changes.

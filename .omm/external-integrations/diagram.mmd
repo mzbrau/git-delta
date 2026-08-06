@@ -1,0 +1,13 @@
+graph LR
+    app["GitDelta App"]
+    app -->|"CliWrap spawn"| git-cli["git CLI ≥2.30"]
+    app -->|"GraphQL Bearer"| github-api["GitHub GraphQL\ngithub.com / Enterprise"]
+    app -->|"local agent"| copilot-sdk["GitHub Copilot SDK"]
+    app -->|"secrets"| os-vault["OS Vault\nKeychain / CredMan"]
+    app -->|"OTLP if set"| otel["OpenTelemetry\nAspire dashboard"]
+    app -->|"package/update"| velopack["Velopack"]
+    app -->|"grammars"| textmate["TextMateSharp"]
+    classDef external fill:#585b70,stroke:#585b70,color:#cdd6f4
+    classDef entry fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    class app entry
+    class git-cli,github-api,copilot-sdk,os-vault,otel,velopack,textmate external

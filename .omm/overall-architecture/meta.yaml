@@ -1,0 +1,17 @@
+created: 2026-08-06T17:58:28.120Z
+updated: 2026-08-06T17:58:35.952Z
+update_count: 7
+last_field: note
+git_commit: c5f80a1
+git_branch: feature/review/2
+children:
+  - ai-layer
+  - app-shell
+  - core-domain
+  - diff-engine
+  - git-cli
+  - git-layer
+  - github-api
+  - github-layer
+  - persistence-layer
+  - review-layer

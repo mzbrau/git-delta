@@ -1,0 +1,14 @@
+created: 2026-08-06T17:58:45.575Z
+updated: 2026-08-06T17:59:06.077Z
+update_count: 2
+last_field: diagram
+kind: nested-class
+title: review-layer
+children:
+  - comment-service
+  - diff-raw
+  - mutation-executor
+  - review-outbox
+  - review-service
+  - review-tree
+parentPath: []

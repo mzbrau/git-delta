@@ -1,0 +1,22 @@
+graph LR
+    status-refresh["Status Refresh\nIGitStatusService"]
+    status-refresh -->|"porcelain lists"| wc-lists["WC File Lists\nWorkingCopyStatusController"]
+    wc-lists -->|"selection"| diff-load["Diff Load\nWorkingCopyDiffPresenter"]
+    diff-load -->|"SWR warm"| warm-store["Diff Warm Store\nDiffWarmStore"]
+    diff-load -->|"miss/refresh"| raw-patch["Raw Patch\nGitDiffRawService"]
+    raw-patch -->|"parse+enrich"| file-diff["FileDiff Cache\nIGitDiffService / IDiffCache"]
+    file-diff -->|"project rows"| presentation["Diff Presentation\nDiffPresentation"]
+    presentation -->|"tokenise"| syntax-paint["Syntax + Paint\nDiffViewer"]
+    pr-open["PR Open\nReviewService.OpenAsync"]
+    pr-open -->|"GraphQL detail"| pr-session["Review Session\nReviewSession + IReviewTree"]
+    pr-session -->|"merge-base..head"| file-diff
+    pr-session -->|"threads"| comment-overlay["Comment Overlays\nReviewCommentService"]
+    comment-overlay -->|"mutations"| outbox-drain["Outbox Drain\nReviewOutbox"]
+    ai-run["AI Review Run\nAiReviewCoordinator"]
+    ai-run -->|"materialise"| tree-export["Tree Export\ntrees/<sha>/"]
+    ai-run -->|"persist"| ai-tables["AI Tables\ndurable.db"]
+    ai-tables -->|"overlays"| syntax-paint
+    classDef store fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+    classDef entry fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    class status-refresh,pr-open,ai-run entry
+    class warm-store,file-diff,ai-tables,tree-export store

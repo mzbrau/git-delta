@@ -1,0 +1,13 @@
+created: 2026-08-06T17:58:43.201Z
+updated: 2026-08-06T17:59:01.379Z
+update_count: 2
+last_field: diagram
+kind: nested-class
+title: core-domain
+children:
+  - abstractions
+  - ai-contracts
+  - diff-model
+  - json-store
+  - settings
+parentPath: []

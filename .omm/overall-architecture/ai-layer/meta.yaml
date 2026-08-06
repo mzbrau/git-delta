@@ -1,0 +1,13 @@
+created: 2026-08-06T17:58:46.507Z
+updated: 2026-08-06T17:59:08.307Z
+update_count: 2
+last_field: diagram
+kind: nested-class
+title: ai-layer
+children:
+  - ai-store
+  - coordinator
+  - copilot-client
+  - materialisers
+  - prompts
+parentPath: []

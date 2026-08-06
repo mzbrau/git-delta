@@ -1,0 +1,1 @@
+HttpClient GraphQL client (github.com + Enterprise), AccountService (token validate + settings metadata), PullRequestService inbox/detail, capability probe for markFileAsViewed. Queries live under Queries/**/*.graphql.

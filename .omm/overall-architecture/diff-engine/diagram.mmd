@@ -1,0 +1,9 @@
+graph LR
+    git-diff-service["Git Diff Service\nGitDiffService.cs"]
+    git-diff-service -->|"parses"| patch-parser["Patch Parser\nPatchParser.cs"]
+    patch-parser -->|"enriches"| intra-line["Intra-Line Differ\nIntraLineDiffer.cs"]
+    intra-line -->|"caches"| memory-cache["Memory Diff Cache\nvia IDiffCache"]
+    memory-cache -->|"projects"| row-projectors["Row Projectors\nUnified + SideBySide"]
+    row-projectors -->|"tokenises"| syntax["Syntax Tokens\nSyntaxTokenService.cs"]
+    classDef store fill:#a6e3a1,stroke:#a6e3a1,color:#1e1e2e
+    class memory-cache store

@@ -1,0 +1,1 @@
+Solution: src/GitDelta.slnx. Layers enforced by ArchitectureTests — no Avalonia outside App; CliWrap only in Git; Copilot SDK only in AI; App must not take IGitProcessRunner. Design intent lives in Plan-Phase1/2/3.md; treat plans as intent, not unfinished checklists.

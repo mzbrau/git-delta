@@ -1,0 +1,12 @@
+created: 2026-08-06T17:58:48.320Z
+updated: 2026-08-06T17:59:12.201Z
+update_count: 2
+last_field: diagram
+kind: nested-class
+title: github-layer
+children:
+  - account-service
+  - github-client
+  - graphql-queries
+  - pr-service
+parentPath: []

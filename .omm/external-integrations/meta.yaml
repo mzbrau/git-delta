@@ -1,0 +1,15 @@
+created: 2026-08-06T18:00:35.113Z
+updated: 2026-08-06T18:00:55.002Z
+update_count: 7
+last_field: note
+git_commit: c5f80a1
+git_branch: feature/review/2
+children:
+  - app
+  - copilot-sdk
+  - git-cli
+  - github-api
+  - os-vault
+  - otel
+  - textmate
+  - velopack

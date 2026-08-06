@@ -1,0 +1,50 @@
+created: 2026-08-06T18:00:30.571Z
+updated: 2026-08-06T18:01:46.862Z
+update_count: 8
+last_field: diagram
+git_commit: c5f80a1
+git_branch: feature/review/2
+children:
+  - ai
+  - app
+  - apphost
+  - core
+  - diff
+  - git
+  - github
+  - persistence
+  - review
+prev_diagram: |
+  graph TD
+      core["GitDelta.Core"]
+      git["GitDelta.Git"]
+      diff["GitDelta.Diff"]
+      github["GitDelta.GitHub"]
+      persistence["GitDelta.Persistence"]
+      review["GitDelta.Review"]
+      ai["GitDelta.AI"]
+      app["GitDelta.App"]
+      apphost["GitDelta.AppHost"]
+      git --> core
+      diff --> core
+      github --> core
+      persistence --> core
+      review --> core
+      review --> diff
+      review --> git
+      review --> github
+      review --> persistence
+      ai --> core
+      ai --> git
+      ai --> diff
+      ai --> github
+      ai --> review
+      ai --> persistence
+      app --> core
+      app --> git
+      app --> diff
+      app --> github
+      app --> persistence
+      app --> review
+      app --> ai
+      apphost --> app

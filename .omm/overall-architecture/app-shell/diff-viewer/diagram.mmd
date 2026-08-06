@@ -1,0 +1,4 @@
+graph LR
+    viewer-core["Viewer Core\nDiffViewer.cs"]
+    viewer-core -->|"overview gutter"| minimap["Minimap\nDiffViewerMinimap.cs"]
+    viewer-core -->|"glyph/layout cache"| paint-cache["Paint Cache\nDiffViewerPaintCache.cs"]

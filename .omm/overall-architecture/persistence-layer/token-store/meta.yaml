@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:50.633Z
+updated: 2026-08-06T17:59:50.634Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: token-store
+children: []
+parentPath:
+  - persistence-layer

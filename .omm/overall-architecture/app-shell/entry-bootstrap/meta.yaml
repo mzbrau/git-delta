@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:31.326Z
+updated: 2026-08-06T17:59:31.327Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: entry-bootstrap
+children: []
+parentPath:
+  - app-shell

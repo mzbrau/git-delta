@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:50.459Z
+updated: 2026-08-06T17:59:50.459Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: account-service
+children: []
+parentPath:
+  - github-layer

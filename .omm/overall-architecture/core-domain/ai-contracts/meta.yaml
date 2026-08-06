@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:35.507Z
+updated: 2026-08-06T17:59:35.508Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: ai-contracts
+children: []
+parentPath:
+  - core-domain

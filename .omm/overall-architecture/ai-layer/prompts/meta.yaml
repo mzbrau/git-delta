@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:45.872Z
+updated: 2026-08-06T17:59:45.873Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: prompts
+children: []
+parentPath:
+  - ai-layer

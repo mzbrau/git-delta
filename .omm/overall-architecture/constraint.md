@@ -1,0 +1,1 @@
+All Git goes through CliWrap / IGitProcessRunner — no LibGit2Sharp, no shell string concat. Core/Git/Diff must not reference Avalonia. AI never mutates cached FileDiffs; overlays only via IDiffAnnotationSource. Package versions only in Directory.Packages.props.

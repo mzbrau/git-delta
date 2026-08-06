@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:45.483Z
+updated: 2026-08-06T17:59:45.483Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: coordinator
+children: []
+parentPath:
+  - ai-layer

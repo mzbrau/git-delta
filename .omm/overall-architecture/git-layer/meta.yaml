@@ -1,0 +1,13 @@
+created: 2026-08-06T17:58:47.421Z
+updated: 2026-08-06T17:59:09.985Z
+update_count: 2
+last_field: diagram
+kind: nested-class
+title: git-layer
+children:
+  - mutate-services
+  - process-runner
+  - repo-gate
+  - status-diff
+  - watcher
+parentPath: []

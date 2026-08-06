@@ -1,0 +1,12 @@
+created: 2026-08-06T17:59:32.008Z
+updated: 2026-08-06T18:00:14.159Z
+update_count: 2
+last_field: diagram
+kind: nested-class
+title: diff-viewer
+children:
+  - minimap
+  - paint-cache
+  - viewer-core
+parentPath:
+  - app-shell

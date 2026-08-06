@@ -1,0 +1,33 @@
+graph TD
+    core["GitDelta.Core"]
+    git["GitDelta.Git"]
+    diff["GitDelta.Diff"]
+    github["GitDelta.GitHub"]
+    persistence["GitDelta.Persistence"]
+    review["GitDelta.Review"]
+    ai["GitDelta.AI"]
+    app["GitDelta.App"]
+    apphost["GitDelta.AppHost"]
+    git -->|"ProjectReference"| core
+    diff -->|"ProjectReference"| core
+    github -->|"ProjectReference"| core
+    persistence -->|"ProjectReference"| core
+    review -->|"ProjectReference"| core
+    review -->|"ProjectReference"| diff
+    review -->|"ProjectReference"| git
+    review -->|"ProjectReference"| github
+    review -->|"ProjectReference"| persistence
+    ai -->|"ProjectReference"| core
+    ai -->|"ProjectReference"| git
+    ai -->|"ProjectReference"| diff
+    ai -->|"ProjectReference"| github
+    ai -->|"ProjectReference"| review
+    ai -->|"ProjectReference"| persistence
+    app -->|"ProjectReference"| core
+    app -->|"ProjectReference"| git
+    app -->|"ProjectReference"| diff
+    app -->|"ProjectReference"| github
+    app -->|"ProjectReference"| persistence
+    app -->|"ProjectReference"| review
+    app -->|"ProjectReference"| ai
+    apphost -->|"ProjectReference"| app

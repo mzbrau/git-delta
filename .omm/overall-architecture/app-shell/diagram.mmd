@@ -1,0 +1,11 @@
+graph LR
+    entry-bootstrap["Entry Bootstrap\nProgram.cs / App.axaml.cs"]
+    entry-bootstrap -->|"builds DI"| service-config["Service Configuration\nServices/ServiceConfiguration.cs"]
+    entry-bootstrap -->|"shows"| main-window["Main Window\nViews/MainWindow.axaml"]
+    main-window -->|"DataContext"| main-vm["Main Window VM\nViewModels/MainWindowViewModel.cs"]
+    main-vm -->|"owns"| working-copy-vm["Working Copy VM\nViewModels/WorkingCopyViewModel.cs"]
+    main-vm -->|"owns"| review-vm["Review VM\nViewModels/ReviewViewModel.cs"]
+    working-copy-vm -->|"presents rows"| diff-viewer["Diff Viewer\nControls/DiffViewer.cs"]
+    review-vm -->|"presents rows"| diff-viewer
+    classDef entry fill:#89b4fa,stroke:#89b4fa,color:#1e1e2e
+    class entry-bootstrap,main-window entry

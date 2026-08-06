@@ -1,0 +1,9 @@
+created: 2026-08-06T17:59:31.895Z
+updated: 2026-08-06T17:59:31.896Z
+update_count: 1
+last_field: description
+kind: nested-class
+title: review-vm
+children: []
+parentPath:
+  - app-shell
