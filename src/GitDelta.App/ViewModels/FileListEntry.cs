@@ -1,8 +1,8 @@
 using Avalonia;
+using GitDelta.App.Collections;
 using GitDelta.Core;
 using GitDelta.Core.Diff;
 using CommunityToolkit.Mvvm.ComponentModel;
-using System.Collections.ObjectModel;
 
 namespace GitDelta.App.ViewModels;
 
@@ -119,24 +119,28 @@ public partial class FileListEntry : ObservableObject
 public static class FileListLayoutHelper
 {
     public static void Rebuild(
-        ObservableCollection<FileListEntry> target,
+        ResettableObservableCollection<FileListEntry> target,
         IReadOnlyList<FileItemViewModel> files,
         FileListLayoutMode mode,
         bool flatUsesFullPath,
         IDictionary<string, bool> expandState)
     {
-        target.Clear();
         if (files.Count == 0)
+        {
+            target.Reset([]);
             return;
+        }
 
         if (mode == FileListLayoutMode.Flat)
         {
+            var flatRows = new List<FileListEntry>(files.Count);
             foreach (var file in files)
             {
                 var label = flatUsesFullPath ? file.Path.Value : file.Name;
-                target.Add(new FileListEntry(0, label, file));
+                flatRows.Add(new FileListEntry(0, label, file));
             }
 
+            target.Reset(flatRows);
             return;
         }
 
@@ -145,11 +149,12 @@ public static class FileListLayoutHelper
         var flat = new List<(FileTreeNode Node, int Depth)>();
         FileTreeBuilder.Flatten(roots, key => IsExpanded(expandState, key), flat);
 
+        var rows = new List<FileListEntry>(flat.Count);
         foreach (var (node, depth) in flat)
         {
             if (node.IsFolder)
             {
-                target.Add(new FileListEntry(
+                rows.Add(new FileListEntry(
                     depth,
                     node.Label,
                     node.Key,
@@ -157,21 +162,23 @@ public static class FileListLayoutHelper
             }
             else if (node.FilePath is not null && byPath.TryGetValue(node.FilePath, out var file))
             {
-                target.Add(new FileListEntry(depth, file.Name, file));
+                rows.Add(new FileListEntry(depth, file.Name, file));
             }
         }
+
+        target.Reset(rows);
     }
 
     /// <summary>
     /// Flat list of matching files with nested hit rows. Expand state defaults to expanded.
     /// </summary>
     public static void RebuildSearchResults(
-        ObservableCollection<FileListEntry> target,
+        ResettableObservableCollection<FileListEntry> target,
         IReadOnlyList<(FileItemViewModel File, IReadOnlyList<ChangedLineSearch.Hit> Hits)> results,
         bool flatUsesFullPath,
         IDictionary<string, bool> expandState)
     {
-        target.Clear();
+        var rows = new List<FileListEntry>();
         foreach (var (file, hits) in results)
         {
             if (hits.Count == 0)
@@ -180,13 +187,15 @@ public static class FileListLayoutHelper
             var key = file.Path.Value;
             var expanded = IsExpanded(expandState, key);
             var label = flatUsesFullPath ? file.Path.Value : file.Name;
-            target.Add(FileListEntry.ForSearchGroup(0, label, file, expanded));
+            rows.Add(FileListEntry.ForSearchGroup(0, label, file, expanded));
             if (!expanded)
                 continue;
 
             foreach (var hit in hits)
-                target.Add(FileListEntry.ForSearchHit(1, file, hit));
+                rows.Add(FileListEntry.ForSearchHit(1, file, hit));
         }
+
+        target.Reset(rows);
     }
 
     public static bool IsExpanded(IDictionary<string, bool> expandState, string key)
@@ -198,7 +207,7 @@ public static class FileListLayoutHelper
     }
 
     public static void ToggleFolder(
-        ObservableCollection<FileListEntry> target,
+        ResettableObservableCollection<FileListEntry> target,
         IReadOnlyList<FileItemViewModel> files,
         IDictionary<string, bool> expandState,
         string folderKey,

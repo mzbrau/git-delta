@@ -871,7 +871,7 @@
                 </Button>
               </StackPanel>
 
-              <Grid RowDefinitions="*,4,*">
+              <Grid RowDefinitions="*,4,*,Auto">
                 <!-- Staged -->
                 <DockPanel Grid.Row="0" MinHeight="80">
                   <DockPanel DockPanel.Dock="Top" Margin="8,0,8,4">
@@ -913,11 +913,6 @@
                                   Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
                       </ContextMenu>
                     </ListBox.ContextMenu>
-                    <ListBox.ItemsPanel>
-                      <ItemsPanelTemplate>
-                        <StackPanel />
-                      </ItemsPanelTemplate>
-                    </ListBox.ItemsPanel>
                     <ListBox.ItemTemplate>
                       <DataTemplate x:DataType="vm:FileListEntry">
                         <ctrl:FileListRowView
@@ -937,107 +932,97 @@
                 <GridSplitter Grid.Row="1" Height="4" ResizeDirection="Rows"
                               Background="{DynamicResource ForgeOutlineVariantBrush}" />
 
-                <!-- Unstaged + Conflicted -->
-                <ScrollViewer Grid.Row="2" MinHeight="80"
-                              HorizontalScrollBarVisibility="Disabled">
-                  <StackPanel Margin="0,0,0,12">
-                    <DockPanel Margin="8,8,8,4">
-                      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
-                        <Button Classes="Link" Content="Stage Selected"
-                                Command="{Binding WorkingCopy.StageSelectedCommand}"
-                                IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
-                        <Button Classes="Link" Content="Stage All"
-                                Command="{Binding WorkingCopy.StageAllCommand}" />
-                      </StackPanel>
-                      <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnToggleUnstaged">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                          <icons:MaterialIcon Kind="{Binding WorkingCopy.UnstagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
-                                              Width="14" Height="14" />
-                          <StackPanel Orientation="Horizontal" Spacing="4">
-                            <TextBlock Text="UNSTAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
-                            <TextBlock Text="{Binding WorkingCopy.UnstagedFileCount, StringFormat=({0})}" Classes="SectionLabel" VerticalAlignment="Center" />
-                          </StackPanel>
-                        </StackPanel>
-                      </Button>
-                    </DockPanel>
-                    <ListBox x:Name="UnstagedFileList"
-                             ItemsSource="{Binding WorkingCopy.UnstagedFileEntries}"
-                             SelectionMode="Multiple"
-                             SelectionChanged="OnFileSelectionChanged"
-                             PointerPressed="OnFileListPointerPressed"
-                             ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             IsVisible="{Binding WorkingCopy.UnstagedExpanded}"
-                             Classes="FileList">
-                      <ListBox.ContextMenu>
-                        <ContextMenu>
-                          <MenuItem Header="Stage"
-                                    Command="{Binding WorkingCopy.StageSelectedCommand}" />
-                          <MenuItem Header="Discard"
-                                    Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
-                          <Separator />
-                          <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
-                                    Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
-                        </ContextMenu>
-                      </ListBox.ContextMenu>
-                      <ListBox.ItemsPanel>
-                        <ItemsPanelTemplate>
-                          <StackPanel />
-                        </ItemsPanelTemplate>
-                      </ListBox.ItemsPanel>
-                      <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="vm:FileListEntry">
-                          <ctrl:FileListRowView
-                              ShowStageCheckbox="True"
-                              StageCheckboxChecked="false" />
-                        </DataTemplate>
-                      </ListBox.ItemTemplate>
-                      <ListBox.Styles>
-                        <Style Selector="ListBoxItem">
-                          <Setter Property="Padding" Value="0" />
-                          <Setter Property="MinHeight" Value="24" />
-                        </Style>
-                      </ListBox.Styles>
-                    </ListBox>
-
-                    <!-- Conflicted -->
-                    <StackPanel IsVisible="{Binding WorkingCopy.HasConflictedFiles}" Margin="0,16,0,0">
-                      <TextBlock Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
-                                 Foreground="{DynamicResource ForgeErrorBrush}" />
-                      <ListBox x:Name="ConflictedFileList"
-                               ItemsSource="{Binding WorkingCopy.ConflictedFileEntries}"
-                               SelectionMode="Multiple"
-                               SelectionChanged="OnFileSelectionChanged"
-                               PointerPressed="OnFileListPointerPressed"
-                               ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                               Classes="FileList">
-                        <ListBox.ContextMenu>
-                          <ContextMenu>
-                            <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
-                                      Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
-                          </ContextMenu>
-                        </ListBox.ContextMenu>
-                        <ListBox.ItemsPanel>
-                          <ItemsPanelTemplate>
-                            <StackPanel />
-                          </ItemsPanelTemplate>
-                        </ListBox.ItemsPanel>
-                        <ListBox.ItemTemplate>
-                          <DataTemplate x:DataType="vm:FileListEntry">
-                            <ctrl:FileListRowView />
-                          </DataTemplate>
-                        </ListBox.ItemTemplate>
-                        <ListBox.Styles>
-                          <Style Selector="ListBoxItem">
-                            <Setter Property="Padding" Value="0" />
-                            <Setter Property="MinHeight" Value="24" />
-                          </Style>
-                        </ListBox.Styles>
-                      </ListBox>
+                <!-- Unstaged (owns its own scroll; virtualized) -->
+                <DockPanel Grid.Row="2" MinHeight="80" Margin="0,0,0,0">
+                  <DockPanel DockPanel.Dock="Top" Margin="8,8,8,4">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="8">
+                      <Button Classes="Link" Content="Stage Selected"
+                              Command="{Binding WorkingCopy.StageSelectedCommand}"
+                              IsVisible="{Binding WorkingCopy.HasUnstagedSelection}" />
+                      <Button Classes="Link" Content="Stage All"
+                              Command="{Binding WorkingCopy.StageAllCommand}" />
                     </StackPanel>
-                  </StackPanel>
-                </ScrollViewer>
+                    <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnToggleUnstaged">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <icons:MaterialIcon Kind="{Binding WorkingCopy.UnstagedExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                            Width="14" Height="14" />
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                          <TextBlock Text="UNSTAGED CHANGES" Classes="SectionLabel" VerticalAlignment="Center" />
+                          <TextBlock Text="{Binding WorkingCopy.UnstagedFileCount, StringFormat=({0})}" Classes="SectionLabel" VerticalAlignment="Center" />
+                        </StackPanel>
+                      </StackPanel>
+                    </Button>
+                  </DockPanel>
+                  <ListBox x:Name="UnstagedFileList"
+                           ItemsSource="{Binding WorkingCopy.UnstagedFileEntries}"
+                           SelectionMode="Multiple"
+                           SelectionChanged="OnFileSelectionChanged"
+                           PointerPressed="OnFileListPointerPressed"
+                           ScrollViewer.VerticalScrollBarVisibility="Auto"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                           IsVisible="{Binding WorkingCopy.UnstagedExpanded}"
+                           Classes="FileList">
+                    <ListBox.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Header="Stage"
+                                  Command="{Binding WorkingCopy.StageSelectedCommand}" />
+                        <MenuItem Header="Discard"
+                                  Command="{Binding WorkingCopy.DiscardSelectedFilesCommand}" />
+                        <Separator />
+                        <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                  Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
+                      </ContextMenu>
+                    </ListBox.ContextMenu>
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:FileListEntry">
+                        <ctrl:FileListRowView
+                            ShowStageCheckbox="True"
+                            StageCheckboxChecked="false" />
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.Styles>
+                      <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="24" />
+                      </Style>
+                    </ListBox.Styles>
+                  </ListBox>
+                </DockPanel>
+
+                <!-- Conflicted (bounded height; ListBox owns scroll) -->
+                <DockPanel Grid.Row="3"
+                           IsVisible="{Binding WorkingCopy.HasConflictedFiles}"
+                           Margin="0,8,0,12"
+                           MaxHeight="240">
+                  <TextBlock DockPanel.Dock="Top" Text="CONFLICTED" Classes="SectionLabel" Margin="8,0,8,4"
+                             Foreground="{DynamicResource ForgeErrorBrush}" />
+                  <ListBox x:Name="ConflictedFileList"
+                           ItemsSource="{Binding WorkingCopy.ConflictedFileEntries}"
+                           SelectionMode="Multiple"
+                           SelectionChanged="OnFileSelectionChanged"
+                           PointerPressed="OnFileListPointerPressed"
+                           ScrollViewer.VerticalScrollBarVisibility="Auto"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                           Classes="FileList">
+                    <ListBox.ContextMenu>
+                      <ContextMenu>
+                        <MenuItem Header="{Binding WorkingCopy.RevealInFileManagerLabel}"
+                                  Command="{Binding WorkingCopy.RevealSelectedInFileManagerCommand}" />
+                      </ContextMenu>
+                    </ListBox.ContextMenu>
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:FileListEntry">
+                        <ctrl:FileListRowView />
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                    <ListBox.Styles>
+                      <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="MinHeight" Value="24" />
+                      </Style>
+                    </ListBox.Styles>
+                  </ListBox>
+                </DockPanel>
               </Grid>
             </DockPanel>
           </DockPanel>
@@ -1725,6 +1710,7 @@
                                        Rows="{Binding WorkingCopy.DiffRows}"
                                        ViewMode="{Binding WorkingCopy.ViewMode}"
                                        EmptyMessage="{Binding WorkingCopy.DiffEmptyMessage}"
+                                       EmptyDetail="{Binding WorkingCopy.DiffEmptyDetail}"
                                        ShowBrandWatermark="{Binding WorkingCopy.ShowDiffBrandWatermark}"
                                        Annotations="{Binding WorkingCopy.PendingReview.DiffAnnotations}"
                                        SelectedAnnotation="{Binding WorkingCopy.PendingReview.SelectedAnnotation, Mode=TwoWay}"
@@ -3568,6 +3554,7 @@
                 <controls:DiffViewer Rows="{Binding WorkingCopy.DiffRows}"
                                      ViewMode="{Binding WorkingCopy.ViewMode}"
                                      EmptyMessage="{Binding WorkingCopy.DiffEmptyMessage}"
+                                     EmptyDetail="{Binding WorkingCopy.DiffEmptyDetail}"
                                      ShowBrandWatermark="{Binding WorkingCopy.ShowDiffBrandWatermark}"
                                      CanStageLines="False"
                                      CanUnstageLines="False"
@@ -3956,12 +3943,61 @@
                     <TextBlock Text="DIAGNOSTICS" Classes="PanelHeader" Opacity="0.7" />
                     <CheckBox Content="Simulate slow Git (1–5s delay)"
                               IsChecked="{Binding SimulateSlowGit}" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                      <TextBlock Text="Diff prefetch concurrency" VerticalAlignment="Center" FontSize="12" />
-                      <ComboBox ItemsSource="{Binding DiffPrefetchConcurrencyOptions}"
-                                SelectedIndex="{Binding DiffPrefetchConcurrencyIndex}"
-                                MinWidth="56" />
+
+                    <TextBlock Text="Background diff prefetch" FontSize="12" FontWeight="SemiBold" Opacity="0.85" />
+
+                    <StackPanel Spacing="4">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Diff prefetch concurrency" VerticalAlignment="Center" FontSize="12" />
+                        <ComboBox ItemsSource="{Binding DiffPrefetchConcurrencyOptions}"
+                                  SelectedIndex="{Binding DiffPrefetchConcurrencyIndex}"
+                                  MinWidth="56" />
+                      </StackPanel>
+                      <TextBlock FontSize="11" TextWrapping="Wrap"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                 Text="How many background diff warms may run at once. Higher fills stats faster but uses more Git/CPU and can feel busier on slow machines. Lower is gentler; remaining files take longer to prepare." />
                     </StackPanel>
+
+                    <StackPanel Spacing="4">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Drip delay (ms)" VerticalAlignment="Center" FontSize="12" Width="160" />
+                        <NumericUpDown Value="{Binding DiffPrefetchDripDelayMs}" Minimum="0" Maximum="5000" Width="120" />
+                      </StackPanel>
+                      <TextBlock FontSize="11" TextWrapping="Wrap"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                 Text="Pause after each background file warm in the slow drip phase (after the priority burst). Higher slows background fill and keeps the UI more idle between warms (safer on slow disks/AV). Lower or 0 drips as fast as sequential warms allow so large change lists finish sooner on fast machines." />
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Indicator throttle (ms)" VerticalAlignment="Center" FontSize="12" Width="160" />
+                        <NumericUpDown Value="{Binding DiffPrefetchIndicatorThrottleMs}" Minimum="50" Maximum="5000" Width="120" />
+                      </StackPanel>
+                      <TextBlock FontSize="11" TextWrapping="Wrap"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                 Text="Minimum time between file-list cache/stat indicator refreshes while dripping. Higher means fewer UI updates and calmer list chrome (stats appear in larger batches). Lower updates indicators more often for snappier feedback at the cost of more layout work." />
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Priority paths" VerticalAlignment="Center" FontSize="12" Width="160" />
+                        <NumericUpDown Value="{Binding DiffPrefetchPriorityPaths}" Minimum="1" Maximum="500" Width="120" />
+                      </StackPanel>
+                      <TextBlock FontSize="11" TextWrapping="Wrap"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                 Text="How many files are enqueued immediately (selection + neighbors first) before the paced drip starts. Higher makes more diffs ready sooner after open/refresh with a larger initial Git burst. Lower keeps the initial burst small so more of the list relies on drip (better when opening huge working copies on slow machines)." />
+                    </StackPanel>
+
+                    <StackPanel Spacing="4">
+                      <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="Neighbor radius" VerticalAlignment="Center" FontSize="12" Width="160" />
+                        <NumericUpDown Value="{Binding DiffPrefetchNeighborRadius}" Minimum="0" Maximum="64" Width="120" />
+                      </StackPanel>
+                      <TextBlock FontSize="11" TextWrapping="Wrap"
+                                 Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
+                                 Text="How many list neighbors above/below the selected file are included in the priority burst. Higher makes scrolling near the selection more likely to hit a warm diff. Lower keeps priority tighter on the selection; neighbors wait for drip." />
+                    </StackPanel>
+
                     <TextBlock Text="{Binding Diagnostics.Summary}" FontSize="11" TextWrapping="Wrap"
                                Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
                     <ItemsControl ItemsSource="{Binding Diagnostics.LastTimings}" MaxHeight="220">

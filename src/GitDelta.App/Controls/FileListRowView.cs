@@ -383,10 +383,41 @@ public sealed class FileListRowView : UserControl
         if (_subscribedFile is null)
             return;
 
-        if (e.PropertyName is nameof(FileItemViewModel.IsViewed))
-            UpdateDerivedChrome();
-        else
-            ApplyFile(_subscribedFile);
+        switch (e.PropertyName)
+        {
+            case nameof(FileItemViewModel.IsViewed):
+                UpdateDerivedChrome();
+                break;
+            case nameof(FileItemViewModel.HasCachedDiff):
+            case nameof(FileItemViewModel.IsDiffStale):
+                _cacheTick.IsVisible = _subscribedFile.HasCachedDiff;
+                break;
+            case nameof(FileItemViewModel.LinesAdded):
+            case nameof(FileItemViewModel.LinesRemoved):
+            case nameof(FileItemViewModel.HasLineStats):
+            case nameof(FileItemViewModel.ChangePercent):
+            case nameof(FileItemViewModel.HasChangePercent):
+            case nameof(FileItemViewModel.ChangePercentTooltip):
+                ApplyCacheStatsChrome(_subscribedFile);
+                break;
+            default:
+                ApplyFile(_subscribedFile);
+                break;
+        }
+    }
+
+    private void ApplyCacheStatsChrome(FileItemViewModel file)
+    {
+        _pie.IsVisible = file.HasChangePercent;
+        _pie.Percent = file.ChangePercent;
+        ToolTip.SetTip(_pie, file.ChangePercentTooltip);
+
+        _lineStats.IsVisible = file.HasLineStats;
+        var added = file.LinesAdded ?? 0;
+        var removed = file.LinesRemoved ?? 0;
+        _linesAdded.Text = $"+{added}";
+        _linesRemoved.Text = $"-{removed}";
+        ToolTip.SetTip(_lineStats, $"+{added} lines added, -{removed} lines removed");
     }
 
     private void ApplyFile(FileItemViewModel file)

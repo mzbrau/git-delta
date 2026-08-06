@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
@@ -14,6 +15,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using GitDelta.App.Controls;
+using GitDelta.App.Diagnostics;
 using GitDelta.App.Services;
 using GitDelta.App.ViewModels;
 using GitDelta.Core;
@@ -1438,6 +1440,23 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnColumnSplitterDragCompleted(object? sender, VectorEventArgs e) =>
+    private void OnColumnSplitterDragCompleted(object? sender, VectorEventArgs e)
+    {
         Vm.CaptureColumnWidthsFromGrid(MainColumns);
+
+        var sw = Stopwatch.StartNew();
+        var visibleApprox = Vm.WorkingCopy.StagedFileEntries.Count
+            + Vm.WorkingCopy.UnstagedFileEntries.Count
+            + Vm.WorkingCopy.ConflictedFileEntries.Count;
+        try
+        {
+            Dispatcher.UIThread.Post(
+                () => OpenTelemetryBootstrap.RecordFileListResize(sw.Elapsed.TotalMilliseconds, visibleApprox),
+                DispatcherPriority.Loaded);
+        }
+        catch (InvalidOperationException)
+        {
+            OpenTelemetryBootstrap.RecordFileListResize(sw.Elapsed.TotalMilliseconds, visibleApprox);
+        }
+    }
 }

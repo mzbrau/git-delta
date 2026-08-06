@@ -31,6 +31,7 @@ public sealed class DiffViewer : Control
     private readonly Image _brandLogo;
     private readonly TextBlock _brandTitle;
     private readonly TextBlock _brandCaption;
+    private readonly TextBlock _brandDetail;
 
     public DiffViewer()
     {
@@ -74,13 +75,23 @@ public sealed class DiffViewer : Control
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = 420,
         };
+        _brandDetail = new TextBlock
+        {
+            FontSize = 13,
+            Opacity = 0.65,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 420,
+            IsVisible = false,
+        };
         _brandOverlay = new StackPanel
         {
             Spacing = 16,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             IsVisible = false,
-            Children = { _brandLogo, _brandTitle, _brandCaption },
+            Children = { _brandLogo, _brandTitle, _brandCaption, _brandDetail },
         };
 
         LogicalChildren.Add(_emptyMessage);
@@ -104,6 +115,9 @@ public sealed class DiffViewer : Control
 
     public static readonly StyledProperty<string> EmptyMessageProperty =
         AvaloniaProperty.Register<DiffViewer, string>(nameof(EmptyMessage), "Select a file to view its diff");
+
+    public static readonly StyledProperty<string?> EmptyDetailProperty =
+        AvaloniaProperty.Register<DiffViewer, string?>(nameof(EmptyDetail));
 
     public static readonly StyledProperty<bool> ShowBrandWatermarkProperty =
         AvaloniaProperty.Register<DiffViewer, bool>(nameof(ShowBrandWatermark));
@@ -193,6 +207,8 @@ public sealed class DiffViewer : Control
     private const int PaintWarmViewportMultiplier = 2;
     private const double BrandHeroLogoFraction = 0.8;
     private const double BrandHeroReservedBelow = 88;
+    private const double BrandLogoIdleMax = 112;
+    private const double BrandLogoDetailMax = 72;
 
     private readonly record struct LinePaintKey(int RowIndex, byte Side, int Epoch);
     private readonly record struct DisplayTextKey(int RowIndex, byte Side, int ContentEpoch);
@@ -260,6 +276,12 @@ public sealed class DiffViewer : Control
     {
         get => GetValue(EmptyMessageProperty);
         set => SetValue(EmptyMessageProperty, value);
+    }
+
+    public string? EmptyDetail
+    {
+        get => GetValue(EmptyDetailProperty);
+        set => SetValue(EmptyDetailProperty, value);
     }
 
     public bool ShowBrandWatermark
@@ -356,7 +378,7 @@ public sealed class DiffViewer : Control
     {
         AffectsRender<DiffViewer>(
             RowsProperty, ViewModeProperty, ShowWhitespaceProperty, RowHeightProperty,
-            EmptyMessageProperty, ShowBrandWatermarkProperty, CanStageLinesProperty, CanUnstageLinesProperty, CanDiscardLinesProperty,
+            EmptyMessageProperty, EmptyDetailProperty, ShowBrandWatermarkProperty, CanStageLinesProperty, CanUnstageLinesProperty, CanDiscardLinesProperty,
             LeftSyntaxTokensProperty, RightSyntaxTokensProperty, AnnotationsProperty, SelectedAnnotationProperty,
             CanAddLineCommentsProperty, InlineInsetAfterRowIndexProperty, InlineInsetHeightProperty);
         FocusableProperty.OverrideDefaultValue<DiffViewer>(true);
@@ -412,6 +434,7 @@ public sealed class DiffViewer : Control
             InvalidateVisual();
         }
         else if (change.Property == EmptyMessageProperty
+                 || change.Property == EmptyDetailProperty
                  || change.Property == ShowBrandWatermarkProperty)
         {
             UpdateEmptyMessage();
@@ -460,17 +483,28 @@ public sealed class DiffViewer : Control
             _brandCaption.Text = EmptyMessage;
             _brandCaption.Foreground = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
             _brandTitle.Foreground = Brush("ForgePrimaryBrush", Brushes.MediumPurple);
+            var detail = EmptyDetail;
+            var hasDetail = !string.IsNullOrWhiteSpace(detail);
+            _brandDetail.Text = detail ?? "";
+            _brandDetail.IsVisible = hasDetail;
+            _brandDetail.Foreground = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
             if (Application.Current?.TryGetResource("ForgeUiFont", ActualThemeVariant, out var font) == true
                 && font is FontFamily uiFont)
             {
                 _brandTitle.FontFamily = uiFont;
                 _brandCaption.FontFamily = uiFont;
+                _brandDetail.FontFamily = uiFont;
             }
         }
         else if (empty)
         {
             _emptyMessage.Text = EmptyMessage;
             _emptyMessage.Foreground = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
+            _brandDetail.IsVisible = false;
+        }
+        else
+        {
+            _brandDetail.IsVisible = false;
         }
     }
 
@@ -655,9 +689,14 @@ public sealed class DiffViewer : Control
 
     private void ApplyBrandLogoSize(double contentWidth, double contentHeight)
     {
+        var maxLogo = string.IsNullOrWhiteSpace(EmptyDetail) ? BrandLogoIdleMax : BrandLogoDetailMax;
+        var reservedBelow = string.IsNullOrWhiteSpace(EmptyDetail)
+            ? BrandHeroReservedBelow
+            : BrandHeroReservedBelow + 120;
         var logoSize = Math.Min(contentWidth, contentHeight) * BrandHeroLogoFraction;
-        logoSize = Math.Min(logoSize, Math.Max(32, contentHeight - BrandHeroReservedBelow));
+        logoSize = Math.Min(logoSize, Math.Max(32, contentHeight - reservedBelow));
         logoSize = Math.Max(32, Math.Min(logoSize, contentWidth));
+        logoSize = Math.Min(logoSize, maxLogo);
         _brandLogo.Width = logoSize;
         _brandLogo.Height = logoSize;
     }

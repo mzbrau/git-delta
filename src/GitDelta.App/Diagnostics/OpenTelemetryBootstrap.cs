@@ -51,6 +51,18 @@ public static class OpenTelemetryBootstrap
         activity?.SetTag("diff.render_ms", elapsedMs);
     }
 
+    /// <summary>Records file-list column resize layout; emits a span only for severe jank (≥ <see cref="SlowPaintMs"/> ms).</summary>
+    public static void RecordFileListResize(double elapsedMs, int visibleApprox)
+    {
+        GitDeltaMeters.UiFileListResizeMs.Record(elapsedMs);
+        if (elapsedMs < SlowPaintMs)
+            return;
+
+        using var activity = GitDeltaActivity.Source.StartActivity("ui.filelist.resize.slow");
+        activity?.SetTag("filelist.visible_approx", visibleApprox);
+        activity?.SetTag("filelist.resize_ms", elapsedMs);
+    }
+
     private sealed class Providers(TracerProvider tracer, MeterProvider meter) : IDisposable
     {
         public void Dispose()

@@ -1,6 +1,8 @@
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
+using GitDelta.Core.Diagnostics;
 
 namespace GitDelta.App.Controls;
 
@@ -9,6 +11,9 @@ namespace GitDelta.App.Controls;
 /// </summary>
 public sealed class MiddleEllipsisTextBlock : Control
 {
+    // Rare slow-measure span only; avoid flooding meters during 600-row remasures.
+    private const double SlowMeasureMs = 8;
+
     public static readonly StyledProperty<string?> TextProperty =
         AvaloniaProperty.Register<MiddleEllipsisTextBlock, string?>(nameof(Text));
 
@@ -79,20 +84,34 @@ public sealed class MiddleEllipsisTextBlock : Control
 
     protected override Size MeasureOverride(Size availableSize)
     {
-        var text = Text ?? "";
-        if (string.IsNullOrEmpty(text))
-            return new Size(0, FontSize * 1.2);
-
-        var full = MeasureWidth(text);
-        var height = FontSize * 1.35;
-        if (double.IsInfinity(availableSize.Width) || availableSize.Width >= full)
+        var sw = Stopwatch.StartNew();
+        try
         {
-            _display = text;
-            return new Size(full, height);
-        }
+            var text = Text ?? "";
+            if (string.IsNullOrEmpty(text))
+                return new Size(0, FontSize * 1.2);
 
-        UpdateDisplay(availableSize.Width);
-        return new Size(Math.Min(availableSize.Width, full), height);
+            var full = MeasureWidth(text);
+            var height = FontSize * 1.35;
+            if (double.IsInfinity(availableSize.Width) || availableSize.Width >= full)
+            {
+                _display = text;
+                return new Size(full, height);
+            }
+
+            UpdateDisplay(availableSize.Width);
+            return new Size(Math.Min(availableSize.Width, full), height);
+        }
+        finally
+        {
+            var elapsed = sw.Elapsed.TotalMilliseconds;
+            if (elapsed >= SlowMeasureMs)
+            {
+                using var activity = GitDeltaActivity.Source.StartActivity("ui.ellipsis.slow");
+                activity?.SetTag("ellipsis.text_length", (Text ?? "").Length);
+                activity?.SetTag("ellipsis.measure_ms", elapsed);
+            }
+        }
     }
 
     protected override Size ArrangeOverride(Size finalSize)

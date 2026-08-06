@@ -99,7 +99,7 @@ public partial class DiagnosticsOverlayViewModel : ObservableObject
         lock (_timingsGate)
         {
             LastTimings.Insert(0, line);
-            while (LastTimings.Count > 20)
+            while (LastTimings.Count > 50)
                 LastTimings.RemoveAt(LastTimings.Count - 1);
         }
     }

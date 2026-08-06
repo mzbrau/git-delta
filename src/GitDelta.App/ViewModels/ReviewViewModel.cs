@@ -100,7 +100,7 @@ public partial class ReviewViewModel : ObservableObject
     public ObservableCollection<PullRequestSummary> MyPullRequests { get; } = [];
     public ObservableCollection<FileItemViewModel> PrFiles { get; } = [];
     public ObservableCollection<FileItemViewModel> FilteredPrFiles { get; } = [];
-    public ObservableCollection<FileListEntry> PrFileEntries { get; } = [];
+    public ResettableObservableCollection<FileListEntry> PrFileEntries { get; } = new();
     public ResettableObservableCollection<DiffRow> DiffRows { get; } = new();
     public ObservableCollection<ReviewThreadViewModel> Threads { get; } = [];
     public ObservableCollection<ReviewThread> UnplaceableThreads { get; } = [];
