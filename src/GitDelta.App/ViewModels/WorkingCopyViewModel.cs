@@ -2239,8 +2239,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
 
         var cts = new CancellationTokenSource();
-        _diffCts?.Cancel();
-        _diffCts = cts;
+        var previous = Interlocked.Exchange(ref _diffCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
         _markdownCts?.Cancel();
         _markdownCts = null;
         var ct = cts.Token;
@@ -2303,12 +2304,13 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
         finally
         {
-            if (ReferenceEquals(_diffCts, cts))
+            if (Interlocked.CompareExchange(ref _diffCts, null, cts) == cts)
             {
                 IsLoadingDiff = false;
                 IsDiffRefreshing = false;
                 UpdateFileCacheIndicators();
                 OnPropertyChanged(nameof(DiffFooterText));
+                cts.Dispose();
             }
         }
     }
@@ -3634,13 +3636,14 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
         finally
         {
-            if (ReferenceEquals(_diffCts, cts))
+            if (Interlocked.CompareExchange(ref _diffCts, null, cts) == cts)
             {
                 IsLoadingDiff = false;
                 IsDiffRefreshing = false;
                 UpdateDiffCacheState(key);
                 UpdateFileCacheIndicators();
                 UpdateDiffOverlay();
+                cts.Dispose();
             }
         }
     }
@@ -3710,13 +3713,14 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
         finally
         {
-            if (ReferenceEquals(_diffCts, cts))
+            if (Interlocked.CompareExchange(ref _diffCts, null, cts) == cts)
             {
                 IsLoadingDiff = false;
                 IsDiffRefreshing = false;
                 UpdateDiffCacheState(key);
                 UpdateFileCacheIndicators();
                 UpdateDiffOverlay();
+                cts.Dispose();
             }
         }
     }

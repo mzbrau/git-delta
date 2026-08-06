@@ -60,7 +60,7 @@ public static class AiReviewSessionViewModel
         AiRunProgress? progress,
         string? copilotSessionId,
         string? lastError,
-        string activityLog)
+        string? activityLog)
     {
         var runTimeout = settings.AiRunTimeoutSeconds <= 0
             ? "unlimited"

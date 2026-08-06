@@ -2780,8 +2780,9 @@ public partial class ReviewViewModel : ObservableObject
     private async Task RefreshInboxCoreAsync(bool silent)
     {
         var cts = new CancellationTokenSource();
-        _inboxCts?.Cancel();
-        _inboxCts = cts;
+        var previous = Interlocked.Exchange(ref _inboxCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
         var ct = cts.Token;
         IsRefreshingInbox = true;
 
@@ -2833,8 +2834,11 @@ public partial class ReviewViewModel : ObservableObject
         }
         finally
         {
-            if (ReferenceEquals(_inboxCts, cts))
+            if (Interlocked.CompareExchange(ref _inboxCts, null, cts) == cts)
+            {
                 IsRefreshingInbox = false;
+                cts.Dispose();
+            }
         }
     }
 
@@ -2844,9 +2848,11 @@ public partial class ReviewViewModel : ObservableObject
         if (summary is null) return;
 
         SelectedPullRequest = summary;
-        _openCts?.Cancel();
-        _openCts = new CancellationTokenSource();
-        var ct = _openCts.Token;
+        var openCts = new CancellationTokenSource();
+        var previousOpen = Interlocked.Exchange(ref _openCts, openCts);
+        previousOpen?.Cancel();
+        previousOpen?.Dispose();
+        var ct = openCts.Token;
 
         await InvokeOnUiAsync(() =>
         {
@@ -2973,9 +2979,14 @@ public partial class ReviewViewModel : ObservableObject
         finally
         {
             // A newer selection owns the flag; do not clear if this open was cancelled.
-            if (!ct.IsCancellationRequested)
+            if (Interlocked.CompareExchange(ref _openCts, null, openCts) == openCts)
             {
-                await InvokeOnUiAsync(() => IsOpeningPullRequest = false).ConfigureAwait(false);
+                if (!ct.IsCancellationRequested)
+                {
+                    await InvokeOnUiAsync(() => IsOpeningPullRequest = false).ConfigureAwait(false);
+                }
+
+                openCts.Dispose();
             }
         }
     }
@@ -3117,8 +3128,9 @@ public partial class ReviewViewModel : ObservableObject
     private async Task LoadDiffForSelectionAsync(FileItemViewModel? file)
     {
         var cts = new CancellationTokenSource();
-        _diffCts?.Cancel();
-        _diffCts = cts;
+        var previous = Interlocked.Exchange(ref _diffCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
         _markdownCts?.Cancel();
         _markdownCts = null;
         _aiFileCts?.Cancel();
@@ -3261,13 +3273,14 @@ public partial class ReviewViewModel : ObservableObject
         {
             // Only the current load may clear the spinner; a superseded load's finally must
             // not hide loading for the newer request.
-            if (ReferenceEquals(_diffCts, cts))
+            if (Interlocked.CompareExchange(ref _diffCts, null, cts) == cts)
             {
                 await InvokeOnUiAsync(() =>
                 {
                     IsLoadingDiff = false;
                     OnPropertyChanged(nameof(DiffFooterText));
                 });
+                cts.Dispose();
             }
         }
     }

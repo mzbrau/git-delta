@@ -43,18 +43,36 @@ internal sealed class AiReviewCoordinator(
     private AiReviewQueries? _queries;
     private AiReviewChatActions? _chat;
 
-    private AiReviewQueries Queries => _queries ??= new AiReviewQueries(
-        resultStore,
-        settingsStore,
-        workingCopyMaterialiser,
-        _runStore,
-        _annotationsByBlob,
-        RegisterRunContext);
+    private AiReviewQueries Queries
+    {
+        get
+        {
+            var existing = Volatile.Read(ref _queries);
+            if (existing is not null) return existing;
+            var created = new AiReviewQueries(
+                resultStore,
+                settingsStore,
+                workingCopyMaterialiser,
+                _runStore,
+                _annotationsByBlob,
+                RegisterRunContext);
+            return Interlocked.CompareExchange(ref _queries, created, null) ?? created;
+        }
+    }
 
-    private AiReviewChatActions Chat => _chat ??= new AiReviewChatActions(
-        resultStore,
-        prompts,
-        RunTurnForTextAsync);
+    private AiReviewChatActions Chat
+    {
+        get
+        {
+            var existing = Volatile.Read(ref _chat);
+            if (existing is not null) return existing;
+            var created = new AiReviewChatActions(
+                resultStore,
+                prompts,
+                RunTurnForTextAsync);
+            return Interlocked.CompareExchange(ref _chat, created, null) ?? created;
+        }
+    }
 
     // ---------------------------------------------------------------------
     // Cache-only reads (never touch the agent).
