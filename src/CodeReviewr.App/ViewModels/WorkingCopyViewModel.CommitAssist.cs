@@ -222,37 +222,19 @@ public partial class WorkingCopyViewModel
                 return;
             }
 
-            var untrackedDiffs = inventoryDiffs
-                .Where(d => d.Change == ChangeKind.Untracked)
-                .ToList();
-            var trackedDiffs = inventoryDiffs
-                .Where(d => d.Change != ChangeKind.Untracked)
-                .ToList();
+            // Build inventory from the initial collect only. Do not rebuild from IndexToWorktree
+            // after unstage — in staged-only mode that would pull in additional unstaged edits.
+            var inventory = MagicCommitInventory.Build(inventoryDiffs);
 
-            // Normalize index so remaining tracked changes are IndexToWorktree for sequential staging.
-            var trackedPaths = trackedDiffs
+            // Normalize index so the executor can rematch/stage against IndexToWorktree.
+            var trackedPaths = inventoryDiffs
+                .Where(d => d.Change != ChangeKind.Untracked)
                 .Select(d => d.NewPath.Value.Length > 0 ? d.NewPath.Value : d.OldPath.Value)
                 .Distinct(StringComparer.Ordinal)
                 .Select(FilePath.From)
                 .ToList();
             if (trackedPaths.Count > 0)
                 await _staging.UnstageFilesAsync(_repoPath, trackedPaths, ct).ConfigureAwait(true);
-
-            // Re-read tracked paths as IndexToWorktree after unstage; keep untracked diffs as-is
-            // (git diff returns empty for untracked paths).
-            var reloadedTracked = trackedPaths.Count == 0
-                ? []
-                : await LoadDiffsForPathsAsync(trackedPaths, DiffTarget.IndexToWorktree, options, ct)
-                    .ConfigureAwait(true);
-            inventoryDiffs = reloadedTracked.Concat(untrackedDiffs).ToList();
-            if (inventoryDiffs.Count == 0)
-            {
-                MagicCommitError = "Changes disappeared after preparing the index.";
-                MagicCommitDialogStep = MagicCommitDialogStepKind.Results;
-                return;
-            }
-
-            var inventory = MagicCommitInventory.Build(inventoryDiffs);
             MagicCommitProgressText = "Asking Copilot for a commit plan…";
             AppendMagicCommitActivity("Asking Copilot for a commit plan…");
 

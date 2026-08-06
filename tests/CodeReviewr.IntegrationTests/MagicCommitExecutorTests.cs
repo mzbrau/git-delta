@@ -25,11 +25,8 @@ public sealed class MagicCommitExecutorTests
 
     private static RepositoryBuilder TwoHunkRepo(int fillerLines = 12)
     {
-        var sb = new System.Text.StringBuilder();
-        for (var i = 1; i <= fillerLines; i++)
-            sb.AppendLine($"line{i}");
-
-        var original = sb.ToString();
+        // Use LF only — AppendLine emits CRLF on Windows and breaks git apply --cached.
+        var original = string.Join('\n', Enumerable.Range(1, fillerLines).Select(i => $"line{i}")) + "\n";
         var lines = original.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList();
         lines[0] = "CHANGED_TOP";
         lines[^1] = "CHANGED_BOTTOM";
@@ -242,5 +239,58 @@ public sealed class MagicCommitExecutorTests
         var log = await history.ListCommitsAsync(path, skip: 0, take: 3);
         Assert.That(log[0].Subject, Is.EqualTo("add new file"));
         Assert.That(log[1].Subject, Is.EqualTo("update tracked"));
+    }
+
+    [Test]
+    public async Task StagedOnly_Inventory_Excludes_Unstaged_Hunks_In_Same_File()
+    {
+        // Regression for PR #23: rebuilding inventory from IndexToWorktree after unstage
+        // would pull unstaged hunks into a staged-only Magic Commit plan.
+        using var repo = TwoHunkRepo(fillerLines: 40);
+        var path = repo.Build();
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var diffService = sp.GetRequiredService<IGitDiffService>();
+        var staging = sp.GetRequiredService<IGitStagingService>();
+
+        var options = DiffOptions.Default;
+        var worktreeDiff = await diffService.GetDiffAsync(
+            path, FilePath.From("file.cs"), DiffTarget.IndexToWorktree, options);
+        Assert.That(worktreeDiff.Hunks.Count, Is.GreaterThanOrEqualTo(2));
+
+        // Stage only the first hunk; leave the rest unstaged.
+        var firstHunkPatch = PatchSynthesizer.SynthesizeHunks(worktreeDiff, [0]);
+        await staging.StagePatchAsync(path, firstHunkPatch);
+
+        var stagedDiff = await diffService.GetDiffAsync(
+            path, FilePath.From("file.cs"), DiffTarget.HeadToIndex, options);
+        Assert.That(stagedDiff.Hunks.Count, Is.EqualTo(1), "Only the staged hunk should appear in HeadToIndex");
+
+        var stagedInventory = MagicCommitInventory.Build([stagedDiff]);
+        Assert.That(stagedInventory, Has.Count.EqualTo(1));
+
+        // Unstage for executor rematch (product does this). IndexToWorktree then shows ALL
+        // hunks again — the old bug rebuilt inventory from this and would plan both.
+        await staging.UnstageFilesAsync(path, [FilePath.From("file.cs")]);
+        var afterUnstageWorktree = await diffService.GetDiffAsync(
+            path, FilePath.From("file.cs"), DiffTarget.IndexToWorktree, options);
+        var worktreeInventory = MagicCommitInventory.Build([afterUnstageWorktree]);
+        Assert.That(worktreeInventory.Count, Is.GreaterThan(stagedInventory.Count),
+            "After unstage, IndexToWorktree has every hunk; staged-only must keep the HeadToIndex inventory");
+
+        // Execute using the staged-only inventory (as ConfirmMagicCommitAsync does after the fix).
+        var plan = new MagicCommitPlan([new MagicCommitPlanEntry("stage first hunk only", [stagedInventory[0].Id])]);
+        var executor = new MagicCommitExecutor(
+            diffService, staging, sp.GetRequiredService<IGitCommitService>(), sp.GetRequiredService<IGitHistoryService>());
+        var result = await executor.ExecuteAsync(
+            path, stagedInventory, plan, options, noVerify: true, progress: null);
+
+        Assert.That(result.Error, Is.Null, result.Error);
+        Assert.That(result.Commits, Has.Count.EqualTo(1));
+
+        // The other hunk remains uncommitted in the worktree.
+        var status = await sp.GetRequiredService<IGitStatusService>().GetStatusAsync(path);
+        Assert.That(status.Unstaged.Any(s => s.Path.Value == "file.cs"), Is.True);
     }
 }
