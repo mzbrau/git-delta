@@ -1,6 +1,6 @@
-# CodeReviewr - Phase 2 Implementation Plan
+# GitDelta - Phase 2 Implementation Plan
 
-> **Objective:** Turn CodeReviewr from a high-performance local Git client into a dedicated GitHub pull request review application.
+> **Objective:** Turn GitDelta from a high-performance local Git client into a dedicated GitHub pull request review application.
 >
 > Phase 2 introduces GitHub integration while preserving the performance-first philosophy established in Phase 1.
 >
@@ -80,7 +80,7 @@ Two Phase 1 exit criteria are unmet, and both matter more in pull request review
 
 - `ISyntaxTokenService` is implemented but referenced by nothing in `App`. Diffs render unhighlighted.
 - Intra-line spans are computed on `DiffLine` and `DiffRow`, but `DiffViewer` paints one brush per line, so word-level diff is invisible.
-- Verify is referenced by `CodeReviewr.Diff.Tests` but no snapshots are pinned, so Phase 1's M2 exit criterion on row projection and token span snapshots was never met.
+- Verify is referenced by `GitDelta.Diff.Tests` but no snapshots are pinned, so Phase 1's M2 exit criterion on row projection and token span snapshots was never met.
 
 These are Phase 2's M0. Phase 2 cannot claim to reuse a diff engine with syntax highlighting and word diff until they are wired.
 
@@ -380,12 +380,12 @@ Local computation first means the diff can render without waiting on the API. Th
 ## Fetching refs
 
 ```
-git fetch <base-repo-remote> refs/pull/N/head:refs/codereviewr/pr/<n>
+git fetch <base-repo-remote> refs/pull/N/head:refs/gitdelta/pr/<n>
 ```
 
 `refs/pull/N/head` lives on the **base** repository, which is what makes fork pull requests work without adding the fork as a remote. If no local remote resolves to the base repository, fetch by URL rather than adding a remote, so the user's remote list is never polluted.
 
-Refs under `refs/codereviewr/` are owned by the application and pruned when a pull request closes or leaves the inbox. Pruning a ref discards nothing the user created.
+Refs under `refs/gitdelta/` are owned by the application and pruned when a pull request closes or leaves the inbox. Pruning a ref discards nothing the user created.
 
 ## Diff scope
 

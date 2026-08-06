@@ -1,5 +1,5 @@
 ---
-name: CodeReviewr
+name: GitDelta
 colors:
   surface: '#131313'
   surface-dim: '#131313'

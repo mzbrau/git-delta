@@ -1,8 +1,8 @@
-# CodeReviewr - Phase 1 Implementation Plan
+# GitDelta - Phase 1 Implementation Plan
 
 > **Vision:** Build the fastest, most responsive cross-platform Git client focused on code review.
 >
-> Long term, CodeReviewr will evolve into an AI-first code review platform built on GitHub Copilot SDK, but Phase 1 is intentionally focused on being an exceptional local Git client with a world-class diff experience.
+> Long term, GitDelta will evolve into an AI-first code review platform built on GitHub Copilot SDK, but Phase 1 is intentionally focused on being an exceptional local Git client with a world-class diff experience.
 
 ---
 
@@ -136,7 +136,7 @@ Known gap: a user with neither a credential helper nor an SSH agent gets a clear
 
 ## Git Prerequisite
 
-CodeReviewr requires Git to be installed and on the PATH. Git is not bundled.
+GitDelta requires Git to be installed and on the PATH. Git is not bundled.
 
 Minimum supported version: 2.30.
 
@@ -231,21 +231,21 @@ MinVer, driven by git tags.
 # Solution Structure
 
 ```
-CodeReviewr.sln
+GitDelta.sln
 
 src/
-    CodeReviewr.Core          domain model, settings, abstractions
-    CodeReviewr.Git           CliWrap invocation, porcelain parsing, the gate, cancellation classes
-    CodeReviewr.Diff          patch parsing, FileDiff, row projection, intra-line differ, token mapping
-    CodeReviewr.App           Avalonia views, viewmodels, the diff control, DI wiring, entry point
+    GitDelta.Core          domain model, settings, abstractions
+    GitDelta.Git           CliWrap invocation, porcelain parsing, the gate, cancellation classes
+    GitDelta.Diff          patch parsing, FileDiff, row projection, intra-line differ, token mapping
+    GitDelta.App           Avalonia views, viewmodels, the diff control, DI wiring, entry point
 
 tests/
-    CodeReviewr.TestSupport   builders; not a test project
-    CodeReviewr.Core.Tests
-    CodeReviewr.Git.Tests
-    CodeReviewr.Diff.Tests
-    CodeReviewr.IntegrationTests
-    CodeReviewr.Benchmarks    BenchmarkDotNet, nightly
+    GitDelta.TestSupport   builders; not a test project
+    GitDelta.Core.Tests
+    GitDelta.Git.Tests
+    GitDelta.Diff.Tests
+    GitDelta.IntegrationTests
+    GitDelta.Benchmarks    BenchmarkDotNet, nightly
 ```
 
 Core must contain no UI dependencies. This is enforced by an architecture test asserting that `Core`, `Git`, and `Diff` reference no Avalonia assembly, rather than by convention.
@@ -1169,7 +1169,7 @@ Row projection is pure, which is exactly what makes it worth pinning.
 Create a reusable testing library.
 
 ```
-CodeReviewr.TestSupport
+GitDelta.TestSupport
 
 RepositoryBuilder
 
@@ -1349,7 +1349,7 @@ Supported workflow:
 
 ## Phase 2 — GitHub Code Reviews
 
-Transform CodeReviewr into a complete GitHub review client.
+Transform GitDelta into a complete GitHub review client.
 
 ### Features
 
@@ -1447,7 +1447,7 @@ Become a collaborative review platform.
 
 # Long-Term Vision
 
-CodeReviewr is **not another Git client**.
+GitDelta is **not another Git client**.
 
 It is an **AI-first code review platform** where:
 

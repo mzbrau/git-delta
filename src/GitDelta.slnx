@@ -1,0 +1,26 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="GitDelta.App/GitDelta.App.csproj" />
+    <Project Path="GitDelta.AppHost/GitDelta.AppHost.csproj" />
+    <Project Path="GitDelta.Core/GitDelta.Core.csproj" />
+    <Project Path="GitDelta.Diff/GitDelta.Diff.csproj" />
+    <Project Path="GitDelta.Git/GitDelta.Git.csproj" />
+    <Project Path="GitDelta.GitHub/GitDelta.GitHub.csproj" />
+    <Project Path="GitDelta.Review/GitDelta.Review.csproj" />
+    <Project Path="GitDelta.Persistence/GitDelta.Persistence.csproj" />
+    <Project Path="GitDelta.AI/GitDelta.AI.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="../tests/GitDelta.App.Tests/GitDelta.App.Tests.csproj" />
+    <Project Path="../tests/GitDelta.Benchmarks/GitDelta.Benchmarks.csproj" />
+    <Project Path="../tests/GitDelta.Core.Tests/GitDelta.Core.Tests.csproj" />
+    <Project Path="../tests/GitDelta.Diff.Tests/GitDelta.Diff.Tests.csproj" />
+    <Project Path="../tests/GitDelta.Git.Tests/GitDelta.Git.Tests.csproj" />
+    <Project Path="../tests/GitDelta.GitHub.Tests/GitDelta.GitHub.Tests.csproj" />
+    <Project Path="../tests/GitDelta.Review.Tests/GitDelta.Review.Tests.csproj" />
+    <Project Path="../tests/GitDelta.Persistence.Tests/GitDelta.Persistence.Tests.csproj" />
+    <Project Path="../tests/GitDelta.AI.Tests/GitDelta.AI.Tests.csproj" />
+    <Project Path="../tests/GitDelta.IntegrationTests/GitDelta.IntegrationTests.csproj" />
+    <Project Path="../tests/GitDelta.TestSupport/GitDelta.TestSupport.csproj" />
+  </Folder>
+</Solution>

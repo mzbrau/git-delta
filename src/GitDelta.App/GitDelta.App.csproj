@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>GitDelta.App</RootNamespace>
+    <AssemblyName>GitDelta.App</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="LiveMarkdown.Avalonia" />
+    <PackageReference Include="LiveMarkdown.Avalonia.Mermaid" />
+    <PackageReference Include="Material.Icons.Avalonia" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Extensions.Logging" />
+    <PackageReference Include="Serilog.Sinks.File" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <PackageReference Include="Velopack" />
+    <PackageReference Include="Markdig" />
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+  </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\Fonts\**" />
+    <AvaloniaResource Include="Assets\logo.png" />
+    <AvaloniaResource Include="Assets\app.ico" />
+    <AvaloniaResource Include="Assets\app.icns" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GitDelta.Core\GitDelta.Core.csproj" />
+    <ProjectReference Include="..\GitDelta.Git\GitDelta.Git.csproj" />
+    <ProjectReference Include="..\GitDelta.Diff\GitDelta.Diff.csproj" />
+    <ProjectReference Include="..\GitDelta.GitHub\GitDelta.GitHub.csproj" />
+    <ProjectReference Include="..\GitDelta.Review\GitDelta.Review.csproj" />
+    <ProjectReference Include="..\GitDelta.Persistence\GitDelta.Persistence.csproj" />
+    <ProjectReference Include="..\GitDelta.AI\GitDelta.AI.csproj" />
+  </ItemGroup>
+</Project>

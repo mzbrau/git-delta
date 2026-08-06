@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>GitDelta.Git</RootNamespace>
+    <AssemblyName>GitDelta.Git</AssemblyName>
+  </PropertyGroup>
+<ItemGroup>
+    <InternalsVisibleTo Include="GitDelta.Git.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\GitDelta.Core\GitDelta.Core.csproj" />
+    <PackageReference Include="CliWrap" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

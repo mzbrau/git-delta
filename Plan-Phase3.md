@@ -1,6 +1,6 @@
-# Code Reviewr - Phase 3 Implementation Plan
+# GIT DELTA - Phase 3 Implementation Plan
 
-> **Objective:** Transform Code Reviewr from a GitHub Pull Request client into an AI-assisted code review platform.
+> **Objective:** Transform GIT DELTA from a GitHub Pull Request client into an AI-assisted code review platform.
 >
 > The goal of Phase 3 is **not** to replace the human reviewer.
 >
@@ -16,7 +16,7 @@
 
 Today's AI code review tools mostly produce review comments.
 
-Code Reviewr should instead become an **AI Review Assistant**.
+GIT DELTA should instead become an **AI Review Assistant**.
 
 Rather than reviewing *for* the user, it should:
 
@@ -62,7 +62,7 @@ user never reads.
 
 ## Context First
 
-Unlike browser-based AI reviewers, Code Reviewr runs on the developer's machine with the
+Unlike browser-based AI reviewers, GIT DELTA runs on the developer's machine with the
 whole repository present. The agent is given a real checkout pinned to the pull request
 head commit and explores it with its own tools: reading files, searching, following call
 sites, inspecting history.
@@ -95,8 +95,8 @@ AI is powered by the **GitHub Copilot SDK** (`GitHub.Copilot.SDK` on NuGet).
 
 The user provides their own GitHub authentication and their own Copilot subscription.
 
-- No Code Reviewr backend.
-- No Code Reviewr-operated cloud infrastructure.
+- No GIT DELTA backend.
+- No GIT DELTA-operated cloud infrastructure.
 - No additional subscription beyond Copilot.
 
 ## What the SDK actually is
@@ -137,7 +137,7 @@ naturally produces. Each increment is independently shippable and independently 
 
 All the plumbing, plus everything that falls out of a single whole-PR turn.
 
-- `CodeReviewr.AI` project, DI wiring, architecture tests
+- `GitDelta.AI` project, DI wiring, architecture tests
 - PR head materialisation and export cache
 - Agent session lifecycle, permission policy, curated tools
 - Tool-based structured output
@@ -170,28 +170,28 @@ All the plumbing, plus everything that falls out of a single whole-PR turn.
 
 ## Project placement
 
-One new project: **`CodeReviewr.AI`**.
+One new project: **`GitDelta.AI`**.
 
 ```
-CodeReviewr.App  ──►  CodeReviewr.AI  ──►  Core, Git, Diff, GitHub, Persistence, Review
+GitDelta.App  ──►  GitDelta.AI  ──►  Core, Git, Diff, GitHub, Persistence, Review
 ```
 
-Registered via `AddCodeReviewrAI()` from `ServiceConfiguration.Build()`. **Only
-`CodeReviewr.App` references it**, so nothing in the existing stack depends on AI and the
+Registered via `AddGitDeltaAI()` from `ServiceConfiguration.Build()`. **Only
+`GitDelta.App` references it**, so nothing in the existing stack depends on AI and the
 entire phase remains removable.
 
 The Copilot SDK types are confined behind an internal agent-session interface
 (`IAgentClient` / `IAgentSession`) in a single folder. A second provider later is a folder,
 not an assembly. `IAIReviewService` and `NullAIReviewService` already exist in
-`CodeReviewr.Core` and remain the seam through which `CodeReviewr.App` consumes AI
+`GitDelta.Core` and remain the seam through which `GitDelta.App` consumes AI
 annotations as `IDiffAnnotation`.
 
 ## New architecture tests
 
-Added to `tests/CodeReviewr.Core.Tests` alongside the existing Avalonia-isolation test:
+Added to `tests/GitDelta.Core.Tests` alongside the existing Avalonia-isolation test:
 
-- `GitHub.Copilot.SDK` may only be referenced from `CodeReviewr.AI`.
-- `CodeReviewr.AI` must not reference Avalonia.
+- `GitHub.Copilot.SDK` may only be referenced from `GitDelta.AI`.
+- `GitDelta.AI` must not reference Avalonia.
 
 ## Layering
 
@@ -229,7 +229,7 @@ mechanism `Plan-Phase2.md` already specified: a **SHA-keyed immutable export**, 
 the `IReviewTree.MaterialisedPath` hook that Phase 2 deliberately left null.
 
 ```
-git archive --format=tar <head-sha> | tar -x -C <appdata>/CodeReviewr/trees/<sha>
+git archive --format=tar <head-sha> | tar -x -C <appdata>/GitDelta/trees/<sha>
 ```
 
 - Run through `IGitProcessRunner` on the read gate. It writes nothing into the user's `.git`,
@@ -325,13 +325,13 @@ Custom tools serve two distinct purposes.
 ## Input tools — curated capability
 
 Things the agent cannot discover from the filesystem, or should not use a shell to obtain.
-Each is backed by an existing Code Reviewr service.
+Each is backed by an existing GIT DELTA service.
 
 | Tool | Backed by |
 | --- | --- |
 | `get_pull_request_diff` | existing merge-base to head diff services |
-| `get_file_history` | `CodeReviewr.Git` history services |
-| `get_file_blame` | `CodeReviewr.Git` |
+| `get_file_history` | `GitDelta.Git` history services |
+| `get_file_blame` | `GitDelta.Git` |
 | `get_review_threads` | `ReviewCommentService` |
 
 ## Output tools — the structured result channel
@@ -375,8 +375,8 @@ prompt payload. That is cheaper and more accurate than us guessing what is relev
 
 # Prompt System
 
-Prompt templates live as **embedded resources** in `CodeReviewr.AI`, mirroring the existing
-pattern where `CodeReviewr.GitHub` embeds its `.graphql` files. A `PromptVersion` constant
+Prompt templates live as **embedded resources** in `GitDelta.AI`, mirroring the existing
+pattern where `GitDelta.GitHub` embeds its `.graphql` files. A `PromptVersion` constant
 participates in every cache key, so changing a template correctly invalidates prior results.
 
 Templates: PR triage, file summary, annotation pass, explanation, comment suggestion,
@@ -454,7 +454,7 @@ keyed to `(path, blob OID, line)`, so they are exact for that blob and never nee
 The single-session decision makes turns strictly serial, so this is a reordering problem,
 not a concurrency problem.
 
-A small **purpose-built single-consumer priority queue** inside `CodeReviewr.AI`, one
+A small **purpose-built single-consumer priority queue** inside `GitDelta.AI`, one
 consumer per repository, feeding the one session. Not `IHostedService`, not a Generic Host,
 not a general reusable job framework.
 
@@ -633,7 +633,7 @@ there are deliberately no per-repository *review rules* in Phase 3.
 ## Wording correction
 
 The original Out of Scope entry "Cloud-hosted AI" was wrong — Copilot *is* cloud-hosted.
-What is out of scope is any **Code Reviewr-hosted backend or third-party AI service**.
+What is out of scope is any **GIT DELTA-hosted backend or third-party AI service**.
 
 ---
 
@@ -721,7 +721,7 @@ Re-scoped, since context generation is no longer something we do:
 
 ## Architecture tests
 
-The two new rules: Copilot SDK confined to `CodeReviewr.AI`; `CodeReviewr.AI` free of
+The two new rules: Copilot SDK confined to `GitDelta.AI`; `GitDelta.AI` free of
 Avalonia. Existing Core / Git / Diff isolation rules continue to apply.
 
 ---
@@ -782,7 +782,7 @@ Not included in Phase 3:
 - Automatic PR merging
 - Automatic code changes
 - Agentic code modification of the user's repository
-- Any Code Reviewr-hosted backend or third-party AI service
+- Any GIT DELTA-hosted backend or third-party AI service
 - Local LLMs
 - Cross-repository analysis
 - Multiple AI providers
@@ -846,7 +846,7 @@ before deciding whether Phase 4 is appropriate.
 
 Phase 4 evolves from **AI-assisted reviews** into **deep code intelligence**.
 
-Instead of analysing only the Pull Request, Code Reviewr understands the entire codebase.
+Instead of analysing only the Pull Request, GIT DELTA understands the entire codebase.
 
 Future capabilities include:
 
@@ -863,5 +863,5 @@ Future capabilities include:
 - "Show me how requests flow through the system"
 - Roslyn-powered semantic analysis integrated with AI
 
-At this point, Code Reviewr becomes much more than a review tool—it becomes a developer's
+At this point, GIT DELTA becomes much more than a review tool—it becomes a developer's
 primary environment for understanding large codebases.
