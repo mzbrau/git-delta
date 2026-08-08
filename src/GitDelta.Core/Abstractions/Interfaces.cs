@@ -114,6 +114,15 @@ public interface IGitBranchService
     Task DeleteBranchAsync(string repositoryPath, string name, bool force, CancellationToken ct = default);
     Task RenameBranchAsync(string repositoryPath, string oldName, string newName, CancellationToken ct = default);
     Task FetchAsync(string repositoryPath, CancellationToken ct = default);
+
+    /// <summary>
+    /// Counts commits unique to each side of the symmetric difference <paramref name="baseRef"/>...<paramref name="headRef"/>.
+    /// </summary>
+    Task<BranchDivergence> GetDivergenceAsync(
+        string repositoryPath,
+        string baseRef,
+        string headRef,
+        CancellationToken ct = default);
 }
 
 public interface IGitRemoteService

@@ -24,9 +24,9 @@ public sealed class RebaseWizardViewModelTests
     {
         var withOriginHead = new[]
         {
-            new BranchInfo("origin/main", false, true, null, "a"),
-            new BranchInfo("origin/HEAD", false, true, null, "h"),
-            new BranchInfo("origin/feature", false, true, null, "c"),
+            new BranchInfo("origin/main", false, true, null, "a", DateTimeOffset.MinValue),
+            new BranchInfo("origin/HEAD", false, true, null, "h", DateTimeOffset.MinValue),
+            new BranchInfo("origin/feature", false, true, null, "c", DateTimeOffset.MinValue),
         };
 
         var pickedHead = RebaseWizardViewModel.PickDefaultBase(withOriginHead, "origin/feature");
@@ -34,9 +34,9 @@ public sealed class RebaseWizardViewModelTests
 
         var withoutOriginHead = new[]
         {
-            new BranchInfo("origin/main", false, true, null, "a"),
-            new BranchInfo("develop", false, false, null, "b"),
-            new BranchInfo("origin/feature", false, true, null, "c"),
+            new BranchInfo("origin/main", false, true, null, "a", DateTimeOffset.MinValue),
+            new BranchInfo("develop", false, false, null, "b", DateTimeOffset.MinValue),
+            new BranchInfo("origin/feature", false, true, null, "c", DateTimeOffset.MinValue),
         };
 
         var pickedUpstream = RebaseWizardViewModel.PickDefaultBase(withoutOriginHead, "origin/feature");
@@ -162,7 +162,7 @@ public sealed class RebaseWizardViewModelTests
         var notifications = new NotificationService();
 
         branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns([new BranchInfo("main", false, false, null, "aaa")]);
+            .Returns([new BranchInfo("main", false, false, null, "aaa", DateTimeOffset.MinValue)]);
         history.ListCommitsRangeAsync(
                 Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
             .Returns([]);

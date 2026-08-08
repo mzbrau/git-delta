@@ -24,7 +24,15 @@ public sealed record BranchInfo(
     bool IsCurrent,
     bool IsRemote,
     string? Upstream,
-    string TipOid);
+    string TipOid,
+    DateTimeOffset TipCommitterDate);
+
+/// <summary>
+/// Divergence of <c>headRef</c> relative to <c>baseRef</c> from
+/// <c>git rev-list --left-right --count base...head</c>.
+/// <see cref="Behind"/> = commits on base not in head; <see cref="Ahead"/> = commits on head not in base.
+/// </summary>
+public sealed record BranchDivergence(int Behind, int Ahead);
 
 public sealed record StashInfo(
     int Index,

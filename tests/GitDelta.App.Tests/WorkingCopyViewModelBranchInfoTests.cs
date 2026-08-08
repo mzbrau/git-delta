@@ -10,7 +10,7 @@ using NUnit.Framework;
 
 namespace GitDelta.App.Tests;
 
-public sealed class WorkingCopyViewModelHistoryContextMenuTests
+public sealed class WorkingCopyViewModelBranchInfoTests
 {
     private IGitStatusService _status = null!;
     private IGitDiffService _diff = null!;
@@ -47,8 +47,7 @@ public sealed class WorkingCopyViewModelHistoryContextMenuTests
         _fsmonitor = Substitute.For<IFsmonitorService>();
         _notifications = new NotificationService();
         _confirm = new AlwaysConfirmDialog();
-        _stashDialog = new FakeStashDialog(
-            new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true));
+        _stashDialog = new FakeStashDialog(null);
         _watcher = Substitute.For<IRepositoryWatcher>();
         _localComments = Substitute.For<ILocalCommentStore>();
         _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([]);
@@ -72,16 +71,20 @@ public sealed class WorkingCopyViewModelHistoryContextMenuTests
             new IntraLineDiffer(), _fsmonitor, _watcher,
             new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications, Substitute.For<IGitHistoryService>()));
 
-    private static BranchInfo Branch(string name, bool isCurrent = false, bool isRemote = false) =>
-        new(name, isCurrent, isRemote, Upstream: null, TipOid: "abc", TipCommitterDate: DateTimeOffset.MinValue);
+    private static BranchInfo Local(string name, bool isCurrent = false) =>
+        new(name, isCurrent, IsRemote: false, Upstream: null, TipOid: $"{name}-oid",
+            TipCommitterDate: DateTimeOffset.UnixEpoch);
 
     [Test]
-    public async Task CherryPick_Disabled_When_History_Branch_Is_Current()
+    public async Task ShowBranchInfo_Defaults_Base_To_Current_And_Reloads_On_Base_Change()
     {
-        var main = Branch("main", isCurrent: true);
-        var feature = Branch("feature");
+        var main = Local("main", isCurrent: true);
+        var feature = Local("feature");
+        var develop = Local("develop");
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns([main, feature]);
+            .Returns([main, feature, develop]);
+        _branches.GetDivergenceAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new BranchDivergence(1, 2));
 
         var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repo);
@@ -90,78 +93,38 @@ public sealed class WorkingCopyViewModelHistoryContextMenuTests
             var vm = CreateVm();
             await vm.OpenAsync(repo);
 
-            Assert.That(vm.SelectedHistoryBranch?.Name, Is.EqualTo("main"));
-            Assert.That(vm.CanCherryPickHistoryCommit, Is.False);
-            Assert.That(vm.CherryPickCommitCommand.CanExecute(null), Is.False);
+            await vm.ShowBranchInfoCommand.ExecuteAsync(feature);
+
+            Assert.That(vm.ShowBranchInfoDialog, Is.True);
+            Assert.That(vm.BranchInfoTargetName, Is.EqualTo("feature"));
+            Assert.That(vm.BranchInfoSelectedBase?.Name, Is.EqualTo("main"));
+            Assert.That(vm.BranchInfoCurrentName, Is.EqualTo("main"));
+            Assert.That(vm.BranchInfoBaseBranches.Select(b => b.Name).ToList(),
+                Is.EquivalentTo(new[] { "main", "feature", "develop" }));
+
+            await _branches.Received(1).GetDivergenceAsync(
+                repo, "main", "feature", Arg.Any<CancellationToken>());
+
+            var developBase = vm.BranchInfoBaseBranches.Single(b => b.Name == "develop");
+            vm.BranchInfoSelectedBase = developBase;
+
+            Assert.That(async () =>
+                {
+                    await Task.Yield();
+                    return !vm.IsBranchInfoLoading
+                        && string.Equals(vm.BranchInfoCurrentName, "develop", StringComparison.Ordinal);
+                },
+                Is.True.After(2000, 20));
+
+            await _branches.Received(1).GetDivergenceAsync(
+                repo, "develop", "feature", Arg.Any<CancellationToken>());
+            Assert.That(vm.BranchInfoCurrentName, Is.EqualTo("develop"));
+            Assert.That(vm.BranchInfoAhead, Is.EqualTo(2));
+            Assert.That(vm.BranchInfoBehind, Is.EqualTo(1));
         }
         finally
         {
-            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
-        }
-    }
-
-    [Test]
-    public async Task CherryPick_Enabled_When_History_Branch_Differs_From_Current()
-    {
-        var main = Branch("main", isCurrent: true);
-        var feature = Branch("feature");
-        _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns([main, feature]);
-
-        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(repo);
-        try
-        {
-            var vm = CreateVm();
-            await vm.OpenAsync(repo);
-
-            vm.SelectedHistoryBranch = feature;
-
-            Assert.That(vm.CanCherryPickHistoryCommit, Is.True);
-            Assert.That(vm.CherryPickCommitCommand.CanExecute(null), Is.True);
-        }
-        finally
-        {
-            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
-        }
-    }
-
-    [Test]
-    public async Task HistoryBranchFilter_Matches_Branch_Names_Case_Insensitive()
-    {
-        var main = Branch("main", isCurrent: true);
-        var feature = Branch("feature/login");
-        var originMain = Branch("origin/main", isRemote: true);
-        _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns([main, feature, originMain]);
-
-        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(repo);
-        try
-        {
-            var vm = CreateVm();
-            await vm.OpenAsync(repo);
-
-            Assert.That(vm.FilteredHistoryBranches.Select(b => b.Name), Is.EquivalentTo(["main", "feature/login", "origin/main"]));
-
-            vm.HistoryBranchFilter = "MAIN";
-            Assert.That(vm.FilteredHistoryBranches.Select(b => b.Name), Is.EquivalentTo(["main", "origin/main"]));
-            Assert.That(vm.ShowHistoryBranchFilterEmpty, Is.False);
-
-            vm.HistoryBranchFilter = "feature";
-            Assert.That(vm.FilteredHistoryBranches.Select(b => b.Name), Is.EquivalentTo(["feature/login"]));
-
-            vm.HistoryBranchFilter = "zzz-no-match";
-            Assert.That(vm.FilteredHistoryBranches, Is.Empty);
-            Assert.That(vm.ShowHistoryBranchFilterEmpty, Is.True);
-
-            vm.HistoryBranchFilter = "";
-            Assert.That(vm.FilteredHistoryBranches.Select(b => b.Name), Is.EquivalentTo(["main", "feature/login", "origin/main"]));
-            Assert.That(vm.ShowHistoryBranchFilterEmpty, Is.False);
-        }
-        finally
-        {
-            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+            Directory.Delete(repo, recursive: true);
         }
     }
 }
