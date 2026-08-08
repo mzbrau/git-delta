@@ -25,7 +25,11 @@ npm start
 
 Download the latest Windows setup executable from [GitHub Releases](https://github.com/mzbrau/git-delta/releases) and run it. Installers are packaged with Velopack and target `win-x64`. Running a newer Setup.exe upgrades an existing install.
 
-To cut a release, push a SemVer tag on `main` with the `v` prefix (for example `v0.1.0`). MinVer supplies the version; the Release workflow builds, packages, and uploads the installer.
+### Installing on macOS
+
+Download the latest macOS portable zip from [GitHub Releases](https://github.com/mzbrau/git-delta/releases) (`GitDelta-osx-Portable.zip`, Apple Silicon / `osx-arm64`). Unzip it and open the `.app`. Builds are unsigned for now — see [Install on macOS](docs/getting-started/install-macos.md) for Gatekeeper notes.
+
+To cut a release, push a SemVer tag on `main` with the `v` prefix (for example `v0.1.0`). MinVer supplies the version; the Release workflow builds, packages, and uploads Windows and macOS artifacts.
 
 ### Installing Git
 

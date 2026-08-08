@@ -13,9 +13,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build, test, package, and release
+  release-windows:
+    name: Build, test, package Windows, and create release
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      tag_commit: ${{ steps.guard.outputs.tag_commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -131,6 +135,88 @@ jobs:
             "--releaseName", "GIT DELTA $version",
             "--tag", "${{ steps.version.outputs.tag }}",
             "--targetCommitish", "${{ steps.guard.outputs.tag_commit }}"
+          )
+
+          if ($version.Contains("-")) {
+            $uploadArgs += "--pre"
+          }
+
+          & vpk @uploadArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "Velopack GitHub release upload failed with exit code $LASTEXITCODE."
+          }
+
+  release-macos:
+    name: Package macOS and merge into release
+    needs: release-windows
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          lfs: true
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install Velopack CLI
+        shell: pwsh
+        run: |
+          dotnet tool install --global vpk --version 0.0.1298
+          "$HOME/.dotnet/tools" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Publish macOS folder
+        shell: pwsh
+        run: ./scripts/publish-macos.ps1 -Configuration Release -RuntimeIdentifier osx-arm64 -OutputPath artifacts/publish/GitDelta-osx-arm64
+
+      - name: Package macOS app
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ needs.release-windows.outputs.version }}"
+          $packageArgs = @{
+            Version = $version
+            RuntimeIdentifier = "osx-arm64"
+            PublishPath = "artifacts/publish/GitDelta-osx-arm64"
+            ReleasePath = "artifacts/release"
+            RepoUrl = "https://github.com/${{ github.repository }}"
+            GitHubToken = $env:GITHUB_TOKEN
+          }
+
+          if ($version.Contains("-")) {
+            $packageArgs.Prerelease = $true
+          }
+
+          ./scripts/package-macos.ps1 @packageArgs
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: GitDelta-osx-arm64-release-${{ needs.release-windows.outputs.version }}
+          path: artifacts/release
+
+      - name: Merge macOS assets into GitHub Release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ needs.release-windows.outputs.version }}"
+          $uploadArgs = @(
+            "upload", "github",
+            "--repoUrl", "https://github.com/${{ github.repository }}",
+            "--token", $env:GITHUB_TOKEN,
+            "--outputDir", "artifacts/release",
+            "--channel", "osx",
+            "--publish",
+            "--merge",
+            "--releaseName", "GIT DELTA $version",
+            "--tag", "${{ needs.release-windows.outputs.tag }}",
+            "--targetCommitish", "${{ needs.release-windows.outputs.tag_commit }}"
           )
 
           if ($version.Contains("-")) {
