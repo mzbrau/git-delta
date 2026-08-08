@@ -3502,13 +3502,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     }
 
     [RelayCommand]
-    private void SelectSidebarBranch(BranchInfo? branch)
-    {
-        if (branch is null) return;
-        SelectedSidebarBranch = branch;
-    }
-
-    [RelayCommand]
     private async Task ShowBranchInfoAsync(BranchInfo? branch)
     {
         if (_repoPath is null || branch is null) return;
