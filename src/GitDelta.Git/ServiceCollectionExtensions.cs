@@ -40,6 +40,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IGitDiscardService, GitDiscardService>();
         services.AddSingleton<IGitCommitService, GitCommitService>();
         services.AddSingleton<IGitBranchService, GitBranchService>();
+        services.AddSingleton<IGitTagService, GitTagService>();
         services.AddSingleton<IGitRemoteService, GitRemoteService>();
         services.AddSingleton<IGitCloneService, GitCloneService>();
         services.AddSingleton<IGitConflictService, GitConflictService>();

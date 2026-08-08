@@ -27,6 +27,13 @@ public sealed record BranchInfo(
     string TipOid,
     DateTimeOffset TipCommitterDate);
 
+/// <summary>A local Git tag from <c>for-each-ref refs/tags</c>.</summary>
+public sealed record TagInfo(
+    string Name,
+    DateTimeOffset Date,
+    string TargetOid,
+    string? Message);
+
 /// <summary>
 /// Divergence of <c>headRef</c> relative to <c>baseRef</c> from
 /// <c>git rev-list --left-right --count base...head</c>.

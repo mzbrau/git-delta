@@ -114,7 +114,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         PendingChangesReviewViewModel pendingReview,
         IAiCommitAssistService? commitAssist = null,
         ISyntaxTokenService? syntaxTokens = null,
-        ICheckoutBlockedDialog? checkoutBlockedDialog = null)
+        ICheckoutBlockedDialog? checkoutBlockedDialog = null,
+        IGitTagService? tags = null)
     {
         _diff = new WorkingCopyDiffPresenter(this);
         _status = new WorkingCopyStatusController(this);
@@ -149,6 +150,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             notifications,
             () => WorkingCopyChangeCount,
             () => RefreshAsync());
+        TagRelease = new TagReleaseDialogViewModel(
+            tags ?? EmptyGitTagService.Instance,
+            notifications,
+            CloseTagReleaseDialogAfterSuccessAsync);
         _warmStore = new DiffWarmStore(DiffWarmStore.ClampConcurrency(settings.Current.DiffPrefetchConcurrency));
         ViewMode = settings.Current.DefaultDiffMode;
         _ignoreWhitespace = settings.Current.IgnoreWhitespace;
@@ -175,6 +180,29 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     /// <summary>Interactive rebase wizard (shown as an in-app overlay).</summary>
     public RebaseWizardViewModel RebaseWizard { get; }
+
+    /// <summary>Tag / release dialog (shown as an in-app overlay).</summary>
+    public TagReleaseDialogViewModel TagRelease { get; }
+
+    private sealed class EmptyGitTagService : IGitTagService
+    {
+        public static EmptyGitTagService Instance { get; } = new();
+
+        public Task<IReadOnlyList<TagInfo>> ListTagsAsync(string repositoryPath, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TagInfo>>([]);
+
+        public Task CreateAnnotatedTagAsync(
+            string repositoryPath, string name, string message, CancellationToken ct = default) =>
+            Task.FromException(new InvalidOperationException("Tag service is not available."));
+
+        public Task PushTagAsync(
+            string repositoryPath, string name, IProgress<string>? progress = null, CancellationToken ct = default) =>
+            Task.FromException(new InvalidOperationException("Tag service is not available."));
+
+        public Task PushAllTagsAsync(
+            string repositoryPath, IProgress<string>? progress = null, CancellationToken ct = default) =>
+            Task.FromException(new InvalidOperationException("Tag service is not available."));
+    }
 
     /// <summary>Called when the main window is activated so the watcher can debounce a soft refresh.</summary>
     public void NotifyWindowActivated()
@@ -290,6 +318,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [ObservableProperty] private bool _isPulling;
     [ObservableProperty] private bool _isFetching;
     [ObservableProperty] private bool _showRebaseWizard;
+    [ObservableProperty] private bool _showTagReleaseDialog;
     [ObservableProperty] private int _selectedFileCount;
     [ObservableProperty] private bool _hasStagedSelection;
     [ObservableProperty] private bool _hasUnstagedSelection;
@@ -495,6 +524,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     }
 
     public bool IsRemoteBusy => IsPushing || IsPulling || IsFetching || IsStashing;
+
+    /// <summary>True when a repository is open so tagging is available.</summary>
+    public bool CanOpenTagRelease => _repoPath is not null && !IsRemoteBusy;
 
     /// <summary>True when the current branch is not main/master and a repository is open.</summary>
     public bool CanRebase =>
@@ -736,10 +768,17 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         SelectedHistoryBranch = branch;
     }
 
-    partial void OnIsPushingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
-    partial void OnIsPullingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
-    partial void OnIsFetchingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
-    partial void OnIsStashingChanged(bool value) => OnPropertyChanged(nameof(IsRemoteBusy));
+    partial void OnIsPushingChanged(bool value) => NotifyRemoteBusyChanged();
+    partial void OnIsPullingChanged(bool value) => NotifyRemoteBusyChanged();
+    partial void OnIsFetchingChanged(bool value) => NotifyRemoteBusyChanged();
+    partial void OnIsStashingChanged(bool value) => NotifyRemoteBusyChanged();
+
+    private void NotifyRemoteBusyChanged()
+    {
+        OnPropertyChanged(nameof(IsRemoteBusy));
+        OnPropertyChanged(nameof(CanOpenTagRelease));
+        OpenTagReleaseDialogCommand.NotifyCanExecuteChanged();
+    }
     partial void OnSelectedFileCountChanged(int value) => OnPropertyChanged(nameof(DiffFooterText));
     partial void OnHasUnstagedSelectionChanged(bool value) => OnPropertyChanged(nameof(CanDiscardSelection));
     partial void OnHasStagedSelectionChanged(bool value) => OnPropertyChanged(nameof(CanDiscardSelection));
@@ -790,7 +829,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             _repoPath = path;
             RepositoryPath = path;
             OnPropertyChanged(nameof(HasRepository));
+            OnPropertyChanged(nameof(CanOpenTagRelease));
             OnPropertyChanged(nameof(SelectedFileAbsolutePath));
+            OpenTagReleaseDialogCommand.NotifyCanExecuteChanged();
             WorkspaceMode = WorkspaceMode.FileStatus;
             SelectedStash = null;
             SelectedSidebarBranch = null;
@@ -1356,6 +1397,29 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         await RebaseWizard.OpenAsync(_repoPath, CurrentBranch, upstream);
         ShowRebaseWizard = true;
         OnPropertyChanged(nameof(CanUseInProgressBanner));
+    }
+
+    [RelayCommand(CanExecute = nameof(CanOpenTagRelease))]
+    private async Task OpenTagReleaseDialogAsync()
+    {
+        if (_repoPath is null) return;
+        await TagRelease.OpenAsync(_repoPath, CurrentBranch);
+        ShowTagReleaseDialog = true;
+    }
+
+    [RelayCommand]
+    private void CloseTagReleaseDialog()
+    {
+        if (!ShowTagReleaseDialog) return;
+        ShowTagReleaseDialog = false;
+        TagRelease.Reset();
+    }
+
+    private Task CloseTagReleaseDialogAfterSuccessAsync()
+    {
+        ShowTagReleaseDialog = false;
+        TagRelease.Reset();
+        return Task.CompletedTask;
     }
 
     [RelayCommand]

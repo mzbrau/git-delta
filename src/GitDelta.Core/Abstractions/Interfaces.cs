@@ -133,6 +133,32 @@ public interface IGitRemoteService
     Task<string?> GetRemoteUrlAsync(string repositoryPath, string remoteName = "origin", CancellationToken ct = default);
 }
 
+/// <summary>List, create annotated tags, and push tags.</summary>
+public interface IGitTagService
+{
+    Task<IReadOnlyList<TagInfo>> ListTagsAsync(string repositoryPath, CancellationToken ct = default);
+
+    /// <summary>Creates an annotated tag on <c>HEAD</c> (<c>git tag -a -m</c>).</summary>
+    Task CreateAnnotatedTagAsync(
+        string repositoryPath,
+        string name,
+        string message,
+        CancellationToken ct = default);
+
+    /// <summary>Pushes a single tag ref to <c>origin</c>.</summary>
+    Task PushTagAsync(
+        string repositoryPath,
+        string name,
+        IProgress<string>? progress = null,
+        CancellationToken ct = default);
+
+    /// <summary>Pushes all local tags to <c>origin</c> (<c>git push --tags</c>).</summary>
+    Task PushAllTagsAsync(
+        string repositoryPath,
+        IProgress<string>? progress = null,
+        CancellationToken ct = default);
+}
+
 /// <summary>Interactive rebase start via prepared todo + <c>GIT_SEQUENCE_EDITOR</c>.</summary>
 public interface IGitRebaseService
 {

@@ -111,6 +111,14 @@
                 <TextBlock Text="Rebase" VerticalAlignment="Center" />
               </StackPanel>
             </Button>
+            <Button Classes="Ghost" Command="{Binding WorkingCopy.OpenTagReleaseDialogCommand}"
+                    IsEnabled="{Binding WorkingCopy.CanOpenTagRelease}"
+                    ToolTip.Tip="Create and push a Git tag">
+              <StackPanel Orientation="Horizontal" Spacing="4">
+                <icons:MaterialIcon Kind="Tag" Width="16" Height="16" />
+                <TextBlock Text="Tag" VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
             <Border Width="1" Height="16" Background="{DynamicResource ForgeOutlineVariantBrush}" Margin="8,0" />
             <Button Classes="Ghost" Command="{Binding WorkingCopy.ViewRemoteCommand}"
                     ToolTip.Tip="Open remote in browser">
@@ -4715,6 +4723,116 @@
               </Grid>
             </StackPanel>
           </StackPanel>
+        </DockPanel>
+      </Border>
+    </Border>
+
+    <!-- Tag / Release dialog -->
+    <Border IsVisible="{Binding WorkingCopy.ShowTagReleaseDialog}"
+            Background="{DynamicResource ForgeSettingsScrimBrush}" ZIndex="217">
+      <Border Width="520" MaxHeight="640" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
+              CornerRadius="10" Padding="20">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Spacing="12" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <icons:MaterialIcon Kind="Tag" Width="20" Height="20"
+                                  Foreground="{DynamicResource ForgePrimaryBrush}" />
+              <TextBlock Text="Tag / Release" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+            </StackPanel>
+
+            <Border IsVisible="{Binding WorkingCopy.TagRelease.ShowBranchWarning}"
+                    Background="{DynamicResource ForgeBannerBrush}"
+                    BorderBrush="{DynamicResource ForgeStatusRequestChangesBrush}"
+                    BorderThickness="1" CornerRadius="6" Padding="12,10">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <icons:MaterialIcon Kind="AlertOutline" Width="18" Height="18"
+                                    Foreground="{DynamicResource ForgeStatusRequestChangesBrush}"
+                                    VerticalAlignment="Top" Margin="0,1,0,0" />
+                <TextBlock Text="{Binding WorkingCopy.TagRelease.BranchWarningText}"
+                           FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <StackPanel DockPanel.Dock="Bottom" Spacing="12" Margin="0,16,0,0">
+            <StackPanel Spacing="8">
+              <TextBlock Text="New tag" FontSize="12" Opacity="0.7" />
+              <TextBox Classes="Forge" Text="{Binding WorkingCopy.TagRelease.NewTagName}"
+                       PlaceholderText="e.g. v1.2.0" />
+              <TextBox Classes="Forge" Text="{Binding WorkingCopy.TagRelease.TagMessage}"
+                       PlaceholderText="Tag message (required)"
+                       AcceptsReturn="True"
+                       MinHeight="56"
+                       TextWrapping="Wrap" />
+              <CheckBox Content="Push all tags"
+                        IsChecked="{Binding WorkingCopy.TagRelease.PushAllTags}"
+                        IsEnabled="{Binding WorkingCopy.TagRelease.IsBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+              <Button Content="Cancel" Classes="Ghost"
+                      Command="{Binding WorkingCopy.CloseTagReleaseDialogCommand}"
+                      IsEnabled="{Binding WorkingCopy.TagRelease.IsBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+              <Button Classes="Primary"
+                      Command="{Binding WorkingCopy.TagRelease.AddAndPushCommand}"
+                      IsEnabled="{Binding WorkingCopy.TagRelease.CanAddAndPush}">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <ProgressBar Width="14" Height="14" IsIndeterminate="True"
+                               IsVisible="{Binding WorkingCopy.TagRelease.IsBusy}" />
+                  <TextBlock Text="Add and push" VerticalAlignment="Center" />
+                </StackPanel>
+              </Button>
+            </StackPanel>
+          </StackPanel>
+
+          <DockPanel>
+            <TextBox DockPanel.Dock="Top" Classes="Forge"
+                     Text="{Binding WorkingCopy.TagRelease.FilterText}"
+                     PlaceholderText="Filter tags…"
+                     Margin="0,0,0,8" />
+
+            <StackPanel DockPanel.Dock="Top" Spacing="6" Margin="0,0,0,8"
+                        IsVisible="{Binding WorkingCopy.TagRelease.IsLoading}">
+              <ProgressBar IsIndeterminate="True" Height="4" HorizontalAlignment="Stretch" />
+              <TextBlock Text="Loading tags…" FontSize="12" Opacity="0.65" />
+            </StackPanel>
+
+            <SelectableTextBlock DockPanel.Dock="Top"
+                       Text="{Binding WorkingCopy.TagRelease.LoadError}" FontSize="12"
+                       TextWrapping="Wrap" Margin="0,0,0,8"
+                       IsVisible="{Binding WorkingCopy.TagRelease.HasLoadError}"
+                       Foreground="{DynamicResource ForgeErrorBrush}" />
+
+            <TextBlock DockPanel.Dock="Top"
+                       Text="No tags" FontSize="12" Opacity="0.55"
+                       Margin="0,8,0,8"
+                       IsVisible="{Binding WorkingCopy.TagRelease.ShowEmptyTags}" />
+
+            <ListBox ItemsSource="{Binding WorkingCopy.TagRelease.FilteredTags}"
+                     Background="Transparent"
+                     BorderThickness="0"
+                     MaxHeight="220"
+                     IsEnabled="{Binding WorkingCopy.TagRelease.IsBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:TagListItemViewModel">
+                  <Grid ColumnDefinitions="*,Auto" Margin="0,4">
+                    <StackPanel Grid.Column="0" Spacing="2" Margin="0,0,12,0">
+                      <TextBlock Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
+                                 FontFamily="{DynamicResource ForgeCodeFont}"
+                                 TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding Message}" FontSize="11" Opacity="0.65"
+                                 TextTrimming="CharacterEllipsis"
+                                 IsVisible="{Binding Message, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Text="{Binding DateDisplay}" FontSize="11" Opacity="0.55"
+                               VerticalAlignment="Center" />
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </DockPanel>
         </DockPanel>
       </Border>
     </Border>
