@@ -107,12 +107,11 @@ public partial class WorkingCopyViewModel
     {
         if (!TicketFromBranch.TryExtract(CurrentBranch, _settings.Current.TicketFromBranchRegex, out var ticket, out var error))
         {
-            HookOutput = error ?? "No ticket found in branch name.";
+            _notifications.Info(error ?? "No ticket found in branch name.");
             return;
         }
 
         CommitMessage = TicketFromBranch.PrependTicket(CommitMessage, ticket);
-        HookOutput = "";
     }
 
     [RelayCommand(CanExecute = nameof(CanGenerateCommitMessage))]
@@ -121,13 +120,12 @@ public partial class WorkingCopyViewModel
         if (_repoPath is null || IsGeneratingCommitMessage) return;
 
         IsGeneratingCommitMessage = true;
-        HookOutput = "";
         try
         {
             var summary = await BuildStagedDiffSummaryAsync().ConfigureAwait(true);
             if (string.IsNullOrWhiteSpace(summary))
             {
-                HookOutput = "No staged changes to summarise.";
+                _notifications.Info("No staged changes to summarise.");
                 return;
             }
 
@@ -141,7 +139,6 @@ public partial class WorkingCopyViewModel
         }
         catch (Exception ex)
         {
-            HookOutput = $"Generate commit message failed: {ex.Message}";
             _notifications.Error($"Generate commit message failed: {ex.Message}", null, ex);
         }
         finally
@@ -269,6 +266,8 @@ public partial class WorkingCopyViewModel
 
             OnPropertyChanged(nameof(HasMagicCommitResults));
             MagicCommitError = result.Error ?? "";
+            if (!string.IsNullOrEmpty(result.Error))
+                AppendMagicCommitActivity(result.Error);
             MagicCommitDialogStep = MagicCommitDialogStepKind.Results;
 
             await RefreshAsync(clearAiReviewAfter: true).ConfigureAwait(true);
@@ -374,7 +373,7 @@ public partial class WorkingCopyViewModel
 
         var target = stagedOnly ? DiffTarget.HeadToIndex : DiffTarget.HeadToWorktree;
         var files = await _diffService.GetRawDiffAsync(_repoPath, target, options, ct).ConfigureAwait(true);
-        var paths = files.Select(f => f.Path).ToList();
+        var paths = files.Select(f => f.Path).Distinct().ToList();
         var diffs = (await LoadDiffsForPathsAsync(paths, target, options, ct).ConfigureAwait(true)).ToList();
 
         if (stagedOnly)

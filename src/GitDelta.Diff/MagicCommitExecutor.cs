@@ -112,7 +112,8 @@ public sealed class MagicCommitExecutor(
 
             if (whole.Count > 0)
             {
-                await staging.StageFileAsync(repositoryPath, path, ct).ConfigureAwait(false);
+                // Force: inventoried Added paths may be gitignored after product unstage.
+                await staging.StageFileAsync(repositoryPath, path, ct, force: true).ConfigureAwait(false);
                 continue;
             }
 

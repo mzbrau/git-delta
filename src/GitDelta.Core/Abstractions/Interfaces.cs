@@ -67,9 +67,11 @@ public interface IGitObjectReader : IAsyncDisposable
 
 public interface IGitStagingService
 {
-    Task StageFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default);
+    /// <param name="force">When true, uses <c>git add -f</c> so ignored paths can be staged.</param>
+    Task StageFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default, bool force = false);
     Task UnstageFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default);
-    Task StageFilesAsync(string repositoryPath, IReadOnlyList<FilePath> paths, CancellationToken ct = default);
+    /// <param name="force">When true, uses <c>git add -f</c> so ignored paths can be staged.</param>
+    Task StageFilesAsync(string repositoryPath, IReadOnlyList<FilePath> paths, CancellationToken ct = default, bool force = false);
     Task UnstageFilesAsync(string repositoryPath, IReadOnlyList<FilePath> paths, CancellationToken ct = default);
     Task StagePatchAsync(string repositoryPath, string patch, CancellationToken ct = default);
     Task UnstagePatchAsync(string repositoryPath, string patch, CancellationToken ct = default);

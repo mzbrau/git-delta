@@ -293,4 +293,102 @@ public sealed class MagicCommitExecutorTests
         var status = await sp.GetRequiredService<IGitStatusService>().GetStatusAsync(path);
         Assert.That(status.Unstaged.Any(s => s.Path.Value == "file.cs"), Is.True);
     }
+
+    [Test]
+    public async Task Staged_Added_File_Survives_Unstage_And_Execute()
+    {
+        // Product unstages inventory paths before execute. Staged Added files become untracked;
+        // they must be whole-file items staged via git add, not hunk rematch.
+        const string lfsPointer =
+            "version https://git-lfs.github.com/spec/v1\n" +
+            "oid sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\n" +
+            "size 1234\n";
+
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("tracked.txt", "keep\n")
+            .WithInitialCommit("init")
+            .WithStagedChange("asset.png", lfsPointer);
+        var path = repo.Build();
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var diffService = sp.GetRequiredService<IGitDiffService>();
+        var staging = sp.GetRequiredService<IGitStagingService>();
+        var commit = sp.GetRequiredService<IGitCommitService>();
+        var history = sp.GetRequiredService<IGitHistoryService>();
+
+        var options = DiffOptions.Default;
+        var addedDiff = await diffService.GetDiffAsync(
+            path, FilePath.From("asset.png"), DiffTarget.HeadToIndex, options);
+        Assert.That(addedDiff.Change, Is.EqualTo(ChangeKind.Added));
+        Assert.That(addedDiff.Hunks, Is.Not.Empty, "LFS pointer text has hunks");
+
+        var inventory = MagicCommitInventory.Build([addedDiff]);
+        Assert.That(inventory, Has.Count.EqualTo(1));
+        Assert.That(inventory[0].WholeFile, Is.True);
+
+        await staging.UnstageFilesAsync(path, [FilePath.From("asset.png")]);
+
+        var plan = new MagicCommitPlan([new MagicCommitPlanEntry("add LFS asset", [inventory[0].Id])]);
+        var executor = new MagicCommitExecutor(diffService, staging, commit, history);
+        var result = await executor.ExecuteAsync(path, inventory, plan, options, noVerify: true, progress: null);
+
+        Assert.That(result.Error, Is.Null, result.Error);
+        Assert.That(result.Commits, Has.Count.EqualTo(1));
+        Assert.That(result.Commits[0].Subject, Is.EqualTo("add LFS asset"));
+
+        var status = await sp.GetRequiredService<IGitStatusService>().GetStatusAsync(path);
+        Assert.That(status.Staged, Is.Empty);
+        Assert.That(status.Unstaged, Is.Empty);
+    }
+
+    [Test]
+    public async Task Ignored_Staged_Added_File_Survives_Unstage_And_Execute()
+    {
+        // Product unstages inventory paths before execute. A force-staged ignored file becomes
+        // ignored-untracked; plain git add fails — Magic Commit must re-stage with -f.
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("tracked.txt", "keep\n")
+            .WithFile(".gitignore", "*.png\n")
+            .WithInitialCommit("init");
+        var path = repo.Build();
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var diffService = sp.GetRequiredService<IGitDiffService>();
+        var staging = sp.GetRequiredService<IGitStagingService>();
+        var commit = sp.GetRequiredService<IGitCommitService>();
+        var history = sp.GetRequiredService<IGitHistoryService>();
+
+        var assetFull = System.IO.Path.Combine(path, "asset.png");
+        await File.WriteAllTextAsync(assetFull, "png-bytes-or-lfs-pointer\n");
+        await staging.StageFileAsync(path, FilePath.From("asset.png"), force: true);
+
+        var options = DiffOptions.Default;
+        var addedDiff = await diffService.GetDiffAsync(
+            path, FilePath.From("asset.png"), DiffTarget.HeadToIndex, options);
+        Assert.That(addedDiff.Change, Is.EqualTo(ChangeKind.Added));
+
+        var inventory = MagicCommitInventory.Build([addedDiff]);
+        Assert.That(inventory, Has.Count.EqualTo(1));
+        Assert.That(inventory[0].WholeFile, Is.True);
+
+        await staging.UnstageFilesAsync(path, [FilePath.From("asset.png")]);
+
+        // Sanity: without -f, re-add fails once the path is ignored-untracked.
+        Assert.ThrowsAsync<GitException>(async () =>
+            await staging.StageFileAsync(path, FilePath.From("asset.png")));
+
+        var plan = new MagicCommitPlan([new MagicCommitPlanEntry("add ignored asset", [inventory[0].Id])]);
+        var executor = new MagicCommitExecutor(diffService, staging, commit, history);
+        var result = await executor.ExecuteAsync(path, inventory, plan, options, noVerify: true, progress: null);
+
+        Assert.That(result.Error, Is.Null, result.Error);
+        Assert.That(result.Commits, Has.Count.EqualTo(1));
+        Assert.That(result.Commits[0].Subject, Is.EqualTo("add ignored asset"));
+
+        var status = await sp.GetRequiredService<IGitStatusService>().GetStatusAsync(path);
+        Assert.That(status.Staged, Is.Empty);
+        Assert.That(status.Unstaged, Is.Empty);
+    }
 }

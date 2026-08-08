@@ -33,7 +33,8 @@ public static class MagicCommitInventory
     }
 
     /// <summary>
-    /// Builds inventory items from a set of file diffs. Binary / empty-hunk files become whole-file items.
+    /// Builds inventory items from a set of file diffs. Binary / empty-hunk / add / delete / untracked
+    /// files become whole-file items; only modifications of existing tracked files stay as per-hunk items.
     /// </summary>
     public static IReadOnlyList<MagicCommitHunkItem> Build(IReadOnlyList<FileDiff> diffs)
     {
@@ -44,8 +45,12 @@ public static class MagicCommitInventory
         foreach (var diff in diffs)
         {
             var path = diff.NewPath.Value.Length > 0 ? diff.NewPath.Value : diff.OldPath.Value;
-            // Untracked must be whole-file: IndexToWorktree rematch is empty until staged.
-            if (diff.IsBinary || diff.Hunks.Count == 0 || diff.Change == ChangeKind.Untracked)
+            // Rematch after product unstage requires a non-empty IndexToWorktree patch. Added files
+            // become untracked after unstage (empty diff); Deleted/Untracked/binary cannot be split
+            // meaningfully — stage the whole file via git add instead.
+            if (diff.IsBinary
+                || diff.Hunks.Count == 0
+                || diff.Change is ChangeKind.Untracked or ChangeKind.Added or ChangeKind.Deleted)
             {
                 var fp = FingerprintWholeFile(diff);
                 items.Add(new MagicCommitHunkItem(
