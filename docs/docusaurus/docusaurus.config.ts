@@ -37,7 +37,7 @@ const config: Config = {
       {
         docs: {
           path: '..',
-          exclude: ['docusaurus/**'],
+          exclude: ['docusaurus/**', 'img/**/*.md'],
           sidebarPath: './sidebars.ts',
           routeBasePath: 'docs',
           editUrl: 'https://github.com/mzbrau/git-delta/tree/main/docs/',
@@ -57,6 +57,10 @@ const config: Config = {
     },
     navbar: {
       title: 'GIT DELTA',
+      logo: {
+        alt: 'GIT DELTA',
+        src: 'img/logo.png',
+      },
       items: [
         {
           type: 'docSidebar',

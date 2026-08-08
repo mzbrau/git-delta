@@ -6,8 +6,7 @@ title: GitHub accounts
 
 Pull request review uses a **personal access token (PAT)** stored in your OS keychain or credential manager — not a shared OAuth app flow.
 
-{/* Capture: Settings → Accounts  */}
-![Settings Accounts](/img/placeholders/settings-accounts.png)
+![Settings Accounts](../img/settings-accounts.png)
 
 ## Add an account
 

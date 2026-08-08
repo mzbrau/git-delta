@@ -12,7 +12,10 @@
     "serve": "docusaurus serve",
     "write-translations": "docusaurus write-translations",
     "write-heading-ids": "docusaurus write-heading-ids",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "sync:landing": "bash scripts/sync-landing.sh",
+    "prestart": "npm run sync:landing",
+    "prebuild": "npm run sync:landing"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",
@@ -20,6 +23,7 @@
     "@docusaurus/preset-classic": "3.10.2",
     "@mdx-js/react": "^3.0.0",
     "clsx": "^2.0.0",
+    "gsap": "^3.15.0",
     "prism-react-renderer": "^2.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

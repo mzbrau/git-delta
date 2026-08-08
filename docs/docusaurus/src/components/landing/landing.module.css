@@ -1,0 +1,543 @@
+/* Landing page — hero, scrollytelling, features, docs */
+
+.hero {
+  --gd-hero-peek: clamp(160px, 28vh, 280px);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 100vh;
+  padding: 5.5rem 1.5rem 0;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(217, 185, 255, 0.14), transparent 55%),
+    linear-gradient(180deg, #0e0e0e 0%, #131313 45%, #191919 100%);
+  color: var(--gd-on-surface, #e5e2e1);
+}
+
+.heroContent {
+  position: relative;
+  z-index: 2;
+  max-width: 40rem;
+  margin: 0 auto 2rem;
+  text-align: center;
+}
+
+.brandRow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+
+.heroLogo {
+  width: 128px;
+  height: 128px;
+  border-radius: 28px;
+}
+
+.brandName {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gd-primary, #d9b9ff);
+}
+
+.heroTitle {
+  margin: 0 0 0.75rem;
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--gd-text-vibrant, #f7f7f7);
+}
+
+.heroTagline {
+  margin: 0 0 0.75rem;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  color: var(--gd-on-surface-variant, #ccc4d0);
+}
+
+.heroBlurb {
+  margin: 0 auto 1.75rem;
+  max-width: 34rem;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--gd-text-muted, #a3a3a3);
+}
+
+.heroCtas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.ctaPrimary,
+.ctaSecondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.7rem 1.25rem;
+  border-radius: 0.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.ctaPrimary {
+  background: var(--gd-primary, #d9b9ff);
+  color: var(--gd-on-primary, #3d235e);
+}
+
+.ctaPrimary:hover {
+  background: var(--gd-primary-bright, #eedbff);
+  color: var(--gd-on-primary, #3d235e);
+  text-decoration: none;
+}
+
+.ctaSecondary {
+  background: transparent;
+  color: var(--gd-on-surface, #e5e2e1);
+  border: 1px solid var(--gd-border-subtle, #2a2a2a);
+}
+
+.ctaSecondary:hover {
+  border-color: var(--gd-outline, #958e9a);
+  color: var(--gd-text-vibrant, #f7f7f7);
+  text-decoration: none;
+}
+
+.quickLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.25rem;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85rem;
+}
+
+.quickLinks a {
+  color: var(--gd-text-muted, #a3a3a3);
+}
+
+.quickLinks a:hover {
+  color: var(--gd-primary, #d9b9ff);
+}
+
+/* Reserves bottom viewport space; ScrollytellingStage fills it (continuous peek). */
+.heroPeekSpacer {
+  position: relative;
+  z-index: 0;
+  width: min(1100px, 92vw);
+  margin: 0 auto;
+  height: var(--gd-hero-peek);
+  pointer-events: none;
+}
+
+/* —— Scrollytelling —— */
+
+.story {
+  --gd-hero-peek: clamp(160px, 28vh, 280px);
+  position: relative;
+  z-index: 1;
+  margin-top: calc(-1 * var(--gd-hero-peek));
+  background: transparent;
+  color: var(--gd-on-surface, #e5e2e1);
+}
+
+.storyPin {
+  height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+  background: #131313;
+}
+
+.storyInner {
+  position: relative;
+  width: min(1400px, 96vw);
+  height: 100%;
+  display: block;
+  margin: 0 auto;
+}
+
+.appStage {
+  /* Fit inside viewport with navbar/edge inset; aspect-aware */
+  --gd-stage-inset: 64px;
+  --gd-stage-w: min(
+    1100px,
+    72vw,
+    calc((100vh - 2 * var(--gd-stage-inset)) * 2940 / 1782)
+  );
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: var(--gd-stage-w);
+  margin-left: calc(var(--gd-stage-w) / -2);
+  will-change: transform;
+  transform: translateZ(0);
+  transform-origin: top center;
+}
+
+.appFrame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2940 / 1782;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--gd-border-subtle, #2a2a2a);
+  background: #0e0e0e;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+}
+
+.appLayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+  pointer-events: none;
+  user-select: none;
+}
+
+.copyColumn {
+  position: absolute;
+  right: clamp(1.5rem, 4vw, 3.5rem);
+  left: auto;
+  top: 12%;
+  transform: none;
+  width: min(280px, 22vw);
+  z-index: 30;
+  pointer-events: none;
+}
+
+.copyPanel {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 100%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.copyHeading {
+  margin: 0 0 0.85rem;
+  font-size: clamp(1.25rem, 2vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: var(--gd-text-vibrant, #f7f7f7);
+}
+
+.bulletList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bulletList li {
+  position: relative;
+  padding: 0.28rem 0 0.28rem 1.1rem;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  color: var(--gd-on-surface-variant, #ccc4d0);
+  opacity: 0;
+}
+
+.bulletList li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.7em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gd-primary, #d9b9ff);
+}
+
+/* —— Features —— */
+
+.features {
+  display: flex;
+  align-items: center;
+  min-height: 100vh;
+  padding: clamp(6rem, 18vh, 10rem) 1.5rem;
+  background: #131313;
+  color: var(--gd-on-surface, #e5e2e1);
+}
+
+.docs {
+  padding: 1rem 1.5rem 6rem;
+  background: #131313;
+  color: var(--gd-on-surface, #e5e2e1);
+  border-top: 1px solid var(--gd-border-subtle, #2a2a2a);
+}
+
+.sectionInner {
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.sectionTitle {
+  margin: 0 0 0.75rem;
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--gd-text-vibrant, #f7f7f7);
+  text-align: center;
+}
+
+.sectionLead {
+  margin: 0 auto 3.5rem;
+  max-width: 36rem;
+  text-align: center;
+  color: var(--gd-text-muted, #a3a3a3);
+  line-height: 1.55;
+  font-size: 1.05rem;
+}
+
+.featureGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.featureCard {
+  padding: 1.25rem 1.15rem;
+  border: 1px solid var(--gd-border-subtle, #2a2a2a);
+  border-radius: 0.75rem;
+  background: var(--gd-surface-low, #191919);
+}
+
+.featureTitle {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--gd-text-vibrant, #f7f7f7);
+}
+
+.featureBody {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--gd-text-muted, #a3a3a3);
+}
+
+.docsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+.docsItem {
+  padding: 0.25rem 0;
+}
+
+.docsTitle {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  color: var(--gd-text-vibrant, #f7f7f7);
+}
+
+.docsBody {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--gd-text-muted, #a3a3a3);
+}
+
+/* —— Reduced motion static story —— */
+
+.staticStory {
+  display: flex;
+  flex-direction: column;
+  gap: 3.5rem;
+  padding: 3rem 1.5rem 4rem;
+  background: #131313;
+  color: var(--gd-on-surface, #e5e2e1);
+}
+
+.staticChapter {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 2rem;
+  align-items: center;
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.staticFrame {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--gd-border-subtle, #2a2a2a);
+}
+
+.staticFrame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.staticCopy h2 {
+  margin-top: 0;
+  color: var(--gd-text-vibrant, #f7f7f7);
+}
+
+.staticCopy ul {
+  padding-left: 1.1rem;
+  color: var(--gd-on-surface-variant, #ccc4d0);
+  line-height: 1.55;
+}
+
+/* —— Mobile —— */
+
+@media (max-width: 768px) {
+  .hero {
+    --gd-hero-peek: clamp(120px, 22vh, 200px);
+    min-height: auto;
+    padding-top: 4.5rem;
+  }
+
+  .heroContent {
+    margin-bottom: 1.5rem;
+  }
+
+  .heroLogo {
+    width: 80px;
+    height: 80px;
+    border-radius: 18px;
+  }
+
+  .heroPeekSpacer {
+    width: 100%;
+  }
+
+  .story {
+    --gd-hero-peek: clamp(120px, 22vh, 200px);
+  }
+
+  .storyPin {
+    height: 100vh;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 4.5rem 1rem 1rem;
+    box-sizing: border-box;
+  }
+
+  .storyInner {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    height: 100%;
+    width: 100%;
+    max-width: 100%;
+    gap: 1.25rem;
+    padding: 0;
+  }
+
+  .appStage {
+    position: relative;
+    left: auto;
+    top: auto;
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    --gd-stage-w: 100%;
+  }
+
+  .appFrame {
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  }
+
+  .copyColumn {
+    position: relative;
+    top: auto !important;
+    right: auto;
+    left: auto;
+    transform: none;
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 12rem;
+    z-index: 5;
+    pointer-events: auto;
+  }
+
+  .copyPanel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+  }
+
+  .copyHeading {
+    font-size: 1.35rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .bulletList li {
+    font-size: 0.9rem;
+    padding-top: 0.3rem;
+    padding-bottom: 0.3rem;
+  }
+
+  .featureGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .docsGrid {
+    grid-template-columns: 1fr;
+    gap: 1.75rem;
+  }
+
+  .staticChapter {
+    grid-template-columns: 1fr;
+  }
+
+  .features {
+    min-height: auto;
+    padding: clamp(4rem, 12vh, 7rem) 1.25rem;
+  }
+
+  .docs {
+    padding: 1rem 1.25rem 4rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .featureGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .heroCtas {
+    flex-direction: column;
+  }
+
+  .ctaPrimary,
+  .ctaSecondary {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctaPrimary,
+  .ctaSecondary {
+    transition: none;
+  }
+}

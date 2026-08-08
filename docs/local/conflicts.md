@@ -6,8 +6,7 @@ title: Conflicts
 
 When a merge, rebase, or similar operation is in progress, GIT DELTA surfaces that state clearly.
 
-{/* Capture: Merge/rebase in-progress banner with Abort/Continue  */}
-![In-progress banner](/img/placeholders/in-progress-banner.png)
+![In-progress banner](../img/in-progress-banner.png)
 
 ## In-progress banner
 
