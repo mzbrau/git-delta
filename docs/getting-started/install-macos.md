@@ -30,7 +30,7 @@ You need **2.30** or later.
 
 ### From Releases
 
-Published macOS builds target **Apple Silicon** (`osx-arm64`) and ship as an unsigned Velopack portable zip.
+Published macOS builds target **Apple Silicon** (`osx-arm64`) and ship as a Velopack portable zip. Builds are ad-hoc signed (not Developer ID–signed or notarized).
 
 1. Open [GitHub Releases](https://github.com/mzbrau/git-delta/releases)
 2. Download `GitDelta-osx-Portable.zip`
@@ -41,7 +41,15 @@ Published macOS builds target **Apple Silicon** (`osx-arm64`) and ship as an uns
 Intel Macs (`osx-x64`) and a signed `.pkg` installer are not published yet; use [From source](#from-source) on those machines.
 
 :::note Gatekeeper
-macOS builds are **not code-signed or notarized** yet. Gatekeeper may block the first launch. If you trust the release from this project’s GitHub Releases page, right-click the app → **Open**, or allow it under **System Settings → Privacy & Security**.
+macOS builds are **not Developer ID–signed or notarized**. Gatekeeper may block the first launch. If you trust the release from this project’s GitHub Releases page:
+
+- **“GIT DELTA is damaged and can’t be opened”** — clear the quarantine attribute, then open again:
+
+  ```bash
+  xattr -dr com.apple.quarantine "/path/to/GIT DELTA.app"
+  ```
+
+- **“cannot be opened because the developer cannot be verified”** — right-click the app → **Open**, or allow it under **System Settings → Privacy & Security**.
 :::
 
 ### From source

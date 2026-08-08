@@ -94,6 +94,70 @@ function Test-PreviousVelopackReleaseExists {
     }
 }
 
+function Invoke-AdHocSignPortableZip {
+    param(
+        [Parameter(Mandatory = $true)][string] $ZipPath,
+        [Parameter(Mandatory = $true)][string] $AppBundleName
+    )
+
+    if (-not (Test-Path $ZipPath -PathType Leaf)) {
+        throw "Portable zip does not exist: $ZipPath"
+    }
+
+    if (-not (Get-Command ditto -ErrorAction SilentlyContinue)) {
+        throw "ditto was not found on PATH. Ad-hoc signing requires macOS."
+    }
+
+    if (-not (Get-Command codesign -ErrorAction SilentlyContinue)) {
+        throw "codesign was not found on PATH. Ad-hoc signing requires macOS."
+    }
+
+    $stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("gitdelta-osx-sign-" + [Guid]::NewGuid().ToString("N"))
+    $extractDir = Join-Path $stagingRoot "extract"
+    $repackDir = Join-Path $stagingRoot "repack"
+    New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $repackDir -Force | Out-Null
+
+    try {
+        & ditto -x -k $ZipPath $extractDir
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract portable zip with ditto (exit code $LASTEXITCODE)."
+        }
+
+        $appPath = Join-Path $extractDir $AppBundleName
+        if (-not (Test-Path $appPath -PathType Container)) {
+            throw "App bundle '$AppBundleName' was not found inside portable zip: $ZipPath"
+        }
+
+        # Ad-hoc sign seals Contents/_CodeSignature so Gatekeeper does not treat
+        # quarantined downloads as "damaged". Not a Developer ID / notarized signature.
+        & codesign --force --deep --sign - $appPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "codesign ad-hoc signing failed with exit code $LASTEXITCODE."
+        }
+
+        & codesign --verify --deep --strict --verbose=2 $appPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "codesign verification failed with exit code $LASTEXITCODE."
+        }
+
+        $repackAppPath = Join-Path $repackDir $AppBundleName
+        Move-Item -Path $appPath -Destination $repackAppPath
+        $repackedZip = Join-Path $stagingRoot "portable-repacked.zip"
+        & ditto -c -k --keepParent $repackAppPath $repackedZip
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to re-zip ad-hoc signed app with ditto (exit code $LASTEXITCODE)."
+        }
+
+        Move-Item -Path $repackedZip -Destination $ZipPath -Force
+        Write-Host "Ad-hoc signed portable app bundle in $ZipPath"
+    } finally {
+        if (Test-Path $stagingRoot) {
+            Remove-Item -Path $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 $publishPathResolved = Resolve-RepositoryPath $PublishPath
 $releasePathResolved = Resolve-RepositoryPath $ReleasePath
 $mainExePath = Join-Path $publishPathResolved $MainExe
@@ -160,5 +224,8 @@ if (-not $SkipDownload -and -not [string]::IsNullOrWhiteSpace($RepoUrl)) {
 if ($LASTEXITCODE -ne 0) {
     throw "Velopack packaging failed with exit code $LASTEXITCODE."
 }
+
+$portableZipPath = Join-Path $releasePathResolved "$PackageId-$channel-Portable.zip"
+Invoke-AdHocSignPortableZip -ZipPath $portableZipPath -AppBundleName "GIT DELTA.app"
 
 Write-Host "GitDelta macOS app assets created in $releasePathResolved"
