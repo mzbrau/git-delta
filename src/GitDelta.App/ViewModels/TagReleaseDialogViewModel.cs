@@ -76,7 +76,7 @@ public partial class TagReleaseDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowBranchWarning));
         OnPropertyChanged(nameof(BranchWarningText));
         OnPropertyChanged(nameof(ShowEmptyTags));
-        AddAndPushCommand.NotifyCanExecuteChanged();
+        NotifyCanAddAndPushChanged();
 
         await ReloadTagsAsync();
     }
@@ -99,7 +99,7 @@ public partial class TagReleaseDialogViewModel : ObservableObject
         OnPropertyChanged(nameof(BranchWarningText));
         OnPropertyChanged(nameof(ShowEmptyTags));
         OnPropertyChanged(nameof(HasLoadError));
-        AddAndPushCommand.NotifyCanExecuteChanged();
+        NotifyCanAddAndPushChanged();
     }
 
     [RelayCommand(CanExecute = nameof(CanAddAndPush))]
@@ -113,7 +113,7 @@ public partial class TagReleaseDialogViewModel : ObservableObject
             return;
 
         IsBusy = true;
-        AddAndPushCommand.NotifyCanExecuteChanged();
+        NotifyCanAddAndPushChanged();
         try
         {
             await _tags.CreateAnnotatedTagAsync(_repoPath, name, message).ConfigureAwait(true);
@@ -137,8 +137,14 @@ public partial class TagReleaseDialogViewModel : ObservableObject
         finally
         {
             IsBusy = false;
-            AddAndPushCommand.NotifyCanExecuteChanged();
+            NotifyCanAddAndPushChanged();
         }
+    }
+
+    private void NotifyCanAddAndPushChanged()
+    {
+        OnPropertyChanged(nameof(CanAddAndPush));
+        AddAndPushCommand.NotifyCanExecuteChanged();
     }
 
     partial void OnCurrentBranchChanged(string? value)
@@ -149,20 +155,17 @@ public partial class TagReleaseDialogViewModel : ObservableObject
 
     partial void OnFilterTextChanged(string value) => ApplyFilter();
 
-    partial void OnNewTagNameChanged(string value) =>
-        AddAndPushCommand.NotifyCanExecuteChanged();
+    partial void OnNewTagNameChanged(string value) => NotifyCanAddAndPushChanged();
 
-    partial void OnTagMessageChanged(string value) =>
-        AddAndPushCommand.NotifyCanExecuteChanged();
+    partial void OnTagMessageChanged(string value) => NotifyCanAddAndPushChanged();
 
     partial void OnIsLoadingChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowEmptyTags));
-        AddAndPushCommand.NotifyCanExecuteChanged();
+        NotifyCanAddAndPushChanged();
     }
 
-    partial void OnIsBusyChanged(bool value) =>
-        AddAndPushCommand.NotifyCanExecuteChanged();
+    partial void OnIsBusyChanged(bool value) => NotifyCanAddAndPushChanged();
 
     partial void OnLoadErrorChanged(string? value)
     {

@@ -138,6 +138,25 @@ public sealed class TagReleaseDialogViewModelTests
     }
 
     [Test]
+    public async Task Typing_Name_And_Message_Raises_CanAddAndPush()
+    {
+        var vm = CreateVm();
+        await vm.OpenAsync("/tmp/repo", "main");
+
+        var raised = new List<string?>();
+        vm.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        vm.NewTagName = "v1.0.0";
+        Assert.That(raised, Does.Contain(nameof(TagReleaseDialogViewModel.CanAddAndPush)));
+
+        raised.Clear();
+        vm.TagMessage = "Release";
+        Assert.That(raised, Does.Contain(nameof(TagReleaseDialogViewModel.CanAddAndPush)));
+        Assert.That(vm.CanAddAndPush, Is.True);
+        Assert.That(vm.AddAndPushCommand.CanExecute(null), Is.True);
+    }
+
+    [Test]
     public async Task Reload_Ownership_Ignores_Stale_Results()
     {
         var tcs1 = new TaskCompletionSource<IReadOnlyList<TagInfo>>();
