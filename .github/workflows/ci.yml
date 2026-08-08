@@ -8,6 +8,12 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  checks: write
+
 jobs:
   windows:
     name: Windows
@@ -26,7 +32,10 @@ jobs:
         run: dotnet restore src/GitDelta.slnx
 
       - name: Build
-        run: dotnet build src/GitDelta.slnx -c Release --no-restore
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet build src/GitDelta.slnx -c Release --no-restore 2>&1 | tee build.log
 
       - name: Test
         run: >
@@ -35,6 +44,20 @@ jobs:
           --results-directory ./TestResults
           --logger "trx;LogFileName=test-results.trx"
           -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=opencover
+
+      - name: Publish test report
+        uses: mzbrau/actions-insights@v1
+        if: always()
+        continue-on-error: true
+        with:
+          test-results: 'TestResults/**/*.trx'
+          coverage-enabled: true
+          coverage-files: '**/coverage.opencover.xml'
+          diagnostics-enabled: true
+          diagnostics-files: 'build.log'
+          history-enabled: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+          history-repository: 'mzbrau/mzbrau-actions-insights'
+          history-token: ${{ secrets.ACTIONS_INSIGHTS_HISTORY_TOKEN }}
 
       - name: Coverage floor (GitHub / Review / Persistence)
         shell: pwsh
