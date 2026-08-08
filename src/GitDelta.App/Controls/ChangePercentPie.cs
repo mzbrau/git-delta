@@ -70,9 +70,7 @@ public sealed class ChangePercentPie : Control
         if (clamped >= 100)
         {
             context.DrawEllipse(fill, null, rect.Center, size / 2, size / 2);
-            // Donut hole
-            var hole = size * 0.28;
-            context.DrawEllipse(track, null, rect.Center, hole, hole);
+            PunchDonutHole(context, rect.Center, size * 0.28);
             return;
         }
 
@@ -83,7 +81,6 @@ public sealed class ChangePercentPie : Control
             var radius = size / 2;
             var start = -Math.PI / 2;
             var sweep = 2 * Math.PI * (clamped / 100.0);
-            var end = start + sweep;
 
             ctx.BeginFigure(center, isFilled: true);
             ctx.LineTo(Polar(center, radius, start));
@@ -99,20 +96,23 @@ public sealed class ChangePercentPie : Control
         }
 
         context.DrawGeometry(fill, null, geometry);
+        PunchDonutHole(context, rect.Center, size * 0.28);
+    }
 
-        var inner = size * 0.28;
+    private static void PunchDonutHole(DrawingContext context, Point center, double radius)
+    {
         // Punch a hole so it reads as a donut against the control background.
-        if (Avalonia.Application.Current?.TryGetResource(
+        if (Application.Current?.TryGetResource(
                 "ForgeBackgroundBrush",
-                Avalonia.Application.Current.ActualThemeVariant,
+                Application.Current.ActualThemeVariant,
                 out var res) == true &&
             res is IBrush bg)
         {
-            context.DrawEllipse(bg, null, rect.Center, inner, inner);
+            context.DrawEllipse(bg, null, center, radius, radius);
         }
         else
         {
-            context.DrawEllipse(Brushes.Transparent, null, rect.Center, inner, inner);
+            context.DrawEllipse(Brushes.Transparent, null, center, radius, radius);
         }
     }
 

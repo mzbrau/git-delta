@@ -44,6 +44,7 @@ public sealed class FileListRowView : UserControl
     private readonly Border _fileRow;
     private readonly Border _searchHitRow;
     private readonly MaterialIcon _folderChevron;
+    private readonly MaterialIcon _folderIcon;
     private readonly TextBlock _folderLabel;
     private readonly CheckBox _stageCheck;
     private readonly MaterialIcon _statusIcon;
@@ -52,6 +53,7 @@ public sealed class FileListRowView : UserControl
     private readonly MaterialIcon _cacheTick;
     private readonly MaterialIcon _viewedEye;
     private readonly StackPanel _commentPanel;
+    private readonly MaterialIcon _commentIcon;
     private readonly TextBlock _commentCount;
     private readonly MaterialIcon _aiClassIcon;
     private readonly ChangePercentPie _pie;
@@ -71,8 +73,7 @@ public sealed class FileListRowView : UserControl
             FontWeight = FontWeight.SemiBold,
             Opacity = 0.9,
         };
-        var folderIcon = Icon(MaterialIconKind.FolderOutline, 14);
-        folderIcon.Foreground = ThemeBrush("ForgeOnSurfaceVariantBrush");
+        _folderIcon = Icon(MaterialIconKind.FolderOutline, 14);
 
         _folderRow = new Border
         {
@@ -84,7 +85,7 @@ public sealed class FileListRowView : UserControl
                 Children =
                 {
                     _folderChevron,
-                    folderIcon,
+                    _folderIcon,
                     _folderLabel,
                 },
             },
@@ -117,11 +118,9 @@ public sealed class FileListRowView : UserControl
         _name.FontSize = ThemeDouble("ForgeCodeFontSize", 12);
 
         _cacheTick = Icon(MaterialIconKind.CheckCircleOutline, 12, 0.55);
-        _cacheTick.Foreground = ThemeBrush("ForgeOnSurfaceVariantBrush");
         ToolTip.SetTip(_cacheTick, "Diff cached");
 
         _viewedEye = Icon(MaterialIconKind.EyeOutline, 12, 0.7);
-        _viewedEye.Foreground = ThemeBrush("ForgeOnSurfaceVariantBrush");
         ToolTip.SetTip(_viewedEye, "Viewed");
 
         _commentCount = new TextBlock
@@ -129,28 +128,21 @@ public sealed class FileListRowView : UserControl
             FontSize = 10,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        _commentCount.Foreground = ThemeBrush("ForgeOnSurfaceVariantBrush");
-        var commentIcon = Icon(MaterialIconKind.MessageOutline, 12, 0.75);
-        commentIcon.Foreground = ThemeBrush("ForgeOnSurfaceVariantBrush");
+        _commentIcon = Icon(MaterialIconKind.MessageOutline, 12, 0.75);
         _commentPanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 2,
             VerticalAlignment = VerticalAlignment.Center,
-            Children = { commentIcon, _commentCount },
+            Children = { _commentIcon, _commentCount },
         };
 
         _aiClassIcon = Icon(MaterialIconKind.HelpCircleOutline, 14);
-        _aiClassIcon.Foreground = ThemeBrush("ForgeAiAccentBrush");
 
         _pie = new ChangePercentPie { Width = 12, Height = 12 };
-        _pie.Fill = ThemeBrush("ForgePrimaryBrush");
-        _pie.Track = ThemeBrush("ForgeOutlineVariantBrush");
 
         _linesAdded = new TextBlock { FontSize = 10, FontWeight = FontWeight.SemiBold };
-        _linesAdded.Foreground = ThemeBrush("ForgeStatusAddedBrush");
         _linesRemoved = new TextBlock { FontSize = 10, FontWeight = FontWeight.SemiBold };
-        _linesRemoved.Foreground = ThemeBrush("ForgeStatusDeletedBrush");
         _lineStats = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -158,6 +150,8 @@ public sealed class FileListRowView : UserControl
             VerticalAlignment = VerticalAlignment.Center,
             Children = { _linesAdded, _linesRemoved },
         };
+
+        ApplyThemeBrushes();
 
         var leading = new StackPanel
         {
@@ -281,6 +275,48 @@ public sealed class FileListRowView : UserControl
     {
         get => _nameFontWeight;
         private set => SetAndRaise(NameFontWeightProperty, ref _nameFontWeight, value);
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        ActualThemeVariantChanged += OnActualThemeVariantChanged;
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        ActualThemeVariantChanged -= OnActualThemeVariantChanged;
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    private void OnActualThemeVariantChanged(object? sender, EventArgs e)
+    {
+        ApplyThemeBrushes();
+        if (_subscribedFile is not null)
+        {
+            // Status badge brush comes from a converter that also resolves against the
+            // current theme; re-apply so it tracks light/dark switches.
+            _statusIcon.Foreground = (IBrush?)ForgeConverters.StatusBadgeBrush.Convert(
+                _subscribedFile.Kind, typeof(IBrush), null, System.Globalization.CultureInfo.CurrentCulture)
+                ?? Brushes.Gray;
+        }
+
+        _pie.InvalidateVisual();
+    }
+
+    private void ApplyThemeBrushes()
+    {
+        var onSurfaceVariant = ThemeBrush("ForgeOnSurfaceVariantBrush");
+        _folderIcon.Foreground = onSurfaceVariant;
+        _cacheTick.Foreground = onSurfaceVariant;
+        _viewedEye.Foreground = onSurfaceVariant;
+        _commentCount.Foreground = onSurfaceVariant;
+        _commentIcon.Foreground = onSurfaceVariant;
+        _aiClassIcon.Foreground = ThemeBrush("ForgeAiAccentBrush");
+        _pie.Fill = ThemeBrush("ForgePrimaryBrush");
+        _pie.Track = ThemeBrush("ForgeOutlineVariantBrush");
+        _linesAdded.Foreground = ThemeBrush("ForgeStatusAddedBrush");
+        _linesRemoved.Foreground = ThemeBrush("ForgeStatusDeletedBrush");
     }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
