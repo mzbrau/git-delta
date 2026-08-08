@@ -63,3 +63,21 @@ public sealed class GitVersionTests
         Assert.That(new GitVersion(3, 0, 0, "3.0.0").MeetsMinimum, Is.True);
     }
 }
+
+public sealed class ProductInfoTests
+{
+    [Test]
+    public void VersionLabel_Is_NonEmpty_And_Prefixed()
+    {
+        Assert.That(ProductInfo.Version, Is.Not.Null.And.Not.Empty);
+        Assert.That(ProductInfo.VersionLabel, Is.Not.Null.And.Not.Empty);
+        Assert.That(ProductInfo.VersionLabel, Does.StartWith("v").IgnoreCase);
+    }
+
+    [Test]
+    public void DisplayName_Is_InApp_Branding_And_ShellDisplayName_Is_Title_Case()
+    {
+        Assert.That(ProductInfo.DisplayName, Is.EqualTo("GIT DELTA"));
+        Assert.That(ProductInfo.ShellDisplayName, Is.EqualTo("Git Delta"));
+    }
+}

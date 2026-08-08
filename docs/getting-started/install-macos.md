@@ -34,7 +34,7 @@ Published macOS builds target **Apple Silicon** (`osx-arm64`) and ship as a Velo
 
 1. Open [GitHub Releases](https://github.com/mzbrau/git-delta/releases)
 2. Download `GitDelta-osx-Portable.zip`
-3. Unzip the archive — you should get `GIT DELTA.app`
+3. Unzip the archive — you should get `Git Delta.app`
 4. Drag the app to **Applications**, or run it in place
 5. Open the app (see Gatekeeper note below if macOS blocks it)
 
@@ -43,10 +43,10 @@ Intel Macs (`osx-x64`) and a signed `.pkg` installer are not published yet; use 
 :::note Gatekeeper
 macOS builds are **not Developer ID–signed or notarized**. Gatekeeper may block the first launch. If you trust the release from this project’s GitHub Releases page:
 
-- **“GIT DELTA is damaged and can’t be opened”** — clear the quarantine attribute, then open again:
+- **“Git Delta is damaged and can’t be opened”** — clear the quarantine attribute, then open again:
 
   ```bash
-  xattr -dr com.apple.quarantine "/path/to/GIT DELTA.app"
+  xattr -dr com.apple.quarantine "/path/to/Git Delta.app"
   ```
 
 - **“cannot be opened because the developer cannot be verified”** — right-click the app → **Open**, or allow it under **System Settings → Privacy & Security**.

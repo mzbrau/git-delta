@@ -30,7 +30,7 @@ Installers are packaged with Velopack. Running a newer Setup.exe upgrades an exi
 
 ## 3. Launch
 
-Start **GIT DELTA** from the Start menu or desktop shortcut.
+Start **Git Delta** from the Start menu or desktop shortcut.
 
 - If Git is missing or too old, you will see a blocking message with install hints — fix Git first, then reopen the app.
 - If Git is fine, you land on the welcome screen. Continue with [First launch](./first-launch.md).

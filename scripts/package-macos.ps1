@@ -215,8 +215,8 @@ if (-not $SkipDownload -and -not [string]::IsNullOrWhiteSpace($RepoUrl)) {
     --outputDir $releasePathResolved `
     --runtime $RuntimeIdentifier `
     --channel $channel `
-    --packAuthors "GIT DELTA contributors" `
-    --packTitle "GIT DELTA" `
+    --packAuthors "Git Delta contributors" `
+    --packTitle "Git Delta" `
     --icon $iconPath `
     --bundleId $BundleId `
     --noInst
@@ -226,6 +226,6 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $portableZipPath = Join-Path $releasePathResolved "$PackageId-$channel-Portable.zip"
-Invoke-AdHocSignPortableZip -ZipPath $portableZipPath -AppBundleName "GIT DELTA.app"
+Invoke-AdHocSignPortableZip -ZipPath $portableZipPath -AppBundleName "Git Delta.app"
 
 Write-Host "GitDelta macOS app assets created in $releasePathResolved"

@@ -141,8 +141,8 @@ if (-not $SkipDownload -and -not [string]::IsNullOrWhiteSpace($RepoUrl)) {
     --outputDir $releasePathResolved `
     --runtime $RuntimeIdentifier `
     --channel win `
-    --packAuthors "GIT DELTA contributors" `
-    --packTitle "GIT DELTA" `
+    --packAuthors "Git Delta contributors" `
+    --packTitle "Git Delta" `
     --icon $iconPath
 
 if ($LASTEXITCODE -ne 0) {

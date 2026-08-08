@@ -142,6 +142,9 @@ public partial class MainWindowViewModel : ObservableObject
     public GitConsoleViewModel GitConsole { get; }
     public NotificationService Notifications => _notifications;
 
+    /// <summary>MinVer-derived app version label (from git tags), e.g. <c>v0.3.1</c>.</summary>
+    public string AppVersion => ProductInfo.VersionLabel;
+
     public System.Collections.ObjectModel.ObservableCollection<GitHubAccountSettings> GitHubAccounts { get; }
     public System.Collections.ObjectModel.ObservableCollection<string> EnterpriseHostUrls { get; }
 
