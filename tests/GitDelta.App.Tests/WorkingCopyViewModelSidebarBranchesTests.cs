@@ -10,7 +10,7 @@ using NUnit.Framework;
 
 namespace GitDelta.App.Tests;
 
-public sealed class WorkingCopyViewModelHistoryContextMenuTests
+public sealed class WorkingCopyViewModelSidebarBranchesTests
 {
     private IGitStatusService _status = null!;
     private IGitDiffService _diff = null!;
@@ -47,8 +47,7 @@ public sealed class WorkingCopyViewModelHistoryContextMenuTests
         _fsmonitor = Substitute.For<IFsmonitorService>();
         _notifications = new NotificationService();
         _confirm = new AlwaysConfirmDialog();
-        _stashDialog = new FakeStashDialog(
-            new StashDialogResult(StashDialogAction.Push, null, IncludeUntracked: true));
+        _stashDialog = new FakeStashDialog(null);
         _watcher = Substitute.For<IRepositoryWatcher>();
         _localComments = Substitute.For<ILocalCommentStore>();
         _localComments.ListAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns([]);
@@ -72,16 +71,28 @@ public sealed class WorkingCopyViewModelHistoryContextMenuTests
             new IntraLineDiffer(), _fsmonitor, _watcher,
             new PendingChangesReviewViewModel(NullAIReviewService.Instance, _localComments, _settings, _confirm, _notifications, Substitute.For<IGitHistoryService>()));
 
-    private static BranchInfo Branch(string name, bool isCurrent = false, bool isRemote = false) =>
-        new(name, isCurrent, isRemote, Upstream: null, TipOid: "abc", TipCommitterDate: DateTimeOffset.MinValue);
+    private static BranchInfo Local(string name, DateTimeOffset tipDate, bool isCurrent = false) =>
+        new(name, isCurrent, IsRemote: false, Upstream: null, TipOid: "abc", TipCommitterDate: tipDate);
+
+    private static IReadOnlyList<BranchInfo> SixLocalsNewestFirst()
+    {
+        var baseDate = new DateTimeOffset(2024, 6, 1, 12, 0, 0, TimeSpan.Zero);
+        return
+        [
+            Local("b5", baseDate.AddDays(5)),
+            Local("b4", baseDate.AddDays(4)),
+            Local("b3", baseDate.AddDays(3)),
+            Local("b2", baseDate.AddDays(2)),
+            Local("b1", baseDate.AddDays(1)),
+            Local("main", baseDate, isCurrent: true),
+        ];
+    }
 
     [Test]
-    public async Task CherryPick_Disabled_When_History_Branch_Is_Current()
+    public async Task Sidebar_Shows_Top_Four_By_Default()
     {
-        var main = Branch("main", isCurrent: true);
-        var feature = Branch("feature");
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns([main, feature]);
+            .Returns(SixLocalsNewestFirst());
 
         var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repo);
@@ -90,23 +101,23 @@ public sealed class WorkingCopyViewModelHistoryContextMenuTests
             var vm = CreateVm();
             await vm.OpenAsync(repo);
 
-            Assert.That(vm.SelectedHistoryBranch?.Name, Is.EqualTo("main"));
-            Assert.That(vm.CanCherryPickHistoryCommit, Is.False);
-            Assert.That(vm.CherryPickCommitCommand.CanExecute(null), Is.False);
+            Assert.That(vm.Branches, Has.Count.EqualTo(6));
+            Assert.That(vm.VisibleSidebarBranches.Select(b => b.Name).ToList(),
+                Is.EqualTo(new[] { "main", "b5", "b4", "b3" }));
+            Assert.That(vm.ShowSidebarBranchToggle, Is.True);
+            Assert.That(vm.SidebarBranchToggleLabel, Is.EqualTo("Show All"));
         }
         finally
         {
-            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+            Directory.Delete(repo, recursive: true);
         }
     }
 
     [Test]
-    public async Task CherryPick_Enabled_When_History_Branch_Differs_From_Current()
+    public async Task ShowAll_Then_ShowLess_Toggles_Full_List()
     {
-        var main = Branch("main", isCurrent: true);
-        var feature = Branch("feature");
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns([main, feature]);
+            .Returns(SixLocalsNewestFirst());
 
         var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repo);
@@ -115,25 +126,26 @@ public sealed class WorkingCopyViewModelHistoryContextMenuTests
             var vm = CreateVm();
             await vm.OpenAsync(repo);
 
-            vm.SelectedHistoryBranch = feature;
+            vm.ToggleShowAllSidebarBranchesCommand.Execute(null);
+            Assert.That(vm.VisibleSidebarBranches, Has.Count.EqualTo(6));
+            Assert.That(vm.SidebarBranchToggleLabel, Is.EqualTo("Show less"));
 
-            Assert.That(vm.CanCherryPickHistoryCommit, Is.True);
-            Assert.That(vm.CherryPickCommitCommand.CanExecute(null), Is.True);
+            vm.ToggleShowAllSidebarBranchesCommand.Execute(null);
+            Assert.That(vm.VisibleSidebarBranches.Select(b => b.Name).ToList(),
+                Is.EqualTo(new[] { "main", "b5", "b4", "b3" }));
+            Assert.That(vm.SidebarBranchToggleLabel, Is.EqualTo("Show All"));
         }
         finally
         {
-            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+            Directory.Delete(repo, recursive: true);
         }
     }
 
     [Test]
-    public async Task HistoryBranchFilter_Matches_Branch_Names_Case_Insensitive()
+    public async Task Filter_Shows_All_Matches_Beyond_Top_Four()
     {
-        var main = Branch("main", isCurrent: true);
-        var feature = Branch("feature/login");
-        var originMain = Branch("origin/main", isRemote: true);
         _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns([main, feature, originMain]);
+            .Returns(SixLocalsNewestFirst());
 
         var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repo);
@@ -142,26 +154,60 @@ public sealed class WorkingCopyViewModelHistoryContextMenuTests
             var vm = CreateVm();
             await vm.OpenAsync(repo);
 
-            Assert.That(vm.FilteredHistoryBranches.Select(b => b.Name), Is.EquivalentTo(["main", "feature/login", "origin/main"]));
+            vm.BranchFilter = "b1";
+            Assert.That(vm.VisibleSidebarBranches.Select(b => b.Name).ToList(), Is.EqualTo(new[] { "b1" }));
+            Assert.That(vm.ShowSidebarBranchToggle, Is.False);
+            Assert.That(vm.ShowSidebarBranchFilterEmpty, Is.False);
 
-            vm.HistoryBranchFilter = "MAIN";
-            Assert.That(vm.FilteredHistoryBranches.Select(b => b.Name), Is.EquivalentTo(["main", "origin/main"]));
-            Assert.That(vm.ShowHistoryBranchFilterEmpty, Is.False);
+            vm.BranchFilter = "main";
+            Assert.That(vm.VisibleSidebarBranches.Select(b => b.Name).ToList(), Is.EqualTo(new[] { "main" }));
 
-            vm.HistoryBranchFilter = "feature";
-            Assert.That(vm.FilteredHistoryBranches.Select(b => b.Name), Is.EquivalentTo(["feature/login"]));
+            vm.BranchFilter = "zzz";
+            Assert.That(vm.VisibleSidebarBranches, Is.Empty);
+            Assert.That(vm.ShowSidebarBranchFilterEmpty, Is.True);
 
-            vm.HistoryBranchFilter = "zzz-no-match";
-            Assert.That(vm.FilteredHistoryBranches, Is.Empty);
-            Assert.That(vm.ShowHistoryBranchFilterEmpty, Is.True);
-
-            vm.HistoryBranchFilter = "";
-            Assert.That(vm.FilteredHistoryBranches.Select(b => b.Name), Is.EquivalentTo(["main", "feature/login", "origin/main"]));
-            Assert.That(vm.ShowHistoryBranchFilterEmpty, Is.False);
+            vm.BranchFilter = "";
+            Assert.That(vm.VisibleSidebarBranches, Has.Count.EqualTo(4));
+            Assert.That(vm.ShowSidebarBranchToggle, Is.True);
         }
         finally
         {
-            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task Fetch_Reloads_Branch_List_Into_Visible_Projection()
+    {
+        var initial = SixLocalsNewestFirst();
+        var afterFetch = new List<BranchInfo>(initial)
+        {
+            Local("fresh", new DateTimeOffset(2024, 7, 1, 12, 0, 0, TimeSpan.Zero)),
+        };
+
+        _branches.ListBranchesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(initial, afterFetch);
+        _branches.FetchAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+            Assert.That(vm.VisibleSidebarBranches[0].Name, Is.EqualTo("main"));
+
+            await vm.FetchCommand.ExecuteAsync(null);
+
+            await _branches.Received(1).FetchAsync(repo, Arg.Any<CancellationToken>());
+            Assert.That(vm.Branches, Has.Count.EqualTo(7));
+            Assert.That(vm.VisibleSidebarBranches.Select(b => b.Name).ToList(),
+                Is.EqualTo(new[] { "main", "fresh", "b5", "b4" }));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
         }
     }
 }

@@ -192,6 +192,11 @@
     <Setter Property="Foreground" Value="{DynamicResource ForgePrimaryBrush}" />
   </Style>
 
+  <Style Selector="ListBox.BranchList ListBoxItem">
+    <Setter Property="Padding" Value="12,4,8,4" />
+    <Setter Property="MinHeight" Value="28" />
+  </Style>
+
   <Style Selector="TextBox.Forge">
     <Setter Property="Background" Value="{DynamicResource ForgeSurfaceContainerLowBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource ForgeOutlineVariantBrush}" />

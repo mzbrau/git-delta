@@ -30,6 +30,19 @@ public sealed class FakeStashDialog(StashDialogResult? result) : IStashDialog
     }
 }
 
+public sealed class FakeCheckoutBlockedDialog(CheckoutBlockedChoice choice) : ICheckoutBlockedDialog
+{
+    public int CallCount { get; private set; }
+    public string? LastTargetRef { get; private set; }
+
+    public Task<CheckoutBlockedChoice> ShowAsync(string targetRef)
+    {
+        CallCount++;
+        LastTargetRef = targetRef;
+        return Task.FromResult(choice);
+    }
+}
+
 public sealed class WorkingCopyViewModelDiscardTests
 {
     private IGitStatusService _status = null!;

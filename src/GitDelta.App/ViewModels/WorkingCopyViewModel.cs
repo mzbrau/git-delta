@@ -37,6 +37,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private readonly NotificationService _notifications;
     private readonly IConfirmDialog _confirm;
     private readonly IStashDialog _stashDialog;
+    private readonly ICheckoutBlockedDialog _checkoutBlockedDialog;
     private readonly IIntraLineDiffer _intraLine;
     private readonly ISyntaxTokenService? _syntaxTokens;
     private readonly IFsmonitorService _fsmonitor;
@@ -51,8 +52,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private CancellationTokenSource? _historyCts;
     private CancellationTokenSource? _commitFilesCts;
     private CancellationTokenSource? _markdownCts;
+    private CancellationTokenSource? _branchInfoCts;
     private string? _cachedHistorySelectedPath;
     private bool _suppressHistoryBranchReload;
+    private bool _suppressBranchInfoBaseReload;
     private string? _repoPath;
     private RepositoryStatus? _lastStatus;
     private readonly DiffWarmStore _warmStore;
@@ -110,7 +113,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         IRepositoryWatcher watcher,
         PendingChangesReviewViewModel pendingReview,
         IAiCommitAssistService? commitAssist = null,
-        ISyntaxTokenService? syntaxTokens = null)
+        ISyntaxTokenService? syntaxTokens = null,
+        ICheckoutBlockedDialog? checkoutBlockedDialog = null)
     {
         _diff = new WorkingCopyDiffPresenter(this);
         _status = new WorkingCopyStatusController(this);
@@ -129,6 +133,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         _notifications = notifications;
         _confirm = confirm;
         _stashDialog = stashDialog;
+        _checkoutBlockedDialog = checkoutBlockedDialog ?? CancelCheckoutBlockedDialog.Instance;
         _intraLine = intraLine;
         _syntaxTokens = syntaxTokens;
         _commitAssist = commitAssist ?? NullAiCommitAssistService.Instance;
@@ -196,11 +201,17 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     public ObservableCollection<CommitInfo> HistoryCommits { get; } = [];
     public ResettableObservableCollection<DiffRow> DiffRows { get; } = new();
     public ObservableCollection<BranchInfo> Branches { get; } = [];
+    /// <summary>Sidebar projection of <see cref="Branches"/> (top 4, Show All, or filter matches).</summary>
+    public ObservableCollection<BranchInfo> VisibleSidebarBranches { get; } = [];
+    /// <summary>Local branches available as the comparison base in the Branch Information dialog.</summary>
+    public ObservableCollection<BranchInfo> BranchInfoBaseBranches { get; } = [];
     /// <summary>Local and remote branches available for the history branch filter.</summary>
     public ObservableCollection<BranchInfo> HistoryBranches { get; } = [];
     /// <summary>HistoryBranches filtered by <see cref="HistoryBranchFilter"/>.</summary>
     public ObservableCollection<BranchInfo> FilteredHistoryBranches { get; } = [];
     public ObservableCollection<StashInfo> Stashes { get; } = [];
+
+    private const int SidebarBranchPreviewCount = 4;
 
     [ObservableProperty] private string? _repositoryPath;
     [ObservableProperty] private string? _currentBranch;
@@ -218,7 +229,6 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [ObservableProperty] private bool _noVerify;
     [ObservableProperty] private bool _pushAfterCommit;
     [ObservableProperty] private bool _isCommitting;
-    [ObservableProperty] private string _hookOutput = "";
     [ObservableProperty] private bool _isGeneratingCommitMessage;
     [ObservableProperty] private bool _showMagicCommitDialog;
     [ObservableProperty] private MagicCommitDialogStepKind _magicCommitDialogStep;
@@ -240,6 +250,21 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [ObservableProperty] private bool _unstagedExpanded = true;
     [ObservableProperty] private bool _workspaceExpanded = true;
     [ObservableProperty] private bool _branchesExpanded;
+    [ObservableProperty] private BranchInfo? _selectedSidebarBranch;
+    [ObservableProperty] private string _branchFilter = "";
+    [ObservableProperty] private bool _showAllSidebarBranches;
+    [ObservableProperty] private bool _showBranchInfoDialog;
+    [ObservableProperty] private string? _branchInfoTargetName;
+    [ObservableProperty] private string? _branchInfoCurrentName;
+    [ObservableProperty] private string? _branchInfoTargetTip;
+    [ObservableProperty] private string? _branchInfoCurrentTip;
+    [ObservableProperty] private int _branchInfoAhead;
+    [ObservableProperty] private int _branchInfoBehind;
+    [ObservableProperty] private double _branchInfoAheadBarWidth;
+    [ObservableProperty] private double _branchInfoBehindBarWidth;
+    [ObservableProperty] private bool _isBranchInfoLoading;
+    [ObservableProperty] private string? _branchInfoError;
+    [ObservableProperty] private BranchInfo? _branchInfoSelectedBase;
     [ObservableProperty] private bool _stashesExpanded = true;
     [ObservableProperty] private bool _pullRequestsExpanded = true;
     [ObservableProperty] private bool _prRequestedExpanded = true;
@@ -546,7 +571,25 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     public bool ShowHistoryBranchFilterEmpty =>
         !string.IsNullOrWhiteSpace(HistoryBranchFilter) && FilteredHistoryBranches.Count == 0;
 
+    public bool ShowSidebarBranchFilterEmpty =>
+        !string.IsNullOrWhiteSpace(BranchFilter) && VisibleSidebarBranches.Count == 0;
+
+    public bool ShowSidebarBranchToggle =>
+        string.IsNullOrWhiteSpace(BranchFilter) && Branches.Count > SidebarBranchPreviewCount;
+
+    public string SidebarBranchToggleLabel =>
+        ShowAllSidebarBranches ? "Show less" : "Show All";
+
     public bool ShowStashDetailsDock => IsStashMode && SelectedStash is not null;
+
+    public bool IsBranchInfoInSync =>
+        !IsBranchInfoLoading
+        && string.IsNullOrEmpty(BranchInfoError)
+        && BranchInfoAhead == 0
+        && BranchInfoBehind == 0
+        && !string.IsNullOrEmpty(BranchInfoTargetName);
+
+    public bool HasBranchInfoError => !string.IsNullOrEmpty(BranchInfoError);
 
     public bool IsFileStatusFlatLayout => FileStatusListLayout == FileListLayoutMode.Flat;
     public bool IsFileStatusTreeLayout => FileStatusListLayout == FileListLayoutMode.Tree;
@@ -651,6 +694,17 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(ShowHistoryBranchFilterEmpty));
     }
 
+    partial void OnBranchFilterChanged(string value)
+    {
+        RebuildVisibleSidebarBranches();
+    }
+
+    partial void OnShowAllSidebarBranchesChanged(bool value)
+    {
+        RebuildVisibleSidebarBranches();
+        OnPropertyChanged(nameof(SidebarBranchToggleLabel));
+    }
+
     partial void OnSelectedHistoryBranchChanged(BranchInfo? value)
     {
         OnPropertyChanged(nameof(CanCherryPickHistoryCommit));
@@ -739,6 +793,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             OnPropertyChanged(nameof(SelectedFileAbsolutePath));
             WorkspaceMode = WorkspaceMode.FileStatus;
             SelectedStash = null;
+            SelectedSidebarBranch = null;
+            BranchFilter = "";
+            ShowAllSidebarBranches = false;
             SelectedCommit = null;
             ClearHistoryState();
             _watcher.WatchRepository(path);
@@ -3370,6 +3427,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private async Task CheckoutBranchAsync(BranchInfo? branch)
     {
         if (_repoPath is null || branch is null) return;
+        SelectedSidebarBranch = branch;
         try
         {
             await _branches.CheckoutAsync(_repoPath, branch.Name);
@@ -3379,8 +3437,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         catch (GitException ex) when (ex.Message.Contains("local changes", StringComparison.OrdinalIgnoreCase)
                                        || ex.StderrSummary?.Contains("would be overwritten", StringComparison.OrdinalIgnoreCase) == true)
         {
-            _notifications.Info("Checkout blocked by local changes. Stash and retry?",
-                () => _ = StashThenCheckoutAsync(branch.Name), "Stash");
+            var choice = await _checkoutBlockedDialog.ShowAsync(branch.Name);
+            if (choice is CheckoutBlockedChoice.StashOnly or CheckoutBlockedChoice.StashAndRestore)
+                await StashThenCheckoutAsync(branch.Name, restoreAfter: choice == CheckoutBlockedChoice.StashAndRestore);
         }
         catch (Exception ex)
         {
@@ -3388,22 +3447,258 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
     }
 
-    private async Task StashThenCheckoutAsync(string branch)
+    private async Task StashThenCheckoutAsync(string targetRef, bool restoreAfter)
     {
         if (_repoPath is null) return;
-        await _stash.StashPushAsync(_repoPath, "GitDelta auto-stash");
-        await _branches.CheckoutAsync(_repoPath, branch);
-        _notifications.Info("Stashed and checked out. Pop stash?",
-            () => _ = PopStashAsync(), "Pop stash");
-        await RefreshAsync();
-        await LoadBranchesAsync();
+        try
+        {
+            await _stash.StashPushAsync(_repoPath, "GitDelta auto-stash");
+            await _branches.CheckoutAsync(_repoPath, targetRef);
+
+            if (restoreAfter)
+            {
+                try
+                {
+                    await _stash.StashPopAsync(_repoPath);
+                    _notifications.Info("Stashed, checked out, and restored working changes.");
+                }
+                catch (Exception ex)
+                {
+                    _notifications.Error(
+                        $"Checked out, but stash pop failed: {ex.Message}",
+                        () => _ = PopStashAsync(),
+                        ex);
+                }
+            }
+            else
+            {
+                _notifications.Info("Stashed and checked out. Your stash was kept.");
+            }
+
+            await RefreshAsync();
+            await LoadBranchesAsync();
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Stash and checkout failed: {ex.Message}", exception: ex);
+            await RefreshAsync();
+            await LoadBranchesAsync();
+        }
     }
 
     private async Task PopStashAsync()
     {
         if (_repoPath is null) return;
-        await _stash.StashPopAsync(_repoPath);
-        await RefreshAsync();
+        try
+        {
+            await _stash.StashPopAsync(_repoPath);
+            await RefreshAsync();
+            _notifications.Info("Stash popped.");
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Stash pop failed: {ex.Message}", exception: ex);
+        }
+    }
+
+    [RelayCommand]
+    private void SelectSidebarBranch(BranchInfo? branch)
+    {
+        if (branch is null) return;
+        SelectedSidebarBranch = branch;
+    }
+
+    [RelayCommand]
+    private async Task ShowBranchInfoAsync(BranchInfo? branch)
+    {
+        if (_repoPath is null || branch is null) return;
+
+        SelectedSidebarBranch = branch;
+        var current = Branches.FirstOrDefault(b => b.IsCurrent)
+            ?? Branches.FirstOrDefault(b =>
+                CurrentBranch is not null
+                && string.Equals(b.Name, CurrentBranch, StringComparison.Ordinal));
+        if (current is null || string.IsNullOrWhiteSpace(current.Name))
+        {
+            _notifications.Error("No checked-out branch to compare against.");
+            return;
+        }
+
+        _branchInfoCts?.Cancel();
+        _branchInfoCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _branchInfoCts = cts;
+
+        BranchInfoTargetName = branch.Name;
+        BranchInfoTargetTip = ShortOid(branch.TipOid);
+        BranchInfoAhead = 0;
+        BranchInfoBehind = 0;
+        BranchInfoAheadBarWidth = 0;
+        BranchInfoBehindBarWidth = 0;
+        BranchInfoError = null;
+        IsBranchInfoLoading = true;
+        ShowBranchInfoDialog = true;
+        OnPropertyChanged(nameof(IsBranchInfoInSync));
+        OnPropertyChanged(nameof(HasBranchInfoError));
+
+        _suppressBranchInfoBaseReload = true;
+        try
+        {
+            BranchInfoBaseBranches.Clear();
+            foreach (var b in Branches)
+                BranchInfoBaseBranches.Add(b);
+
+            var defaultBase = BranchInfoBaseBranches.FirstOrDefault(b =>
+                    string.Equals(b.Name, current.Name, StringComparison.Ordinal))
+                ?? BranchInfoBaseBranches.FirstOrDefault();
+            BranchInfoSelectedBase = defaultBase;
+            BranchInfoCurrentName = defaultBase?.Name;
+            BranchInfoCurrentTip = defaultBase is null ? null : ShortOid(defaultBase.TipOid);
+        }
+        finally
+        {
+            _suppressBranchInfoBaseReload = false;
+        }
+
+        if (BranchInfoSelectedBase is null || string.IsNullOrWhiteSpace(BranchInfoSelectedBase.Name))
+        {
+            BranchInfoError = "No base branch available for comparison.";
+            IsBranchInfoLoading = false;
+            OnPropertyChanged(nameof(IsBranchInfoInSync));
+            OnPropertyChanged(nameof(HasBranchInfoError));
+            return;
+        }
+
+        await LoadBranchInfoDivergenceAsync(
+            BranchInfoSelectedBase.Name,
+            branch.Name,
+            cts).ConfigureAwait(false);
+    }
+
+    partial void OnBranchInfoSelectedBaseChanged(BranchInfo? value)
+    {
+        if (_suppressBranchInfoBaseReload || !ShowBranchInfoDialog || value is null)
+            return;
+        if (string.IsNullOrWhiteSpace(BranchInfoTargetName) || _repoPath is null)
+            return;
+
+        BranchInfoCurrentName = value.Name;
+        BranchInfoCurrentTip = ShortOid(value.TipOid);
+        BranchInfoError = null;
+        IsBranchInfoLoading = true;
+        OnPropertyChanged(nameof(IsBranchInfoInSync));
+        OnPropertyChanged(nameof(HasBranchInfoError));
+
+        _branchInfoCts?.Cancel();
+        _branchInfoCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _branchInfoCts = cts;
+        _ = LoadBranchInfoDivergenceAsync(value.Name, BranchInfoTargetName, cts);
+    }
+
+    private async Task LoadBranchInfoDivergenceAsync(
+        string baseName,
+        string targetName,
+        CancellationTokenSource cts)
+    {
+        var repoPath = _repoPath;
+        if (repoPath is null) return;
+
+        try
+        {
+            var divergence = await _branches.GetDivergenceAsync(repoPath, baseName, targetName, cts.Token)
+                .ConfigureAwait(false);
+
+            if (!ReferenceEquals(_branchInfoCts, cts) || cts.IsCancellationRequested)
+                return;
+
+            var baseBranch = Branches.FirstOrDefault(b =>
+                string.Equals(b.Name, baseName, StringComparison.Ordinal));
+
+            await InvokeOnUiAsync(() =>
+            {
+                if (!ReferenceEquals(_branchInfoCts, cts))
+                    return;
+
+                BranchInfoCurrentName = baseName;
+                BranchInfoCurrentTip = baseBranch is null ? null : ShortOid(baseBranch.TipOid);
+                BranchInfoAhead = divergence.Ahead;
+                BranchInfoBehind = divergence.Behind;
+                (BranchInfoBehindBarWidth, BranchInfoAheadBarWidth) =
+                    ComputeDivergenceBarWidths(divergence.Behind, divergence.Ahead);
+                IsBranchInfoLoading = false;
+                OnPropertyChanged(nameof(IsBranchInfoInSync));
+                OnPropertyChanged(nameof(HasBranchInfoError));
+            }, "branch_info_apply");
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // Superseded.
+        }
+        catch (Exception ex)
+        {
+            if (!ReferenceEquals(_branchInfoCts, cts))
+                return;
+
+            await InvokeOnUiAsync(() =>
+            {
+                if (!ReferenceEquals(_branchInfoCts, cts))
+                    return;
+                BranchInfoError = ex.Message;
+                IsBranchInfoLoading = false;
+                OnPropertyChanged(nameof(IsBranchInfoInSync));
+                OnPropertyChanged(nameof(HasBranchInfoError));
+            }, "branch_info_error");
+        }
+    }
+
+    [RelayCommand]
+    private void CloseBranchInfoDialog()
+    {
+        _branchInfoCts?.Cancel();
+        _branchInfoCts?.Dispose();
+        _branchInfoCts = null;
+        ShowBranchInfoDialog = false;
+        IsBranchInfoLoading = false;
+        BranchInfoError = null;
+        _suppressBranchInfoBaseReload = true;
+        try
+        {
+            BranchInfoSelectedBase = null;
+            BranchInfoBaseBranches.Clear();
+        }
+        finally
+        {
+            _suppressBranchInfoBaseReload = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task FetchFromSidebarAsync(BranchInfo? branch)
+    {
+        if (branch is not null)
+            SelectedSidebarBranch = branch;
+        await FetchAsync();
+    }
+
+    private static string ShortOid(string oid) =>
+        oid.Length >= 7 ? oid[..7] : oid;
+
+    private static (double BehindWidth, double AheadWidth) ComputeDivergenceBarWidths(int behind, int ahead)
+    {
+        const double maxTotal = 200;
+        const double minSegment = 12;
+        var total = behind + ahead;
+        if (total <= 0)
+            return (0, 0);
+
+        var behindW = maxTotal * behind / total;
+        var aheadW = maxTotal * ahead / total;
+        if (behind > 0)
+            behindW = Math.Max(behindW, minSegment);
+        if (ahead > 0)
+            aheadW = Math.Max(aheadW, minSegment);
+        return (behindW, aheadW);
     }
 
     private async Task LoadBranchesAsync()
@@ -3416,9 +3711,18 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             var listed = await _branches.ListBranchesAsync(_repoPath).ConfigureAwait(false);
             await InvokeOnUiAsync(() =>
             {
+                var selectedName = SelectedSidebarBranch?.Name;
                 Branches.Clear();
-                foreach (var b in listed.Where(b => !b.IsRemote))
+                foreach (var b in listed
+                             .Where(b => !b.IsRemote)
+                             .OrderByDescending(b => b.TipCommitterDate)
+                             .ThenBy(b => b.Name, StringComparer.Ordinal))
                     Branches.Add(b);
+                SelectedSidebarBranch = selectedName is null
+                    ? null
+                    : Branches.FirstOrDefault(b =>
+                        string.Equals(b.Name, selectedName, StringComparison.Ordinal));
+                RebuildVisibleSidebarBranches();
                 ApplyHistoryBranches(listed, preferCurrentBranch: false);
             }, "branches_apply");
             activity?.SetTag("branches.count", listed.Count);
@@ -3427,6 +3731,73 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         {
             GitDeltaMeters.WcBranchesLoadMs.Record(sw.Elapsed.TotalMilliseconds);
         }
+    }
+
+    private void RebuildVisibleSidebarBranches()
+    {
+        var selectedName = SelectedSidebarBranch?.Name;
+        IEnumerable<BranchInfo> query = Branches.Where(MatchesSidebarBranchFilter);
+        if (string.IsNullOrWhiteSpace(BranchFilter) && !ShowAllSidebarBranches)
+            query = BuildCollapsedSidebarBranches(query);
+
+        VisibleSidebarBranches.Clear();
+        foreach (var branch in query)
+            VisibleSidebarBranches.Add(branch);
+
+        // Keep selection if still visible; otherwise clear so ListBox does not hold a stale item.
+        if (selectedName is not null
+            && VisibleSidebarBranches.All(b =>
+                !string.Equals(b.Name, selectedName, StringComparison.Ordinal)))
+        {
+            SelectedSidebarBranch = null;
+        }
+        else if (selectedName is not null)
+        {
+            SelectedSidebarBranch = VisibleSidebarBranches.FirstOrDefault(b =>
+                string.Equals(b.Name, selectedName, StringComparison.Ordinal));
+        }
+
+        OnPropertyChanged(nameof(ShowSidebarBranchFilterEmpty));
+        OnPropertyChanged(nameof(ShowSidebarBranchToggle));
+        OnPropertyChanged(nameof(SidebarBranchToggleLabel));
+    }
+
+    private bool MatchesSidebarBranchFilter(BranchInfo branch)
+    {
+        if (string.IsNullOrWhiteSpace(BranchFilter))
+            return true;
+
+        return branch.Name.Contains(BranchFilter, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Collapsed preview: current branch first (when present), then up to 3 other most-recent tips.
+    /// </summary>
+    private IEnumerable<BranchInfo> BuildCollapsedSidebarBranches(IEnumerable<BranchInfo> filtered)
+    {
+        var list = filtered as IList<BranchInfo> ?? filtered.ToList();
+        if (list.Count <= SidebarBranchPreviewCount)
+            return list;
+
+        var current = list.FirstOrDefault(b => b.IsCurrent)
+            ?? list.FirstOrDefault(b =>
+                CurrentBranch is not null
+                && string.Equals(b.Name, CurrentBranch, StringComparison.Ordinal));
+
+        if (current is null)
+            return list.Take(SidebarBranchPreviewCount);
+
+        var others = list
+            .Where(b => !string.Equals(b.Name, current.Name, StringComparison.Ordinal))
+            .Take(SidebarBranchPreviewCount - 1);
+
+        return others.Prepend(current);
+    }
+
+    [RelayCommand]
+    private void ToggleShowAllSidebarBranches()
+    {
+        ShowAllSidebarBranches = !ShowAllSidebarBranches;
     }
 
     [RelayCommand(CanExecute = nameof(CanCherryPickCommit))]
@@ -3472,8 +3843,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         catch (GitException ex) when (ex.Message.Contains("local changes", StringComparison.OrdinalIgnoreCase)
                                        || ex.StderrSummary?.Contains("would be overwritten", StringComparison.OrdinalIgnoreCase) == true)
         {
-            _notifications.Info("Checkout blocked by local changes. Stash and retry?",
-                () => _ = StashThenCheckoutAsync(commit.Oid), "Stash");
+            var choice = await _checkoutBlockedDialog.ShowAsync(commit.Oid);
+            if (choice is CheckoutBlockedChoice.StashOnly or CheckoutBlockedChoice.StashAndRestore)
+                await StashThenCheckoutAsync(commit.Oid, restoreAfter: choice == CheckoutBlockedChoice.StashAndRestore);
         }
         catch (Exception ex)
         {

@@ -1014,6 +1014,8 @@ public partial class MainWindow : Window
             stashDialog.Owner = this;
         if (global::GitDelta.App.App.Services.GetService(typeof(AvaloniaReviewSubmitDialog)) is AvaloniaReviewSubmitDialog reviewSubmit)
             reviewSubmit.Owner = this;
+        if (global::GitDelta.App.App.Services.GetService(typeof(AvaloniaCheckoutBlockedDialog)) is AvaloniaCheckoutBlockedDialog checkoutBlocked)
+            checkoutBlocked.Owner = this;
 
         // Defer repo open so the window can paint first.
         Dispatcher.UIThread.Post(() => _ = Vm.TryOpenLastRepositoryAsync(), DispatcherPriority.Background);

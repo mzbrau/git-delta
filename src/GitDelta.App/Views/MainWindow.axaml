@@ -386,36 +386,61 @@
                     <TextBlock Text="BRANCHES" Classes="SectionLabel" VerticalAlignment="Center" />
                   </StackPanel>
                 </Button>
-                <ItemsControl ItemsSource="{Binding WorkingCopy.Branches}"
-                              IsVisible="{Binding WorkingCopy.BranchesExpanded}">
-                  <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="core:BranchInfo">
-                      <Border Padding="28,4,12,4">
-                        <Border.ContextMenu>
-                          <ContextMenu>
-                            <MenuItem Header="Check Out"
-                                      Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.CheckoutBranchCommand}"
-                                      CommandParameter="{Binding}" />
-                          </ContextMenu>
-                        </Border.ContextMenu>
-                        <DockPanel>
-                          <icons:MaterialIcon DockPanel.Dock="Left" Kind="Circle" Width="8" Height="8"
-                                              Margin="0,0,8,0" VerticalAlignment="Center"
-                                              Foreground="{DynamicResource ForgePrimaryBrush}"
-                                              IsVisible="{Binding IsCurrent}" />
-                          <icons:MaterialIcon DockPanel.Dock="Right" Kind="Check" Width="14" Height="14"
-                                              Foreground="{DynamicResource ForgePrimaryBrush}"
-                                              IsVisible="{Binding IsCurrent}" />
-                          <StackPanel Orientation="Horizontal" Spacing="8">
-                            <icons:MaterialIcon Kind="SourceBranch" Width="16" Height="16" />
-                            <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
-                                       Foreground="{DynamicResource ForgeOnSurfaceBrush}" />
-                          </StackPanel>
-                        </DockPanel>
-                      </Border>
-                    </DataTemplate>
-                  </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <StackPanel IsVisible="{Binding WorkingCopy.BranchesExpanded}" Margin="12,0,8,0" Spacing="4">
+                  <TextBox Classes="Forge"
+                           Text="{Binding WorkingCopy.BranchFilter}"
+                           PlaceholderText="Filter branches…"
+                           Margin="0,0,0,2" />
+                  <TextBlock Text="No matching branches"
+                             FontSize="11" Opacity="0.7" TextWrapping="Wrap"
+                             Margin="4,4,4,0"
+                             IsVisible="{Binding WorkingCopy.ShowSidebarBranchFilterEmpty}" />
+                  <ListBox Classes="PrList BranchList"
+                           ItemsSource="{Binding WorkingCopy.VisibleSidebarBranches}"
+                           SelectionMode="Single"
+                           SelectedItem="{Binding WorkingCopy.SelectedSidebarBranch}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="core:BranchInfo">
+                        <Border Padding="4,2">
+                          <Border.ContextMenu>
+                            <ContextMenu>
+                              <MenuItem Header="Check Out"
+                                        Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.CheckoutBranchCommand}"
+                                        CommandParameter="{Binding}" />
+                              <MenuItem Header="Information"
+                                        Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.ShowBranchInfoCommand}"
+                                        CommandParameter="{Binding}" />
+                              <Separator />
+                              <MenuItem Header="Fetch"
+                                        Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.FetchFromSidebarCommand}"
+                                        CommandParameter="{Binding}" />
+                            </ContextMenu>
+                          </Border.ContextMenu>
+                          <DockPanel>
+                            <icons:MaterialIcon DockPanel.Dock="Left" Kind="Circle" Width="8" Height="8"
+                                                Margin="0,0,8,0" VerticalAlignment="Center"
+                                                Foreground="{DynamicResource ForgePrimaryBrush}"
+                                                IsVisible="{Binding IsCurrent}" />
+                            <icons:MaterialIcon DockPanel.Dock="Right" Kind="Check" Width="14" Height="14"
+                                                Foreground="{DynamicResource ForgePrimaryBrush}"
+                                                IsVisible="{Binding IsCurrent}" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                              <icons:MaterialIcon Kind="SourceBranch" Width="16" Height="16" />
+                              <TextBlock Text="{Binding Name}" VerticalAlignment="Center"
+                                         Foreground="{DynamicResource ForgeOnSurfaceBrush}" />
+                            </StackPanel>
+                          </DockPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <Button Classes="Ghost"
+                          HorizontalAlignment="Left"
+                          Padding="4,2"
+                          Command="{Binding WorkingCopy.ToggleShowAllSidebarBranchesCommand}"
+                          Content="{Binding WorkingCopy.SidebarBranchToggleLabel}"
+                          IsVisible="{Binding WorkingCopy.ShowSidebarBranchToggle}" />
+                </StackPanel>
 
                 <!-- STASHES -->
                 <Button Classes="Ghost" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
@@ -4552,6 +4577,144 @@
               </Border>
             </DockPanel>
           </DockPanel>
+        </DockPanel>
+      </Border>
+    </Border>
+
+    <!-- Branch Information overlay -->
+    <Border IsVisible="{Binding WorkingCopy.ShowBranchInfoDialog}"
+            Background="{DynamicResource ForgeSettingsScrimBrush}" ZIndex="216">
+      <Border Width="480" MinHeight="280" HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
+              CornerRadius="10" Padding="20">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,16">
+            <icons:MaterialIcon Kind="InformationOutline" Width="20" Height="20"
+                                Foreground="{DynamicResource ForgePrimaryBrush}" />
+            <TextBlock Text="Branch information" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </StackPanel>
+
+          <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="8"
+                      HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Close" Classes="Primary"
+                    Command="{Binding WorkingCopy.CloseBranchInfoDialogCommand}" />
+          </StackPanel>
+
+          <StackPanel Spacing="16">
+            <StackPanel Spacing="8">
+              <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding WorkingCopy.BranchInfoTargetName}" />
+              <StackPanel Spacing="4">
+                <TextBlock Text="Compared to" FontSize="12" Opacity="0.7" />
+                <ComboBox ItemsSource="{Binding WorkingCopy.BranchInfoBaseBranches}"
+                          SelectedItem="{Binding WorkingCopy.BranchInfoSelectedBase}"
+                          HorizontalAlignment="Stretch">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate x:DataType="core:BranchInfo">
+                      <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </StackPanel>
+            </StackPanel>
+
+            <StackPanel Spacing="8" IsVisible="{Binding WorkingCopy.IsBranchInfoLoading}">
+              <ProgressBar IsIndeterminate="True" Height="4" HorizontalAlignment="Stretch" />
+              <TextBlock Text="Loading divergence…" FontSize="12" Opacity="0.65" />
+            </StackPanel>
+
+            <SelectableTextBlock Text="{Binding WorkingCopy.BranchInfoError}" FontSize="12"
+                       TextWrapping="Wrap"
+                       IsVisible="{Binding WorkingCopy.HasBranchInfoError}"
+                       Foreground="{DynamicResource ForgeErrorBrush}" />
+
+            <StackPanel Spacing="14"
+                        IsVisible="{Binding WorkingCopy.IsBranchInfoLoading, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+              <!-- Divergence graphic -->
+              <Border Background="{DynamicResource ForgeSurfaceContainerBrush}"
+                      CornerRadius="8" Padding="16,14"
+                      IsVisible="{Binding WorkingCopy.HasBranchInfoError, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                <StackPanel Spacing="12">
+                  <StackPanel Spacing="6" IsVisible="{Binding WorkingCopy.IsBranchInfoInSync}">
+                    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                      <icons:MaterialIcon Kind="CheckCircle" Width="18" Height="18"
+                                          Foreground="{DynamicResource ForgeStatusAddedBrush}" />
+                      <TextBlock Text="In sync" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </StackPanel>
+                    <TextBlock Text="Both branches point at the same history relative to each other."
+                               FontSize="12" Opacity="0.65" TextAlignment="Center" TextWrapping="Wrap" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="10"
+                              IsVisible="{Binding WorkingCopy.IsBranchInfoInSync, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                    <Grid ColumnDefinitions="*,Auto,*">
+                      <StackPanel Grid.Column="0" HorizontalAlignment="Right" Spacing="4">
+                        <TextBlock Text="{Binding WorkingCopy.BranchInfoBehind, StringFormat={}{0} behind}"
+                                   FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource ForgeStatusDeletedBrush}"
+                                   HorizontalAlignment="Right" />
+                        <Border Height="10" CornerRadius="5"
+                                Width="{Binding WorkingCopy.BranchInfoBehindBarWidth}"
+                                HorizontalAlignment="Right"
+                                Background="{DynamicResource ForgeDiffRemovedFillBrush}"
+                                BorderBrush="{DynamicResource ForgeStatusDeletedBrush}"
+                                BorderThickness="1"
+                                IsVisible="{Binding WorkingCopy.BranchInfoBehind, Converter={x:Static conv:ForgeConverters.IsPositive}}" />
+                      </StackPanel>
+
+                      <StackPanel Grid.Column="1" Margin="14,0" VerticalAlignment="Center" Spacing="2">
+                        <Ellipse Width="10" Height="10" Fill="{DynamicResource ForgePrimaryBrush}"
+                                 HorizontalAlignment="Center" />
+                        <Border Height="2" Width="28" Background="{DynamicResource ForgeOutlineBrush}"
+                                HorizontalAlignment="Center" />
+                        <Ellipse Width="10" Height="10" Fill="{DynamicResource ForgePrimaryBrush}"
+                                 HorizontalAlignment="Center" />
+                      </StackPanel>
+
+                      <StackPanel Grid.Column="2" HorizontalAlignment="Left" Spacing="4">
+                        <TextBlock Text="{Binding WorkingCopy.BranchInfoAhead, StringFormat={}{0} ahead}"
+                                   FontSize="13" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource ForgeStatusAddedBrush}" />
+                        <Border Height="10" CornerRadius="5"
+                                Width="{Binding WorkingCopy.BranchInfoAheadBarWidth}"
+                                HorizontalAlignment="Left"
+                                Background="{DynamicResource ForgeDiffAddedFillBrush}"
+                                BorderBrush="{DynamicResource ForgeStatusAddedBrush}"
+                                BorderThickness="1"
+                                IsVisible="{Binding WorkingCopy.BranchInfoAhead, Converter={x:Static conv:ForgeConverters.IsPositive}}" />
+                      </StackPanel>
+                    </Grid>
+
+                    <TextBlock FontSize="11" Opacity="0.6" TextWrapping="Wrap" TextAlignment="Center">
+                      <Run Text="Behind = commits on " />
+                      <Run Text="{Binding WorkingCopy.BranchInfoCurrentName}" />
+                      <Run Text=" not in this branch. Ahead = commits on this branch not in " />
+                      <Run Text="{Binding WorkingCopy.BranchInfoCurrentName}" />
+                      <Run Text="." />
+                    </TextBlock>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+
+              <Grid ColumnDefinitions="*,*" Margin="0,4,0,0"
+                    IsVisible="{Binding WorkingCopy.HasBranchInfoError, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+                <StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+                  <TextBlock Text="This branch" FontSize="11" Opacity="0.55" />
+                  <TextBlock Text="{Binding WorkingCopy.BranchInfoTargetName}" FontSize="12" FontWeight="SemiBold"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding WorkingCopy.BranchInfoTargetTip}" FontSize="11"
+                             FontFamily="{DynamicResource ForgeCodeFont}" Opacity="0.7" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="2" Margin="8,0,0,0">
+                  <TextBlock Text="Base" FontSize="11" Opacity="0.55" />
+                  <TextBlock Text="{Binding WorkingCopy.BranchInfoCurrentName}" FontSize="12" FontWeight="SemiBold"
+                             TextTrimming="CharacterEllipsis" />
+                  <TextBlock Text="{Binding WorkingCopy.BranchInfoCurrentTip, Converter={x:Static conv:ForgeConverters.NullOrEmptyDisplay}}"
+                             FontSize="11" FontFamily="{DynamicResource ForgeCodeFont}" Opacity="0.7" />
+                </StackPanel>
+              </Grid>
+            </StackPanel>
+          </StackPanel>
         </DockPanel>
       </Border>
     </Border>

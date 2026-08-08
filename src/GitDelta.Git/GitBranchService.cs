@@ -12,10 +12,16 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
     public Task<IReadOnlyList<BranchInfo>> ListBranchesAsync(string repositoryPath, CancellationToken ct = default) =>
         gates.For(repositoryPath).RunReadAsync(async token =>
         {
-            var format = string.Join(FieldSeparator, "%(refname)", "%(HEAD)", "%(upstream:short)", "%(objectname)");
+            var format = string.Join(
+                FieldSeparator,
+                "%(refname)",
+                "%(HEAD)",
+                "%(upstream:short)",
+                "%(objectname)",
+                "%(committerdate:iso-strict)");
             var result = await runner.RunAsync(
                 repositoryPath,
-                ["for-each-ref", $"--format={format}", "refs/heads", "refs/remotes"],
+                ["for-each-ref", "--sort=-committerdate", $"--format={format}", "refs/heads", "refs/remotes"],
                 options: null,
                 token).ConfigureAwait(false);
 
@@ -60,7 +66,45 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
                 token),
             ct);
 
-    private static List<BranchInfo> ParseBranches(string rawOutput)
+    public Task<BranchDivergence> GetDivergenceAsync(
+        string repositoryPath,
+        string baseRef,
+        string headRef,
+        CancellationToken ct = default) =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
+        {
+            var result = await runner.RunAsync(
+                repositoryPath,
+                ["rev-list", "--left-right", "--count", $"{baseRef}...{headRef}"],
+                options: null,
+                token).ConfigureAwait(false);
+
+            return ParseDivergence(result.Stdout);
+        }, ct);
+
+    internal static BranchDivergence ParseDivergence(string rawOutput)
+    {
+        var line = rawOutput.AsSpan().Trim();
+        if (line.IsEmpty)
+            return new BranchDivergence(0, 0);
+
+        var tab = line.IndexOf('\t');
+        if (tab < 0)
+            tab = line.IndexOf(' ');
+
+        if (tab < 0)
+            throw new FormatException($"Unexpected rev-list --count output: '{rawOutput.Trim()}'");
+
+        if (!int.TryParse(line[..tab], out var behind) ||
+            !int.TryParse(line[(tab + 1)..], out var ahead))
+        {
+            throw new FormatException($"Unexpected rev-list --count output: '{rawOutput.Trim()}'");
+        }
+
+        return new BranchDivergence(behind, ahead);
+    }
+
+    internal static List<BranchInfo> ParseBranches(string rawOutput)
     {
         var branches = new List<BranchInfo>();
         foreach (var line in rawOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries))
@@ -73,6 +117,13 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
             var isCurrent = fields[1] == "*";
             var upstream = string.IsNullOrEmpty(fields[2]) ? null : fields[2];
             var tipOid = fields[3];
+            var tipDate = DateTimeOffset.MinValue;
+            if (fields.Length >= 5
+                && !string.IsNullOrWhiteSpace(fields[4])
+                && DateTimeOffset.TryParse(fields[4], out var parsed))
+            {
+                tipDate = parsed;
+            }
 
             var isRemote = refName.StartsWith("refs/remotes/", StringComparison.Ordinal);
             var name = isRemote
@@ -81,7 +132,7 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
                     ? refName["refs/heads/".Length..]
                     : refName;
 
-            branches.Add(new BranchInfo(name, isCurrent, isRemote, upstream, tipOid));
+            branches.Add(new BranchInfo(name, isCurrent, isRemote, upstream, tipOid, tipDate));
         }
 
         return branches;
