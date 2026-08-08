@@ -14,16 +14,19 @@ namespace GitDelta.Git;
 /// </summary>
 public sealed class GitStagingService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitStagingService
 {
-    public Task StageFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default) =>
-        StageFilesAsync(repositoryPath, [path], ct);
+    public Task StageFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default, bool force = false) =>
+        StageFilesAsync(repositoryPath, [path], ct, force);
 
     public Task UnstageFileAsync(string repositoryPath, FilePath path, CancellationToken ct = default) =>
         UnstageFilesAsync(repositoryPath, [path], ct);
 
-    public Task StageFilesAsync(string repositoryPath, IReadOnlyList<FilePath> paths, CancellationToken ct = default)
+    public Task StageFilesAsync(string repositoryPath, IReadOnlyList<FilePath> paths, CancellationToken ct = default, bool force = false)
     {
         if (paths.Count == 0) return Task.CompletedTask;
-        var args = new List<string>(2 + paths.Count) { "add", "--" };
+        var args = new List<string>(3 + paths.Count) { "add" };
+        if (force)
+            args.Add("-f");
+        args.Add("--");
         foreach (var p in paths)
             args.Add(p.Value);
         return RunIndexWrite(repositoryPath, args, stdin: null, ct);

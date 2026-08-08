@@ -44,4 +44,58 @@ public sealed class MagicCommitInventoryTests
         Assert.That(inventory, Has.Count.EqualTo(1));
         Assert.That(inventory[0].WholeFile, Is.False);
     }
+
+    [Test]
+    public void Build_Treats_Added_As_WholeFile_Even_With_Hunks()
+    {
+        var added = PatchParser.Parse(
+            """
+            diff --git a/new.txt b/new.txt
+            new file mode 100644
+            index 0000000..e69de29
+            --- /dev/null
+            +++ b/new.txt
+            @@ -0,0 +1,3 @@
+            +version https://git-lfs.github.com/spec/v1
+            +oid sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+            +size 1234
+            """, DiffTarget.HeadToIndex);
+
+        Assert.That(added.Change, Is.EqualTo(ChangeKind.Added));
+        Assert.That(added.Hunks, Is.Not.Empty);
+
+        var inventory = MagicCommitInventory.Build([added]);
+
+        Assert.That(inventory, Has.Count.EqualTo(1));
+        Assert.That(inventory[0].WholeFile, Is.True);
+        Assert.That(inventory[0].Path, Is.EqualTo("new.txt"));
+        Assert.That(inventory[0].Header, Does.Contain("Added"));
+    }
+
+    [Test]
+    public void Build_Treats_Deleted_As_WholeFile_Even_With_Hunks()
+    {
+        var deleted = PatchParser.Parse(
+            """
+            diff --git a/gone.txt b/gone.txt
+            deleted file mode 100644
+            index e69de29..0000000
+            --- a/gone.txt
+            +++ /dev/null
+            @@ -1,3 +0,0 @@
+            -version https://git-lfs.github.com/spec/v1
+            -oid sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+            -size 1234
+            """, DiffTarget.HeadToIndex);
+
+        Assert.That(deleted.Change, Is.EqualTo(ChangeKind.Deleted));
+        Assert.That(deleted.Hunks, Is.Not.Empty);
+
+        var inventory = MagicCommitInventory.Build([deleted]);
+
+        Assert.That(inventory, Has.Count.EqualTo(1));
+        Assert.That(inventory[0].WholeFile, Is.True);
+        Assert.That(inventory[0].Path, Is.EqualTo("gone.txt"));
+        Assert.That(inventory[0].Header, Does.Contain("Deleted"));
+    }
 }

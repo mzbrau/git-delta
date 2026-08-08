@@ -3248,14 +3248,12 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         var pushAfter = PushAfterCommit;
 
         IsCommitting = true;
-        HookOutput = "";
         try
         {
             var sw = Stopwatch.StartNew();
-            var progress = new Progress<string>(line => HookOutput += line + Environment.NewLine);
             try
             {
-                await _commit.CommitAsync(_repoPath, message, amend, noVerify, progress);
+                await _commit.CommitAsync(_repoPath, message, amend, noVerify, hookOutput: null);
             }
             catch (Exception ex)
             {

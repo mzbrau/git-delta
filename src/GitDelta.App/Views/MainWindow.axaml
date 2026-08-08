@@ -780,8 +780,6 @@
                   <CheckBox Content="--no-verify" IsChecked="{Binding WorkingCopy.NoVerify}" FontSize="11" />
                   <CheckBox Content="Push" IsChecked="{Binding WorkingCopy.PushAfterCommit}" FontSize="11" />
                 </StackPanel>
-                <TextBlock Text="{Binding WorkingCopy.HookOutput}" FontSize="10" Opacity="0.7"
-                           TextWrapping="Wrap" IsVisible="{Binding WorkingCopy.HookOutput, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
               </StackPanel>
             </Border>
 
