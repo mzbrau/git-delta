@@ -6,8 +6,7 @@ title: Working copy
 
 **File Status** is where you review and prepare local changes.
 
-{/* Capture: File Status with staged + unstaged lists  */}
-![File Status overview](/img/placeholders/file-status-overview.png)
+![File Status overview](../img/file-status-overview.png)
 
 ## Change lists
 

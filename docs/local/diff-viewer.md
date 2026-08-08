@@ -6,8 +6,7 @@ title: Diff viewer
 
 The diff viewer is the heart of GIT DELTA’s review experience.
 
-{/* Capture: Side-by-side diff with hunk actions visible  */}
-![Side-by-side diff](/img/placeholders/diff-side-by-side.png)
+![Side-by-side diff](../img/diff-side-by-side.png)
 
 ## View modes
 
@@ -16,8 +15,7 @@ The diff viewer is the heart of GIT DELTA’s review experience.
 | **Side by side** | Compare old and new columns |
 | **Unified** | Single column with `+` / `-` lines |
 
-{/* Capture: Unified diff view  */}
-![Unified diff](/img/placeholders/diff-unified.png)
+![Unified diff](../img/diff-unified.png)
 
 Switch from the diff toolbar. Defaults live in **Settings → Diff**.
 

@@ -6,8 +6,7 @@ title: Pull request review
 
 The PR workspace is built for reading diffs and leaving high-quality review comments.
 
-{/* Capture: PR review: file list + diff + conversation  */}
-![PR review](/img/placeholders/pr-review.png)
+![PR review](../img/pr-review.png)
 
 ## Header actions
 

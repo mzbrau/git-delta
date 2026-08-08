@@ -6,8 +6,7 @@ title: Rebase
 
 The **Rebase** toolbar button opens an interactive rebase wizard.
 
-{/* Capture: Rebase wizard (plan editing step)  */}
-![Rebase wizard](/img/placeholders/rebase-wizard.png)
+![Rebase wizard](../img/rebase-wizard.png)
 
 If rebase is not allowed in the current state, the button is disabled and the tooltip explains why.
 

@@ -6,8 +6,7 @@ title: Inbox
 
 The sidebar **PULL REQUESTS** section is your review inbox.
 
-{/* Capture: Pull Requests inbox sections  */}
-![PR inbox](/img/placeholders/pr-inbox.png)
+![PR inbox](../img/pr-inbox.png)
 
 ## Sections
 

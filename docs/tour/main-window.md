@@ -6,8 +6,7 @@ title: Main window
 
 Once a repository is open, GIT DELTA uses a single main window.
 
-{/* Capture: Full main window: toolbar, sidebar, file list, diff  */}
-![Main window overview](/img/placeholders/main-window-overview.png)
+![Main window overview](../img/main-window-overview.png)
 
 ## Layout at a glance
 

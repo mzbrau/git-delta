@@ -6,9 +6,6 @@ title: Navigation
 
 The left sidebar is how you move between repositories and workspace modes.
 
-{/* Capture: Sidebar showing File Status, History, Branches, Stashes, PRs  */}
-![Sidebar navigation](/img/placeholders/sidebar-navigation.png)
-
 ## Repository switcher
 
 | Feature | Description |

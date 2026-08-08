@@ -6,8 +6,7 @@ title: Settings
 
 Open Settings from the toolbar gear.
 
-{/* Capture: Settings → General  */}
-![Settings General](/img/placeholders/settings-general.png)
+![Settings General](../img/settings-general.png)
 
 ## General
 

@@ -6,8 +6,7 @@ title: Local pending review
 
 You can review **uncommitted** work with the same review mindset you use for pull requests — comments, briefing, and optional AI — without opening GitHub.
 
-{/* Capture: Local pending-changes review (briefing + comments)  */}
-![Local pending review](/img/placeholders/local-pending-review.png)
+![Local pending review](../img/local-pending-review.png)
 
 ## Where it lives
 

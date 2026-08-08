@@ -8,10 +8,10 @@ This folder is the **Docusaurus** project for the user guide.
 ```bash
 cd docs/docusaurus
 npm install
-npm start          # local preview
-npm run build      # production build → ./build
+npm start          # syncs landing PNGs, then local preview
+npm run build      # syncs landing PNGs, then production build → ./build
 ```
 
-GitHub Pages deploys via [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml) on pushes to `main` that change `docs/**`.
+Landing-page screenshots are authored in [`docs/img/landing/`](../img/landing/) and copied into `static/img/landing/` by `npm run sync:landing` (`prestart` / `prebuild`). Guide screenshots live in [`docs/img/`](../img/).
 
-Screenshot capture checklist: [`static/img/placeholders/README.md`](./static/img/placeholders/README.md).
+GitHub Pages deploys via [`.github/workflows/docs.yml`](../../.github/workflows/docs.yml) on pushes to `main` that change `docs/**`.

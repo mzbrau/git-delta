@@ -8,8 +8,7 @@ Stashes let you set aside work temporarily and come back to it later.
 
 ## Stash dialog
 
-{/* Capture: Stash push/pop dialog  */}
-![Stash dialog](/img/placeholders/stash-dialog.png)
+![Stash dialog](../img/stash-dialog.png)
 
 Open it from the toolbar **Stash** button.
 

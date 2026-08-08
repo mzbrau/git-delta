@@ -6,8 +6,7 @@ title: History
 
 **History** browses commits in the current repository.
 
-{/* Capture: History commit list + details + file diff  */}
-![History view](/img/placeholders/history-view.png)
+![History view](../img/history-view.png)
 
 ## Commit list
 

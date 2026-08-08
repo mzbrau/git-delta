@@ -6,8 +6,7 @@ title: Committing
 
 The commit dock sits with **File Status** so you can stage and commit without changing screens.
 
-{/* Capture: Commit message dock (amend / no-verify / push options)  */}
-![Commit dock](/img/placeholders/commit-dock.png)
+![Commit dock](../img/commit-dock.png)
 
 ## Write a message
 
@@ -31,12 +30,11 @@ The commit dock sits with **File Status** so you can stage and commit without ch
 | **--no-verify** | Skip Git hooks for this commit |
 | **Push** after commit | Push once the commit succeeds |
 
-Hook output appears in the UI when hooks run so you can see failures without digging into a terminal.
+Commit and hook failures surface as app notifications.
 
 ## Magic Commit
 
-{/* Capture: Magic Commit overlay  */}
-![Magic Commit](/img/placeholders/magic-commit.png)
+![Magic Commit](../img/magic-commit.png)
 
 **Magic Commit** helps split work into logical commits:
 

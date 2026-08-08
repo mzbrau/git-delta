@@ -14,8 +14,9 @@ In the age of AI-authored code, seniors often review unfamiliar changes under ti
 
 It is **not** meant to rubber-stamp enterprise or mission-critical software.
 
-{/* Capture: AI review / Change Briefing side panel  */}
-![AI review panel](/img/placeholders/ai-review-panel.png)
+![Change Briefing](../img/ai-review-panel.png)
+
+![File Briefing beside a diff](../img/ai-review-panel-file-briefing.png)
 
 ## Enable AI
 
@@ -24,8 +25,7 @@ It is **not** meant to rubber-stamp enterprise or mission-critical software.
 3. Enable AI assist and configure a Copilot token / model as required
 4. Optionally set path denylists, excluded repos, budgets, and thresholds
 
-{/* Capture: Settings → AI  */}
-![Settings AI](/img/placeholders/settings-ai.png)
+![Settings AI](../img/settings-ai.png)
 
 Use **Test connection** and **Refresh models** when setting up.
 

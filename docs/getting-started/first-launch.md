@@ -6,9 +6,6 @@ title: First launch
 
 ## If Git is missing
 
-{/* Capture: Git missing / too-old blocking window  */}
-![Git missing window](/img/placeholders/git-missing.png)
-
 GIT DELTA checks for Git at startup.
 
 - If Git is **missing** or **older than 2.30**, a blocking window explains how to install it.
@@ -17,9 +14,6 @@ GIT DELTA checks for Git at startup.
 You cannot continue until Git is available.
 
 ## Welcome screen
-
-{/* Capture: Welcome / no-repo state with Open Repository and recent list  */}
-![Welcome screen](/img/placeholders/welcome-screen.png)
 
 When no repository is open you see:
 
