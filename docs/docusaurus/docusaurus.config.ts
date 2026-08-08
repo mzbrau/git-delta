@@ -11,8 +11,8 @@ const config: Config = {
     v4: true,
   },
 
-  url: 'https://mzbrau.github.io',
-  baseUrl: '/git-delta/',
+  url: 'https://www.gitdelta.com',
+  baseUrl: '/',
   trailingSlash: true,
 
   organizationName: 'mzbrau',

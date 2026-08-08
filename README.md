@@ -8,7 +8,7 @@ Built with .NET 10 and Avalonia 12.
 
 User documentation (Docusaurus) lives under [`docs/`](docs/). The site project is [`docs/docusaurus/`](docs/docusaurus/).
 
-Published docs: [https://mzbrau.github.io/git-delta/](https://mzbrau.github.io/git-delta/)
+Published docs: [https://www.gitdelta.com/](https://www.gitdelta.com/)
 
 ```bash
 cd docs/docusaurus
