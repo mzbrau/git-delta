@@ -103,7 +103,7 @@ public sealed class GitProcessRunner : IGitProcessRunner
         var command = Cli.Wrap(options.ExecutableOverride ?? _executablePath)
             .WithArguments(fullArguments)
             .WithWorkingDirectory(workingDirectory)
-            .WithEnvironmentVariables(BuildEnvironment(options.ExtraEnvironment))
+            .WithEnvironmentVariables(BuildEnvironment(options.ExtraEnvironment, options.ExecutableOverride))
             .WithValidation(CommandResultValidation.None)
             .WithStandardOutputPipe(stdoutTarget)
             .WithStandardErrorPipe(stderrTarget);
@@ -245,9 +245,11 @@ public sealed class GitProcessRunner : IGitProcessRunner
         return full;
     }
 
-    private static Dictionary<string, string?> BuildEnvironment(
-        IReadOnlyDictionary<string, string?>? extra = null)
+    private Dictionary<string, string?> BuildEnvironment(
+        IReadOnlyDictionary<string, string?>? extra = null,
+        string? executableOverride = null)
     {
+        var gitPath = executableOverride ?? _executablePath;
         var env = new Dictionary<string, string?>
         {
             // Fail fast instead of blocking on a terminal prompt a GUI process cannot answer.
@@ -262,6 +264,10 @@ public sealed class GitProcessRunner : IGitProcessRunner
             // Commands like `merge --continue` fall back to an interactive commit message editor
             // unless one is already staged; a spawned editor with no TTY is another way to freeze.
             ["GIT_EDITOR"] = "true",
+            // GUI launches often lack Homebrew / Git-for-Windows bins; hooks need git-lfs on PATH.
+            ["PATH"] = GitToolPath.Augment(
+                Environment.GetEnvironmentVariable("PATH"),
+                Path.IsPathRooted(gitPath) ? gitPath : null),
         };
 
         if (extra is null)

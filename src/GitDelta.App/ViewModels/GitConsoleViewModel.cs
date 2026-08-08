@@ -1,3 +1,7 @@
+using System.Text;
+using Avalonia;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GitDelta.Git;
@@ -46,6 +50,25 @@ public partial class GitConsoleViewModel : ObservableObject
     {
         _log.Clear();
         RebuildLines();
+    }
+
+    [RelayCommand]
+    private async Task CopyAsync()
+    {
+        if (Lines.Count == 0)
+            return;
+
+        var sb = new StringBuilder();
+        foreach (var line in Lines)
+            sb.AppendLine(line.Text);
+
+        var clipboard = Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop
+            ? desktop.MainWindow?.Clipboard
+            : null;
+        if (clipboard is null)
+            return;
+
+        await clipboard.SetTextAsync(sb.ToString()).ConfigureAwait(true);
     }
 
     private void QueueRebuild()

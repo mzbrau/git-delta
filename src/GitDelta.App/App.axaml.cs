@@ -9,6 +9,7 @@ using GitDelta.App.ViewModels;
 using GitDelta.App.Views;
 using GitDelta.Core;
 using GitDelta.Core.Abstractions;
+using GitDelta.Git;
 using LiveMarkdown.Avalonia;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -49,6 +50,10 @@ public partial class App : Application
 
         // Apply persisted theme (Light / Dark / System).
         ApplyTheme(settings.Current.Theme);
+
+        // Packaged GUI launches inherit a minimal PATH; enrich before git detection so
+        // Homebrew / Git-for-Windows bins (and companion tools like git-lfs) are visible.
+        GitToolPath.ApplyToProcess();
 
         var env = Services.GetRequiredService<IGitEnvironment>();
         GitExecutableInfo? gitInfo = null;

@@ -169,6 +169,7 @@
                   Background="{DynamicResource ForgeSurfaceContainerBrush}">
             <DockPanel>
               <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                <Button Classes="Link" Content="Copy" Command="{Binding GitConsole.CopyCommand}" FontSize="11" />
                 <Button Classes="Link" Content="Clear" Command="{Binding GitConsole.ClearCommand}" FontSize="11" />
                 <Button Classes="Ghost" Padding="4" Command="{Binding GitConsole.ToggleExpandedCommand}">
                   <icons:MaterialIcon Kind="{Binding GitConsole.IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
@@ -192,11 +193,11 @@
               <ItemsControl ItemsSource="{Binding GitConsole.Lines}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:GitConsoleLine">
-                    <TextBlock Text="{Binding Text}"
-                               FontFamily="{DynamicResource ForgeCodeFont}"
-                               FontSize="11"
-                               Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.GitConsoleLineBrush}}"
-                               TextWrapping="NoWrap" />
+                    <SelectableTextBlock Text="{Binding Text}"
+                                         FontFamily="{DynamicResource ForgeCodeFont}"
+                                         FontSize="11"
+                                         Foreground="{Binding Kind, Converter={x:Static conv:ForgeConverters.GitConsoleLineBrush}}"
+                                         TextWrapping="NoWrap" />
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
