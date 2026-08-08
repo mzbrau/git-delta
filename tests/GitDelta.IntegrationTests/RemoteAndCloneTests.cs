@@ -42,6 +42,12 @@ public sealed class RemoteAndCloneTests
 
             await clone.CloneAsync(upstreamPath, localPath, progress: null);
 
+            // Pin EOL on the clone (mirrors RepositoryBuilder) so Windows CI matches LF expectations.
+            var runner = sp.GetRequiredService<IGitProcessRunner>();
+            await runner.RunAsync(localPath, ["config", "core.autocrlf", "false"], new GitProcessOptions());
+            await runner.RunAsync(localPath, ["config", "core.eol", "lf"], new GitProcessOptions());
+            await runner.RunAsync(localPath, ["checkout", "--force", "HEAD"], new GitProcessOptions());
+
             Assert.That(Directory.Exists(Path.Combine(localPath, ".git")), Is.True);
             Assert.That(File.ReadAllText(Path.Combine(localPath, "a.txt")), Is.EqualTo("v1\n"));
 

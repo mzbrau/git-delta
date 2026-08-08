@@ -13,7 +13,7 @@
     "write-translations": "docusaurus write-translations",
     "write-heading-ids": "docusaurus write-heading-ids",
     "typecheck": "tsc",
-    "sync:landing": "bash scripts/sync-landing.sh",
+    "sync:landing": "node scripts/sync-landing.js",
     "prestart": "npm run sync:landing",
     "prebuild": "npm run sync:landing"
   },
