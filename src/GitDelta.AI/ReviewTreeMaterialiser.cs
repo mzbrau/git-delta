@@ -101,7 +101,7 @@ public sealed class ReviewTreeMaterialiser(
         var tarPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"gitdelta-tree-{Guid.NewGuid():N}.tar");
         try
         {
-            await gates.For(repositoryPath).RunReadAsync(async token =>
+            await gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
             {
                 var result = await runner.RunAsync(
                         repositoryPath,
@@ -114,7 +114,7 @@ public sealed class ReviewTreeMaterialiser(
                     throw new GitException($"git archive --format=tar {sha} failed: {result.Stderr}");
 
                 return true;
-            }, ct).ConfigureAwait(false);
+            }, ct), ct).ConfigureAwait(false);
 
             await TarFile.ExtractToDirectoryAsync(tarPath, targetDirectory, overwriteFiles: true, ct).ConfigureAwait(false);
         }

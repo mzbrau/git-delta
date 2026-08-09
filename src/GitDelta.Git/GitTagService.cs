@@ -13,7 +13,7 @@ public sealed class GitTagService(IGitProcessRunner runner, IRepositoryGateProvi
     private static readonly TimeSpan NetworkTimeout = TimeSpan.FromMinutes(5);
 
     public Task<IReadOnlyList<TagInfo>> ListTagsAsync(string repositoryPath, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var format = string.Join(
                 FieldSeparator,
@@ -28,7 +28,7 @@ public sealed class GitTagService(IGitProcessRunner runner, IRepositoryGateProvi
                 token).ConfigureAwait(false);
 
             return (IReadOnlyList<TagInfo>)ParseTags(result.Stdout);
-        }, ct);
+        }, ct), ct);
 
     public Task CreateAnnotatedTagAsync(
         string repositoryPath,
@@ -42,13 +42,13 @@ public sealed class GitTagService(IGitProcessRunner runner, IRepositoryGateProvi
             ? ["tag", "--", name]
             : ["tag", "-a", "-m", message, "--", name];
 
-        return gates.For(repositoryPath).RunIndexWriteAsync(
+        return gates.WithGateAsync(repositoryPath, gate => gate.RunIndexWriteAsync(
             token => runner.RunAsync(
                 repositoryPath,
                 args,
                 options: null,
                 token),
-            ct);
+            ct), ct);
     }
 
     public Task PushTagAsync(
@@ -59,7 +59,7 @@ public sealed class GitTagService(IGitProcessRunner runner, IRepositoryGateProvi
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        return gates.For(repositoryPath).RunNetworkAsync(async token =>
+        return gates.WithGateAsync(repositoryPath, gate => gate.RunNetworkAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var options = new GitProcessOptions
@@ -74,14 +74,14 @@ public sealed class GitTagService(IGitProcessRunner runner, IRepositoryGateProvi
                 options,
                 token).ConfigureAwait(false);
             GitDeltaMeters.PushMs.Record(sw.Elapsed.TotalMilliseconds);
-        }, ct);
+        }, ct), ct);
     }
 
     public Task PushAllTagsAsync(
         string repositoryPath,
         IProgress<string>? progress = null,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunNetworkAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunNetworkAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var options = new GitProcessOptions
@@ -96,7 +96,7 @@ public sealed class GitTagService(IGitProcessRunner runner, IRepositoryGateProvi
                 options,
                 token).ConfigureAwait(false);
             GitDeltaMeters.PushMs.Record(sw.Elapsed.TotalMilliseconds);
-        }, ct);
+        }, ct), ct);
 
     internal static List<TagInfo> ParseTags(string rawOutput)
     {

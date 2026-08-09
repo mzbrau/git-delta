@@ -28,13 +28,13 @@ public sealed class GitDiffRawService(
         var maxBytes = settings?.Current.MaxDiffPatchBytes ?? 32 * 1024 * 1024;
         var processOptions = new GitProcessOptions { MaxStdoutBytes = maxBytes };
 
-        return gates.For(repositoryPath).RunReadAsync(async token =>
+        return gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var result = await runner.RunAsync(repositoryPath, args, processOptions, token).ConfigureAwait(false);
             GitDeltaMeters.DiffGenerationMs.Record(sw.Elapsed.TotalMilliseconds);
             return result.Stdout;
-        }, ct);
+        }, ct), ct);
     }
 
     public Task<IReadOnlyList<(FilePath Path, ContentId OldOid, ContentId NewOid, ChangeKind Kind)>> GetRawFileListAsync(
@@ -45,11 +45,11 @@ public sealed class GitDiffRawService(
     {
         var args = GitDiffArgumentBuilder.BuildRawArgs(scope, options, path: null);
 
-        return gates.For(repositoryPath).RunReadAsync(async token =>
+        return gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(repositoryPath, args, options: null, token).ConfigureAwait(false);
             return ParseRaw(result.Stdout);
-        }, ct);
+        }, ct), ct);
     }
 
     /// <summary>

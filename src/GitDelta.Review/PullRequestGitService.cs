@@ -19,7 +19,7 @@ public sealed class PullRequestGitService(
         var localRef = LocalRefName(prNumber);
         var fetchSpec = $"refs/pull/{prNumber}/head:{localRef}";
 
-        return gates.For(repoPath).RunNetworkAsync(async token =>
+        return gates.WithGateAsync(repoPath, gate => gate.RunNetworkAsync(async token =>
         {
             var result = await runner.RunAsync(
                     repoPath,
@@ -30,7 +30,7 @@ public sealed class PullRequestGitService(
 
             if (!result.Succeeded)
                 throw new GitException($"git fetch pull request head failed: {result.Stderr}");
-        }, ct);
+        }, ct), ct);
     }
 
     public Task<CommitId> ResolveMergeBaseAsync(
@@ -38,7 +38,7 @@ public sealed class PullRequestGitService(
         CommitId baseOid,
         CommitId headOid,
         CancellationToken ct = default) =>
-        gates.For(repoPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repoPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                     repoPath,
@@ -55,5 +55,5 @@ public sealed class PullRequestGitService(
                 throw new GitException("git merge-base returned empty output");
 
             return CommitId.FromSha(sha);
-        }, ct);
+        }, ct), ct);
 }

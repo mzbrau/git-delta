@@ -452,10 +452,25 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
         // History browse path navigation selects a sibling/back file then presents the browse diff itself.
         if (_fileHistoryBrowse.IsPathNavigationInProgress)
             return;
+
+        if (value is not null
+            && IsRecentOnlySelection(value)
+            && !_fileHistoryBrowse.IsFileHistoryBrowseMode)
+        {
+            _ = LoadCleanRecentFileAsync(value, CancellationToken.None);
+            return;
+        }
+
         _ = LoadDiffForSelectionAsync(value);
         if (value is not null && !value.IsViewed && !value.IsViewedPending)
             _ = MarkFileViewedInternalAsync(value);
     }
+
+    private bool IsRecentOnlySelection(FileItemViewModel? file) =>
+        file is not null
+        && RecentViewedFiles.Find(file.Path.Value) is not null
+        && !PrFiles.Any(f => string.Equals(f.Path.Value, file.Path.Value, StringComparison.Ordinal));
+
 
     partial void OnSelectedPrFileEntryChanged(FileListEntry? value)
     {
@@ -3694,6 +3709,12 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
 
     DiffOptions IFileHistoryBrowseHost.BuildDiffOptions() => BuildDiffOptions();
 
+    Task IFileHistoryBrowseHost.BeginFileHistoryDiffLoadAsync() =>
+        InvokeOnUiAsync(() => IsLoadingDiff = true);
+
+    Task IFileHistoryBrowseHost.EndFileHistoryDiffLoadAsync() =>
+        InvokeOnUiAsync(() => IsLoadingDiff = false);
+
     async Task IFileHistoryBrowseHost.PresentFileHistoryDiffAsync(FilePath path, FileDiff diff, CancellationToken ct)
     {
         var file = SelectedFile;
@@ -3779,43 +3800,71 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
         SelectedFile = file;
     }
 
-    public async Task OpenViewedFileAsync(FilePath path, CancellationToken ct = default)
+    public Task OpenViewedFileAsync(FilePath path, CancellationToken ct = default)
     {
         if (_session is null)
-            return;
+            return Task.CompletedTask;
 
         var existing = PrFiles.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal));
         if (existing is not null)
         {
             SelectedFile = existing;
-            return;
+            return Task.CompletedTask;
         }
 
         var exclude = PrFiles.Select(f => f.Path.Value).ToHashSet(StringComparer.Ordinal);
         var file = RecentViewedFiles.Remember(path, exclude);
         OnPropertyChanged(nameof(HasRecentViewedFiles));
+        // OnSelectedFileChanged loads the clean view for recent-only selections.
         SelectedFile = file;
+        return Task.CompletedTask;
+    }
 
-        // Prefer worktree contents for readable view (checkout should match PR head when reviewing).
+    private async Task LoadCleanRecentFileAsync(FileItemViewModel file, CancellationToken ct)
+    {
+        if (_session is null)
+            return;
+
+        _fileHistoryBrowse.Reset();
+        _fileHistoryBrowse.ClearSelectionHighlight(FileHistory);
+
         var maxBytes = _settings.Current.MaxDiffPatchBytes;
         byte[] bytes;
-        var fullPath = RepositoryPathResolver.ResolveUnderRoot(_session.RepositoryPath, path);
-        if (System.IO.File.Exists(fullPath))
+        var fullPath = RepositoryPathResolver.ResolveUnderRoot(_session.RepositoryPath, file.Path);
+        try
         {
-            var info = new FileInfo(fullPath);
-            if (info.Length > maxBytes)
-                throw new DiffTooLargeException(maxBytes, info.Length);
-            bytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
-        }
-        else
-        {
-            bytes = [];
-        }
+            if (System.IO.File.Exists(fullPath))
+            {
+                var info = new FileInfo(fullPath);
+                if (info.Length > maxBytes)
+                    throw new DiffTooLargeException(maxBytes, info.Length);
+                bytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                bytes = [];
+            }
 
-        var scope = new DiffScope.RevisionsTwoDot(_session.Head, _session.Head);
-        var diff = CleanFileDiff.Create(path, bytes, scope);
-        await ((IFileHistoryBrowseHost)this).PresentFileHistoryDiffAsync(path, diff, ct).ConfigureAwait(false);
-        _fileHistoryBrowse.Reset();
+            var scope = new DiffScope.RevisionsTwoDot(_session.Head, _session.Head);
+            var diff = CleanFileDiff.Create(file.Path, bytes, scope);
+            if (!ReferenceEquals(SelectedFile, file))
+                return;
+            await ((IFileHistoryBrowseHost)this).PresentFileHistoryDiffAsync(file.Path, diff, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored
+        }
+        catch (Exception ex)
+        {
+            if (!ReferenceEquals(SelectedFile, file))
+                return;
+            DiffRows.Clear();
+            _currentDiff = null;
+            DiffEmptyMessage = $"Failed to open file: {ex.Message}";
+            _notifications.Error(DiffEmptyMessage, exception: ex);
+        }
     }
 
     private FileDiff EnsureIntraLine(FileDiff diff) =>

@@ -65,8 +65,9 @@ public sealed class FileHistoryCacheTests
 
         var timeline = FileHistoryCacheEntry.BuildTimeline(created, recent);
         Assert.That(timeline, Has.Count.EqualTo(3));
-        Assert.That(timeline[0].IsCreated, Is.True);
-        Assert.That(timeline[^1].IsCurrent, Is.True);
+        Assert.That(timeline[0].IsCurrent, Is.True);
+        Assert.That(timeline[1].Oid, Is.EqualTo("c2"));
+        Assert.That(timeline[^1].IsCreated, Is.True);
     }
 
     [Test]
@@ -81,8 +82,9 @@ public sealed class FileHistoryCacheTests
         Assert.That(entry.IsReady, Is.True);
         Assert.That(entry.Entries, Has.Count.EqualTo(2));
         Assert.That(entry.Entries[0], Is.TypeOf<FileHistoryItemViewModel>());
-        Assert.That(entry.Entries[0].CanExpand, Is.True);
-        Assert.That(entry.Entries[^1].CanExpand, Is.False);
+        Assert.That(entry.Entries[0].CanExpand, Is.False);
+        Assert.That(entry.Entries[0].IsCurrent, Is.True);
+        Assert.That(entry.Entries[^1].CanExpand, Is.True);
     }
 }
 
@@ -197,6 +199,36 @@ public sealed class FileHistoryBrowseControllerTests
         Assert.That(controller.IsFileHistoryBrowseMode, Is.True);
     }
 
+    [Test]
+    public async Task SideLabels_VsCurrent_UsesShortOidAndCurrent()
+    {
+        var host = new FakeBrowseHost { BrowseSubjectPath = FilePath.From("src/a.cs") };
+        var controller = CreateController(host);
+        host.Controller = controller;
+
+        Assert.That(controller.PreviousSideLabel, Is.EqualTo("PREVIOUS VERSION"));
+        Assert.That(controller.NewSideLabel, Is.EqualTo("NEW VERSION"));
+
+        var item = HistoryItem("oid1", "abc1234", "change a");
+        await controller.SelectHistoryItemAsync(item, cache: null);
+
+        Assert.That(controller.PreviousSideLabel, Is.EqualTo("PREVIOUS VERSION"));
+        Assert.That(controller.NewSideLabel, Is.EqualTo("NEW VERSION"));
+
+        controller.CompareMode = FileHistoryCompareMode.VsCurrent;
+        Assert.That(controller.PreviousSideLabel, Is.EqualTo("abc1234"));
+        Assert.That(controller.NewSideLabel, Is.EqualTo("CURRENT"));
+
+        controller.CompareMode = FileHistoryCompareMode.InCommit;
+        Assert.That(controller.PreviousSideLabel, Is.EqualTo("PREVIOUS VERSION"));
+        Assert.That(controller.NewSideLabel, Is.EqualTo("NEW VERSION"));
+
+        controller.CompareMode = FileHistoryCompareMode.VsCurrent;
+        controller.Reset();
+        Assert.That(controller.PreviousSideLabel, Is.EqualTo("PREVIOUS VERSION"));
+        Assert.That(controller.NewSideLabel, Is.EqualTo("NEW VERSION"));
+    }
+
     private static FileHistoryBrowseController CreateController(FakeBrowseHost host) =>
         new(new StubHistory(), new StubDiff(), () => host);
 
@@ -213,6 +245,10 @@ public sealed class FileHistoryBrowseControllerTests
         public List<FilePath> PresentedPaths { get; } = [];
 
         public DiffOptions BuildDiffOptions() => new();
+
+        public Task BeginFileHistoryDiffLoadAsync() => Task.CompletedTask;
+
+        public Task EndFileHistoryDiffLoadAsync() => Task.CompletedTask;
 
         public Task PresentFileHistoryDiffAsync(FilePath path, FileDiff diff, CancellationToken ct)
         {

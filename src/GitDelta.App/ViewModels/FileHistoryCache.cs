@@ -227,9 +227,10 @@ public sealed partial class FileHistoryCacheEntry : ObservableObject
                 IsCurrent: false));
         }
 
-        list.Sort((a, b) => a.AuthorDate.CompareTo(b.AuthorDate));
+        // Newest commits first; synthetic "Current change" stays at the top.
+        list.Sort((a, b) => b.AuthorDate.CompareTo(a.AuthorDate));
 
-        list.Add(new FileHistoryEntry(
+        list.Insert(0, new FileHistoryEntry(
             Oid: "",
             ShortOid: "",
             Subject: "Current change",

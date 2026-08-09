@@ -48,7 +48,7 @@ public sealed class GitStagingService(IGitProcessRunner runner, IRepositoryGateP
         RunIndexWrite(repositoryPath, ["apply", "--cached", "--reverse", "--whitespace=nowarn", "-"], patch, ct);
 
     private Task RunIndexWrite(string repositoryPath, IReadOnlyList<string> args, string? stdin, CancellationToken ct) =>
-        gates.For(repositoryPath).RunIndexWriteAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunIndexWriteAsync(async token =>
         {
             using var activity = GitDeltaActivity.Source.StartActivity("git.stage");
             activity?.SetTag("git.command", args.Count > 0 ? args[0] : "");
@@ -62,5 +62,5 @@ public sealed class GitStagingService(IGitProcessRunner runner, IRepositoryGateP
             {
                 GitDeltaMeters.StageMs.Record(sw.Elapsed.TotalMilliseconds);
             }
-        }, ct);
+        }, ct), ct);
 }

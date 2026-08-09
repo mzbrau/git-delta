@@ -19,6 +19,18 @@ public interface IFileHistoryBrowseHost
 
     DiffOptions BuildDiffOptions();
 
+    /// <summary>
+    /// Shows the diff-pane loading overlay before a browse git fetch starts.
+    /// Must not clear existing rows so the previous diff remains visible under the spinner.
+    /// </summary>
+    Task BeginFileHistoryDiffLoadAsync();
+
+    /// <summary>
+    /// Clears the browse loading overlay when a load is cancelled or fails before present.
+    /// Callers must only invoke this for the still-current browse generation.
+    /// </summary>
+    Task EndFileHistoryDiffLoadAsync();
+
     /// <summary>Presents a browse-mode diff for <paramref name="path"/> without leaving the current pane.</summary>
     Task PresentFileHistoryDiffAsync(FilePath path, FileDiff diff, CancellationToken ct);
 

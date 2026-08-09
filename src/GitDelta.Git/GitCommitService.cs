@@ -28,7 +28,7 @@ public sealed class GitCommitService(IGitProcessRunner runner, IRepositoryGatePr
         args.Add("-F");
         args.Add("-");
 
-        return gates.For(repositoryPath).RunIndexWriteAsync(async token =>
+        return gates.WithGateAsync(repositoryPath, gate => gate.RunIndexWriteAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var options = new GitProcessOptions
@@ -40,22 +40,22 @@ public sealed class GitCommitService(IGitProcessRunner runner, IRepositoryGatePr
 
             await runner.RunAsync(repositoryPath, args, options, token).ConfigureAwait(false);
             GitDeltaMeters.CommitMs.Record(sw.Elapsed.TotalMilliseconds);
-        }, ct);
+        }, ct), ct);
     }
 
     public Task CherryPickAsync(string repositoryPath, string oid, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(oid);
-        return gates.For(repositoryPath).RunWorktreeWriteAsync(
+        return gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(
             token => runner.RunAsync(repositoryPath, ["cherry-pick", oid], options: null, token),
-            ct);
+            ct), ct);
     }
 
     public Task RevertAsync(string repositoryPath, string oid, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(oid);
-        return gates.For(repositoryPath).RunWorktreeWriteAsync(
+        return gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(
             token => runner.RunAsync(repositoryPath, ["revert", "--no-edit", oid], options: null, token),
-            ct);
+            ct), ct);
     }
 }

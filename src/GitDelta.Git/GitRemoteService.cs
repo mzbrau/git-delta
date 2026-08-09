@@ -17,7 +17,7 @@ public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGatePr
     private static readonly TimeSpan NetworkTimeout = TimeSpan.FromMinutes(5);
 
     public Task PushAsync(string repositoryPath, IProgress<string>? progress, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunNetworkAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunNetworkAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var options = new GitProcessOptions
@@ -28,10 +28,10 @@ public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGatePr
             };
             await runner.RunAsync(repositoryPath, ["push", "--progress"], options, token).ConfigureAwait(false);
             GitDeltaMeters.PushMs.Record(sw.Elapsed.TotalMilliseconds);
-        }, ct);
+        }, ct), ct);
 
     public Task ForcePushWithLeaseAsync(string repositoryPath, IProgress<string>? progress, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunNetworkAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunNetworkAsync(async token =>
         {
             var sw = Stopwatch.StartNew();
             var options = new GitProcessOptions
@@ -46,10 +46,10 @@ public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGatePr
                 options,
                 token).ConfigureAwait(false);
             GitDeltaMeters.PushMs.Record(sw.Elapsed.TotalMilliseconds);
-        }, ct);
+        }, ct), ct);
 
     public Task PullAsync(string repositoryPath, PullMode mode, IProgress<string>? progress, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async token =>
         {
             var args = new List<string> { "pull", "--progress" };
             args.Add(mode switch
@@ -69,13 +69,13 @@ public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGatePr
             };
             await runner.RunAsync(repositoryPath, args, options, token).ConfigureAwait(false);
             GitDeltaMeters.PullMs.Record(sw.Elapsed.TotalMilliseconds);
-        }, ct);
+        }, ct), ct);
 
     public Task<string?> GetRemoteUrlAsync(
         string repositoryPath,
         string remoteName = "origin",
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             try
             {
@@ -91,5 +91,5 @@ public sealed class GitRemoteService(IGitProcessRunner runner, IRepositoryGatePr
             {
                 return null;
             }
-        }, ct);
+        }, ct), ct);
 }

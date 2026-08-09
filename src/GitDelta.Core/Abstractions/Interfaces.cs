@@ -307,5 +307,14 @@ public interface IRepositoryGate
 
 public interface IRepositoryGateProvider
 {
+    /// <summary>
+    /// Resolves the gate for <paramref name="repositoryPath"/>. May run git synchronously —
+    /// prefer <see cref="ForAsync"/> from UI or other sync-context threads.
+    /// </summary>
     IRepositoryGate For(string repositoryPath);
+
+    /// <summary>
+    /// Asynchronously resolves the per-common-dir gate (awaits <c>rev-parse --git-common-dir</c> on cache miss).
+    /// </summary>
+    Task<IRepositoryGate> ForAsync(string repositoryPath, CancellationToken ct = default);
 }
