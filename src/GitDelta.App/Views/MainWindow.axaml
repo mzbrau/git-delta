@@ -19,6 +19,37 @@
         Background="{DynamicResource ForgeBackgroundBrush}">
 
   <Panel>
+    <!-- Quick-open overlay (Ctrl+T) -->
+    <Border ZIndex="1000"
+            Background="#99000000"
+            IsVisible="{Binding QuickOpen.IsOpen}"
+            IsHitTestVisible="{Binding QuickOpen.IsOpen}">
+      <Border Width="560" MaxWidth="720" MaxHeight="420"
+              VerticalAlignment="Top" HorizontalAlignment="Center" Margin="0,80,0,0"
+              Background="{DynamicResource ForgeSurfaceContainerBrush}"
+              BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1"
+              CornerRadius="8" Padding="12" BoxShadow="0 8 24 0 #40000000">
+        <DockPanel>
+          <TextBox x:Name="QuickOpenQueryBox" DockPanel.Dock="Top" PlaceholderText="Open file…"
+                   Text="{Binding QuickOpen.Query}"
+                   Margin="0,0,0,8"
+                   KeyDown="OnQuickOpenKeyDown" />
+          <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" Height="3" Margin="0,0,0,8"
+                       IsVisible="{Binding QuickOpen.IsLoading}" />
+          <ListBox ItemsSource="{Binding QuickOpen.Results}"
+                   SelectedItem="{Binding QuickOpen.SelectedResult}"
+                   DoubleTapped="OnQuickOpenResultActivated"
+                   MaxHeight="320">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="core:FilePath">
+                <TextBlock Text="{Binding Value}" Classes="MonoPath" FontSize="12" Margin="4,2" />
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Border>
+    </Border>
+
     <!-- Empty repository state -->
     <Border IsVisible="{Binding WorkingCopy.HasRepository, Converter={x:Static conv:ForgeConverters.InvertBool}}"
             Background="{DynamicResource ForgeBackgroundBrush}">
@@ -914,6 +945,33 @@
                 </Button>
               </StackPanel>
 
+              <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8" IsVisible="{Binding WorkingCopy.HasRecentViewedFiles}">
+                <DockPanel DockPanel.Dock="Top" Margin="8,0,8,4">
+                  <Button DockPanel.Dock="Right" Classes="Link" Content="Clear"
+                          Command="{Binding WorkingCopy.ClearRecentViewedFilesCommand}" />
+                  <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnToggleRecentViewedFiles">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <icons:MaterialIcon Kind="{Binding WorkingCopy.RecentViewedFilesExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                          Width="14" Height="14" />
+                      <TextBlock Text="RECENT FILES" Classes="SectionLabel" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Button>
+                </DockPanel>
+                <ListBox ItemsSource="{Binding WorkingCopy.RecentViewedFiles.Items}"
+                         SelectedItem="{Binding WorkingCopy.SelectedFile}"
+                         SelectionMode="Single"
+                         Classes="FileList"
+                         MaxHeight="140"
+                         IsVisible="{Binding WorkingCopy.RecentViewedFilesExpanded}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:FileItemViewModel">
+                      <TextBlock Text="{Binding Path.Value}" Classes="MonoPath" FontSize="11" TextTrimming="CharacterEllipsis"
+                                 Margin="8,4" ToolTip.Tip="{Binding Path.Value}" />
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </DockPanel>
+
               <Grid RowDefinitions="*,4,*,Auto">
                 <!-- Staged -->
                 <DockPanel Grid.Row="0" MinHeight="80">
@@ -1265,6 +1323,32 @@
                     <TextBlock Text="Conversation" FontWeight="{Binding Review.IsConversationSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
                   </StackPanel>
                 </Button>
+                <DockPanel Margin="8,0,8,8" IsVisible="{Binding Review.HasRecentViewedFiles}">
+                  <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+                    <Button DockPanel.Dock="Right" Classes="Link" Content="Clear"
+                            Command="{Binding Review.ClearRecentViewedFilesCommand}" />
+                    <Button Classes="Ghost" Padding="0" HorizontalAlignment="Left" Click="OnTogglePrRecentViewedFiles">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <icons:MaterialIcon Kind="{Binding Review.RecentViewedFilesExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}"
+                                            Width="14" Height="14" />
+                        <TextBlock Text="RECENT FILES" Classes="SectionLabel" VerticalAlignment="Center" />
+                      </StackPanel>
+                    </Button>
+                  </DockPanel>
+                  <ListBox ItemsSource="{Binding Review.RecentViewedFiles.Items}"
+                           SelectedItem="{Binding Review.SelectedFile}"
+                           SelectionMode="Single"
+                           Classes="FileList"
+                           MaxHeight="140"
+                           IsVisible="{Binding Review.RecentViewedFilesExpanded}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:FileItemViewModel">
+                        <TextBlock Text="{Binding Path.Value}" Classes="MonoPath" FontSize="11" TextTrimming="CharacterEllipsis"
+                                   Margin="8,4" ToolTip.Tip="{Binding Path.Value}" />
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                </DockPanel>
                 <ListBox x:Name="PrFileList"
                          ItemsSource="{Binding Review.PrFileEntries}"
                          SelectedItem="{Binding Review.SelectedPrFileEntry}"
@@ -1298,6 +1382,34 @@
         <!-- Diff pane (File Status / Stash) -->
         <DockPanel Grid.Column="4" Background="{DynamicResource ForgeSurfaceContainerLowestBrush}"
                    IsVisible="{Binding ShowFileStatusPane}">
+          <Border DockPanel.Dock="Top" Padding="12,8"
+                  Background="{DynamicResource ForgeBannerBrush}"
+                  IsVisible="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode}">
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Classes="Ghost" Content="Exit History Mode" FontSize="11" Padding="8,4"
+                      Command="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.ExitFileHistoryBrowseCommand}" />
+              <StackPanel Spacing="4">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Classes="Ghost" Content="← Back" FontSize="11" Padding="6,2"
+                          Command="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.NavigateBackCommand}"
+                          IsVisible="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.CanNavigateBack}" />
+                  <TextBlock Text="History Mode" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.BreadcrumbTrail}"
+                           FontSize="11" Opacity="0.8" TextTrimming="CharacterEllipsis"
+                           IsVisible="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.BreadcrumbTrail, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <RadioButton Content="In commit" GroupName="WcFileHistoryCompare"
+                               IsChecked="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.IsCompareInCommit}" />
+                  <RadioButton Content="vs Current" GroupName="WcFileHistoryCompare"
+                               IsChecked="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.IsCompareVsCurrent}" />
+                  <TextBlock Text="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.SelectedShortOid}"
+                             FontFamily="{DynamicResource ForgeCodeFont}" FontSize="11" Opacity="0.7"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </StackPanel>
+            </DockPanel>
+          </Border>
           <Border DockPanel.Dock="Top" MinHeight="52" Padding="12,6"
                   Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
@@ -1762,7 +1874,7 @@
                                        CanDiscardLines="{Binding WorkingCopy.CanDiscardLines}"
                                        LeftSyntaxTokens="{Binding WorkingCopy.LeftSyntaxTokens}"
                                        RightSyntaxTokens="{Binding WorkingCopy.RightSyntaxTokens}"
-                                       CanAddLineComments="True"
+                                       CanAddLineComments="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode, Converter={x:Static conv:ForgeConverters.InvertBool}}"
                                        AddLineCommentCommand="{Binding WorkingCopy.PendingReview.BeginLineCommentCommand}"
                                        FontSize="{Binding FontSize}"
                                        IsVisible="{Binding WorkingCopy.ShowDiffViewer}" />
@@ -1771,7 +1883,7 @@
                                                 EmptyMessage="{Binding WorkingCopy.MarkdownPreviewEmptyMessage}"
                                                 Annotations="{Binding WorkingCopy.PendingReview.DiffAnnotations}"
                                                 SelectedAnnotation="{Binding WorkingCopy.PendingReview.SelectedAnnotation, Mode=TwoWay}"
-                                                CanAddLineComments="True"
+                                                CanAddLineComments="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode, Converter={x:Static conv:ForgeConverters.InvertBool}}"
                                                 AddLineCommentCommand="{Binding WorkingCopy.PendingReview.BeginLineCommentCommand}"
                                                 IsVisible="{Binding WorkingCopy.ShowMarkdownPreviewPane}" />
 
@@ -1893,6 +2005,16 @@
                           </StackPanel>
                         </Button>
                         <Button Classes="Ghost" Padding="8,4" FontSize="11"
+                                Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsAiHistoryTabSelected}"
+                                Command="{Binding WorkingCopy.PendingReview.SelectAiHistoryTabCommand}">
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <icons:MaterialIcon Kind="History" Width="13" Height="13"
+                                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                            <TextBlock Text="History"
+                                       FontWeight="{Binding WorkingCopy.PendingReview.IsAiHistoryTabSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                          </StackPanel>
+                        </Button>
+                        <Button Classes="Ghost" Padding="8,4" FontSize="11"
                                 Classes.FileListSelected="{Binding WorkingCopy.PendingReview.IsAiChatTabSelected}"
                                 Command="{Binding WorkingCopy.PendingReview.SelectAiChatTabCommand}">
                           <StackPanel Orientation="Horizontal" Spacing="4">
@@ -1948,45 +2070,6 @@
                           </StackPanel>
                         </Border>
 
-                        <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}">
-                          <StackPanel Spacing="6">
-                            <DockPanel>
-                              <Button DockPanel.Dock="Right" Classes="Ghost" Content="Load" FontSize="10" Padding="6,2"
-                                      Command="{Binding WorkingCopy.PendingReview.LoadFileHistoryCommand}"
-                                      IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsNotLoaded}" />
-                              <TextBlock Text="FILE HISTORY" Classes="PanelHeader" Opacity="0.7" VerticalAlignment="Center" />
-                            </DockPanel>
-                            <ProgressBar IsIndeterminate="True" Height="3"
-                                         IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsLoading}" />
-                            <TextBlock Text="{Binding WorkingCopy.PendingReview.FileHistory.ErrorMessage}" FontSize="11"
-                                       Foreground="{DynamicResource ForgeStatusDeletedBrush}" TextWrapping="Wrap"
-                                       IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsFailed}" />
-                            <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.FileHistory.Entries}"
-                                          IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsReady}">
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:FileHistoryEntry">
-                                  <DockPanel Margin="0,3" ToolTip.Tip="{Binding AuthorName}">
-                                    <TextBlock DockPanel.Dock="Right" Text="{Binding ShortOid}"
-                                               FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.6" />
-                                    <StackPanel Spacing="1">
-                                      <SelectableTextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                      <StackPanel Orientation="Horizontal" Spacing="4">
-                                        <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
-                                                   FontSize="10" Opacity="0.55" />
-                                        <Border Classes="Chip" IsVisible="{Binding IsCreated}">
-                                          <TextBlock Text="Created" FontSize="9" />
-                                        </Border>
-                                        <Border Classes="Chip" IsVisible="{Binding IsCurrent}">
-                                          <TextBlock Text="Current" FontSize="9" />
-                                        </Border>
-                                      </StackPanel>
-                                    </StackPanel>
-                                  </DockPanel>
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                          </StackPanel>
-                        </Border>
                       </StackPanel>
 
                       <StackPanel Spacing="8" IsVisible="{Binding WorkingCopy.PendingReview.HasAiFileBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
@@ -2007,6 +2090,91 @@
                           </StackPanel>
                         </StackPanel>
                       </StackPanel>
+                    </StackPanel>
+                  </ScrollViewer>
+
+                  <!-- History tab -->
+                  <ScrollViewer IsVisible="{Binding WorkingCopy.PendingReview.IsAiHistoryTabSelected}">
+                    <StackPanel Spacing="10" Margin="10">
+                      <TextBlock Text="Select a file to view its history." FontSize="12" Opacity="0.6"
+                                 IsVisible="{Binding WorkingCopy.PendingReview.FileHistory, Converter={x:Static conv:ForgeConverters.IsNull}}" />
+                      <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                              IsVisible="{Binding WorkingCopy.PendingReview.FileHistory, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                        <StackPanel Spacing="6">
+                          <DockPanel>
+                            <Button DockPanel.Dock="Right" Classes="Ghost" Content="Load" FontSize="10" Padding="6,2"
+                                    Command="{Binding WorkingCopy.PendingReview.LoadFileHistoryCommand}"
+                                    IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsNotLoaded}" />
+                            <TextBlock Text="FILE HISTORY" Classes="PanelHeader" Opacity="0.7" VerticalAlignment="Center" />
+                          </DockPanel>
+                          <ProgressBar IsIndeterminate="True" Height="3"
+                                       IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsLoading}" />
+                          <TextBlock Text="{Binding WorkingCopy.PendingReview.FileHistory.ErrorMessage}" FontSize="11"
+                                     Foreground="{DynamicResource ForgeStatusDeletedBrush}" TextWrapping="Wrap"
+                                     IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsFailed}" />
+                          <ItemsControl ItemsSource="{Binding WorkingCopy.PendingReview.FileHistory.Entries}"
+                                        IsVisible="{Binding WorkingCopy.PendingReview.FileHistory.IsReady}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:FileHistoryItemViewModel">
+                                <Border Margin="0,3" Padding="6,4" CornerRadius="4"
+                                        Background="{Binding IsSelected, Converter={x:Static conv:ForgeConverters.SelectedRowBrush}}"
+                                        Cursor="Hand">
+                                  <StackPanel Spacing="4">
+                                    <DockPanel>
+                                      <Button DockPanel.Dock="Left" Classes="IconOnly" Width="20" Height="20" Padding="0"
+                                              IsVisible="{Binding CanExpand}"
+                                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.PendingReview.ToggleFileHistoryItemExpandedCommand}"
+                                              CommandParameter="{Binding}">
+                                        <icons:MaterialIcon Width="12" Height="12"
+                                                            Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}" />
+                                      </Button>
+                                      <Button Classes="Ghost" Padding="4,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.PendingReview.SelectFileHistoryItemCommand}"
+                                              CommandParameter="{Binding}">
+                                        <DockPanel>
+                                          <TextBlock DockPanel.Dock="Right" Text="{Binding ShortOid}"
+                                                     FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.6" />
+                                          <StackPanel Spacing="1">
+                                            <TextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                              <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
+                                                         FontSize="10" Opacity="0.55" />
+                                              <Border Classes="Chip" IsVisible="{Binding IsCreated}">
+                                                <TextBlock Text="Created" FontSize="9" />
+                                              </Border>
+                                              <Border Classes="Chip" IsVisible="{Binding IsCurrent}">
+                                                <TextBlock Text="Current" FontSize="9" />
+                                              </Border>
+                                            </StackPanel>
+                                          </StackPanel>
+                                        </DockPanel>
+                                      </Button>
+                                    </DockPanel>
+                                    <StackPanel Margin="24,0,0,0" Spacing="2" IsVisible="{Binding IsExpanded}">
+                                      <ProgressBar IsIndeterminate="True" Height="2" IsVisible="{Binding IsFilesLoading}" />
+                                      <TextBlock Text="{Binding FilesErrorMessage}" FontSize="10"
+                                                 Foreground="{DynamicResource ForgeStatusDeletedBrush}"
+                                                 IsVisible="{Binding IsFilesFailed}" />
+                                      <ItemsControl ItemsSource="{Binding CommitFiles}" IsVisible="{Binding IsFilesReady}">
+                                        <ItemsControl.ItemTemplate>
+                                          <DataTemplate x:DataType="vm:FileHistoryCommitFileItem">
+                                            <Button Classes="Ghost" Padding="4,2" FontSize="10" HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).WorkingCopy.PendingReview.SelectFileHistoryCommitFileCommand}"
+                                                    CommandParameter="{Binding}">
+                                              <TextBlock Text="{Binding DisplayPath}" Classes="MonoPath" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                            </Button>
+                                          </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                      </ItemsControl>
+                                    </StackPanel>
+                                  </StackPanel>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+                      </Border>
                     </StackPanel>
                   </ScrollViewer>
 
@@ -2070,6 +2238,34 @@
                       IsVisible="{Binding Review.HasAiRun}" />
               <TextBlock Text="{Binding Review.HeadMovedBanner}" TextWrapping="Wrap" FontSize="12"
                          VerticalAlignment="Center" />
+            </DockPanel>
+          </Border>
+          <Border DockPanel.Dock="Top" Padding="12,8"
+                  Background="{DynamicResource ForgeBannerBrush}"
+                  IsVisible="{Binding Review.FileHistoryBrowse.IsFileHistoryBrowseMode}">
+            <DockPanel>
+              <Button DockPanel.Dock="Right" Classes="Ghost" Content="Exit History Mode" FontSize="11" Padding="8,4"
+                      Command="{Binding Review.FileHistoryBrowse.ExitFileHistoryBrowseCommand}" />
+              <StackPanel Spacing="4">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <Button Classes="Ghost" Content="← Back" FontSize="11" Padding="6,2"
+                          Command="{Binding Review.FileHistoryBrowse.NavigateBackCommand}"
+                          IsVisible="{Binding Review.FileHistoryBrowse.CanNavigateBack}" />
+                  <TextBlock Text="History Mode" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="{Binding Review.FileHistoryBrowse.BreadcrumbTrail}"
+                           FontSize="11" Opacity="0.8" TextTrimming="CharacterEllipsis"
+                           IsVisible="{Binding Review.FileHistoryBrowse.BreadcrumbTrail, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                  <RadioButton Content="In commit" GroupName="PrFileHistoryCompare"
+                               IsChecked="{Binding Review.FileHistoryBrowse.IsCompareInCommit}" />
+                  <RadioButton Content="vs Current" GroupName="PrFileHistoryCompare"
+                               IsChecked="{Binding Review.FileHistoryBrowse.IsCompareVsCurrent}" />
+                  <TextBlock Text="{Binding Review.FileHistoryBrowse.SelectedShortOid}"
+                             FontFamily="{DynamicResource ForgeCodeFont}" FontSize="11" Opacity="0.7"
+                             VerticalAlignment="Center" />
+                </StackPanel>
+              </StackPanel>
             </DockPanel>
           </Border>
           <Border DockPanel.Dock="Top" MinHeight="52" Padding="12,6"
@@ -2614,7 +2810,7 @@
                                      SelectedAnnotation="{Binding Review.SelectedAnnotation, Mode=TwoWay}"
                                      LeftSyntaxTokens="{Binding Review.LeftSyntaxTokens}"
                                      RightSyntaxTokens="{Binding Review.RightSyntaxTokens}"
-                                     CanAddLineComments="True"
+                                     CanAddLineComments="{Binding Review.FileHistoryBrowse.IsFileHistoryBrowseMode, Converter={x:Static conv:ForgeConverters.InvertBool}}"
                                      AddLineCommentCommand="{Binding Review.BeginLineCommentCommand}"
                                      CanStageLines="False"
                                      CanUnstageLines="False"
@@ -2626,7 +2822,7 @@
                                               EmptyMessage="{Binding Review.MarkdownPreviewEmptyMessage}"
                                               Annotations="{Binding Review.DiffAnnotations}"
                                               SelectedAnnotation="{Binding Review.SelectedAnnotation, Mode=TwoWay}"
-                                              CanAddLineComments="True"
+                                              CanAddLineComments="{Binding Review.FileHistoryBrowse.IsFileHistoryBrowseMode, Converter={x:Static conv:ForgeConverters.InvertBool}}"
                                               AddLineCommentCommand="{Binding Review.BeginLineCommentCommand}"
                                               IsVisible="{Binding Review.ShowMarkdownPreviewPane}" />
                 <Canvas IsVisible="{Binding Review.HasDraftCommentAnchor}">
@@ -2848,6 +3044,16 @@
                           </StackPanel>
                         </Button>
                         <Button Classes="Ghost" Padding="8,4" FontSize="11"
+                                Classes.FileListSelected="{Binding Review.IsAiHistoryTabSelected}"
+                                Command="{Binding Review.SelectAiHistoryTabCommand}">
+                          <StackPanel Orientation="Horizontal" Spacing="4">
+                            <icons:MaterialIcon Kind="History" Width="13" Height="13"
+                                                Foreground="{DynamicResource ForgeAiAccentBrush}" />
+                            <TextBlock Text="History"
+                                       FontWeight="{Binding Review.IsAiHistoryTabSelected, Converter={x:Static conv:ForgeConverters.SelectedFontWeight}}" />
+                          </StackPanel>
+                        </Button>
+                        <Button Classes="Ghost" Padding="8,4" FontSize="11"
                                 Classes.FileListSelected="{Binding Review.IsAiChatTabSelected}"
                                 Command="{Binding Review.SelectAiChatTabCommand}">
                           <StackPanel Orientation="Horizontal" Spacing="4">
@@ -2913,45 +3119,6 @@
                           </StackPanel>
                         </Border>
 
-                        <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}">
-                          <StackPanel Spacing="6">
-                            <DockPanel>
-                              <Button DockPanel.Dock="Right" Classes="Ghost" Content="Load" FontSize="10" Padding="6,2"
-                                      Command="{Binding Review.LoadFileHistoryCommand}"
-                                      IsVisible="{Binding Review.FileHistory.IsNotLoaded}" />
-                              <TextBlock Text="FILE HISTORY" Classes="PanelHeader" Opacity="0.7" VerticalAlignment="Center" />
-                            </DockPanel>
-                            <ProgressBar IsIndeterminate="True" Height="3"
-                                         IsVisible="{Binding Review.FileHistory.IsLoading}" />
-                            <TextBlock Text="{Binding Review.FileHistory.ErrorMessage}" FontSize="11"
-                                       Foreground="{DynamicResource ForgeStatusDeletedBrush}" TextWrapping="Wrap"
-                                       IsVisible="{Binding Review.FileHistory.IsFailed}" />
-                            <ItemsControl ItemsSource="{Binding Review.FileHistory.Entries}"
-                                          IsVisible="{Binding Review.FileHistory.IsReady}">
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="vm:FileHistoryEntry">
-                                  <DockPanel Margin="0,3" ToolTip.Tip="{Binding AuthorName}">
-                                    <TextBlock DockPanel.Dock="Right" Text="{Binding ShortOid}"
-                                               FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.6" />
-                                    <StackPanel Spacing="1">
-                                      <SelectableTextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                      <StackPanel Orientation="Horizontal" Spacing="4">
-                                        <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
-                                                   FontSize="10" Opacity="0.55" />
-                                        <Border Classes="Chip" IsVisible="{Binding IsCreated}">
-                                          <TextBlock Text="Created" FontSize="9" />
-                                        </Border>
-                                        <Border Classes="Chip" IsVisible="{Binding IsCurrent}">
-                                          <TextBlock Text="Current" FontSize="9" />
-                                        </Border>
-                                      </StackPanel>
-                                    </StackPanel>
-                                  </DockPanel>
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                          </StackPanel>
-                        </Border>
                       </StackPanel>
 
                       <StackPanel Spacing="8" IsVisible="{Binding Review.HasAiFileBriefing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
@@ -2972,6 +3139,91 @@
                           </StackPanel>
                         </StackPanel>
                       </StackPanel>
+                    </StackPanel>
+                  </ScrollViewer>
+
+                  <!-- History tab -->
+                  <ScrollViewer IsVisible="{Binding Review.IsAiHistoryTabSelected}">
+                    <StackPanel Spacing="10" Margin="10">
+                      <TextBlock Text="Select a file to view its history." FontSize="12" Opacity="0.6"
+                                 IsVisible="{Binding Review.FileHistory, Converter={x:Static conv:ForgeConverters.IsNull}}" />
+                      <Border CornerRadius="8" Padding="10" Background="{DynamicResource ForgeSurfaceContainerLowBrush}"
+                              IsVisible="{Binding Review.FileHistory, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
+                        <StackPanel Spacing="6">
+                          <DockPanel>
+                            <Button DockPanel.Dock="Right" Classes="Ghost" Content="Load" FontSize="10" Padding="6,2"
+                                    Command="{Binding Review.LoadFileHistoryCommand}"
+                                    IsVisible="{Binding Review.FileHistory.IsNotLoaded}" />
+                            <TextBlock Text="FILE HISTORY" Classes="PanelHeader" Opacity="0.7" VerticalAlignment="Center" />
+                          </DockPanel>
+                          <ProgressBar IsIndeterminate="True" Height="3"
+                                       IsVisible="{Binding Review.FileHistory.IsLoading}" />
+                          <TextBlock Text="{Binding Review.FileHistory.ErrorMessage}" FontSize="11"
+                                     Foreground="{DynamicResource ForgeStatusDeletedBrush}" TextWrapping="Wrap"
+                                     IsVisible="{Binding Review.FileHistory.IsFailed}" />
+                          <ItemsControl ItemsSource="{Binding Review.FileHistory.Entries}"
+                                        IsVisible="{Binding Review.FileHistory.IsReady}">
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate x:DataType="vm:FileHistoryItemViewModel">
+                                <Border Margin="0,3" Padding="6,4" CornerRadius="4"
+                                        Background="{Binding IsSelected, Converter={x:Static conv:ForgeConverters.SelectedRowBrush}}"
+                                        Cursor="Hand">
+                                  <StackPanel Spacing="4">
+                                    <DockPanel>
+                                      <Button DockPanel.Dock="Left" Classes="IconOnly" Width="20" Height="20" Padding="0"
+                                              IsVisible="{Binding CanExpand}"
+                                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.ToggleFileHistoryItemExpandedCommand}"
+                                              CommandParameter="{Binding}">
+                                        <icons:MaterialIcon Width="12" Height="12"
+                                                            Kind="{Binding IsExpanded, Converter={x:Static conv:ForgeConverters.ChevronKind}}" />
+                                      </Button>
+                                      <Button Classes="Ghost" Padding="4,0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                              Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.SelectFileHistoryItemCommand}"
+                                              CommandParameter="{Binding}">
+                                        <DockPanel>
+                                          <TextBlock DockPanel.Dock="Right" Text="{Binding ShortOid}"
+                                                     FontFamily="{DynamicResource ForgeCodeFont}" FontSize="10" Opacity="0.6" />
+                                          <StackPanel Spacing="1">
+                                            <TextBlock Text="{Binding Subject}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Orientation="Horizontal" Spacing="4">
+                                              <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
+                                                         FontSize="10" Opacity="0.55" />
+                                              <Border Classes="Chip" IsVisible="{Binding IsCreated}">
+                                                <TextBlock Text="Created" FontSize="9" />
+                                              </Border>
+                                              <Border Classes="Chip" IsVisible="{Binding IsCurrent}">
+                                                <TextBlock Text="Current" FontSize="9" />
+                                              </Border>
+                                            </StackPanel>
+                                          </StackPanel>
+                                        </DockPanel>
+                                      </Button>
+                                    </DockPanel>
+                                    <StackPanel Margin="24,0,0,0" Spacing="2" IsVisible="{Binding IsExpanded}">
+                                      <ProgressBar IsIndeterminate="True" Height="2" IsVisible="{Binding IsFilesLoading}" />
+                                      <TextBlock Text="{Binding FilesErrorMessage}" FontSize="10"
+                                                 Foreground="{DynamicResource ForgeStatusDeletedBrush}"
+                                                 IsVisible="{Binding IsFilesFailed}" />
+                                      <ItemsControl ItemsSource="{Binding CommitFiles}" IsVisible="{Binding IsFilesReady}">
+                                        <ItemsControl.ItemTemplate>
+                                          <DataTemplate x:DataType="vm:FileHistoryCommitFileItem">
+                                            <Button Classes="Ghost" Padding="4,2" FontSize="10" HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).Review.SelectFileHistoryCommitFileCommand}"
+                                                    CommandParameter="{Binding}">
+                                              <TextBlock Text="{Binding DisplayPath}" Classes="MonoPath" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                            </Button>
+                                          </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                      </ItemsControl>
+                                    </StackPanel>
+                                  </StackPanel>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
+                      </Border>
                     </StackPanel>
                   </ScrollViewer>
 
@@ -4774,7 +5026,7 @@
               <TextBox Classes="Forge" Text="{Binding WorkingCopy.TagRelease.NewTagName}"
                        PlaceholderText="e.g. v1.2.0" />
               <TextBox Classes="Forge" Text="{Binding WorkingCopy.TagRelease.TagMessage}"
-                       PlaceholderText="Tag message (required)"
+                       PlaceholderText="Tag message (optional)"
                        AcceptsReturn="True"
                        MinHeight="56"
                        TextWrapping="Wrap" />

@@ -6,7 +6,7 @@ using GitDelta.Git.Internal;
 
 namespace GitDelta.Git;
 
-/// <summary>List tags, create annotated tags, and push tags to origin.</summary>
+/// <summary>List tags, create annotated or lightweight tags, and push tags to origin.</summary>
 public sealed class GitTagService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitTagService
 {
     private const string FieldSeparator = "\u0001";
@@ -33,16 +33,19 @@ public sealed class GitTagService(IGitProcessRunner runner, IRepositoryGateProvi
     public Task CreateAnnotatedTagAsync(
         string repositoryPath,
         string name,
-        string message,
+        string? message,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
-        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+
+        string[] args = string.IsNullOrWhiteSpace(message)
+            ? ["tag", "--", name]
+            : ["tag", "-a", "-m", message, "--", name];
 
         return gates.For(repositoryPath).RunIndexWriteAsync(
             token => runner.RunAsync(
                 repositoryPath,
-                ["tag", "-a", "-m", message, "--", name],
+                args,
                 options: null,
                 token),
             ct);

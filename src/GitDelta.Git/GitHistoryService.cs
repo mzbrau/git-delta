@@ -121,6 +121,47 @@ public sealed class GitHistoryService(
             return commits.Count > 0 ? commits[0] : null;
         }, ct);
 
+    public Task<IReadOnlyList<FilePath>> ListTrackedFilesAsync(
+        string repositoryPath,
+        CancellationToken ct = default) =>
+        gates.For(repositoryPath).RunReadAsync(async token =>
+        {
+            var result = await runner.RunAsync(
+                repositoryPath,
+                ["ls-files", "-z"],
+                options: null,
+                token).ConfigureAwait(false);
+
+            if (string.IsNullOrEmpty(result.Stdout))
+                return (IReadOnlyList<FilePath>)Array.Empty<FilePath>();
+
+            var list = new List<FilePath>();
+            var span = result.Stdout.AsSpan();
+            while (!span.IsEmpty)
+            {
+                var idx = span.IndexOf('\0');
+                ReadOnlySpan<char> part;
+                if (idx < 0)
+                {
+                    part = span;
+                    span = default;
+                }
+                else
+                {
+                    part = span[..idx];
+                    span = span[(idx + 1)..];
+                }
+
+                if (part.IsEmpty)
+                    continue;
+
+                list.Add(FilePath.From(part.ToString()));
+            }
+
+            list.Sort((a, b) => string.CompareOrdinal(a.Value, b.Value));
+            return (IReadOnlyList<FilePath>)list;
+        }, ct);
+
     public Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetCommitFilesAsync(
         string repositoryPath,
         string oid,

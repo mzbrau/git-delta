@@ -40,12 +40,15 @@ public partial class MainWindowViewModel : ObservableObject
         IAccountService accounts,
         IRepositoryLocator repositoryLocator,
         IConfirmDialog confirm,
+        IGitHistoryService history,
         IAIReviewService? ai = null)
     {
         WorkingCopy = workingCopy;
         Review = review;
         Diagnostics = diagnostics;
         GitConsole = gitConsole;
+        QuickOpen = new QuickOpenViewModel(history);
+        QuickOpen.FileChosen += OnQuickOpenFileChosenAsync;
         _settings = settings;
         _notifications = notifications;
         _accounts = accounts;
@@ -138,6 +141,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     public WorkingCopyViewModel WorkingCopy { get; }
     public ReviewViewModel Review { get; }
+    public QuickOpenViewModel QuickOpen { get; }
     public DiagnosticsOverlayViewModel Diagnostics { get; }
     public GitConsoleViewModel GitConsole { get; }
     public NotificationService Notifications => _notifications;
@@ -410,6 +414,34 @@ public partial class MainWindowViewModel : ObservableObject
             return;
 
         await OpenRepositoryPathAsync(path).ConfigureAwait(true);
+    }
+
+    [RelayCommand]
+    private async Task ShowQuickOpenAsync()
+    {
+        var repo = WorkingCopy.RepositoryPath;
+        if (string.IsNullOrWhiteSpace(repo))
+            return;
+        await QuickOpen.ShowAsync(repo).ConfigureAwait(true);
+    }
+
+    private async Task OnQuickOpenFileChosenAsync(FilePath path)
+    {
+        if (ShowPullRequestPane)
+            await Review.OpenViewedFileAsync(path).ConfigureAwait(true);
+        else
+            await WorkingCopy.OpenViewedFileAsync(path).ConfigureAwait(true);
+
+        if (ShowPullRequestPane)
+        {
+            Review.ShowAiSidePanel = true;
+            Review.AiSidePanelTab = AiSidePanelTab.History;
+        }
+        else
+        {
+            WorkingCopy.PendingReview.ShowAiSidePanel = true;
+            WorkingCopy.PendingReview.AiSidePanelTab = AiSidePanelTab.History;
+        }
     }
 
     [RelayCommand]

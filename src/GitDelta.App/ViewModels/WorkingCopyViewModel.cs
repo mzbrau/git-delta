@@ -20,7 +20,7 @@ using GitDelta.Diff;
 
 namespace GitDelta.App.ViewModels;
 
-public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesReviewHost
+public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesReviewHost, IFileHistoryBrowseHost
 {
     private readonly IGitStatusService _statusService;
     private readonly IGitDiffService _diffService;
@@ -178,6 +178,9 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     /// <summary>PR-parity AI review + local-only comments surface for File Status (pending changes).</summary>
     public PendingChangesReviewViewModel PendingReview { get; }
 
+    /// <summary>Session-only MRU of files opened outside staged/unstaged/conflicted lists.</summary>
+    public RecentViewedFilesStore RecentViewedFiles { get; } = new();
+
     /// <summary>Interactive rebase wizard (shown as an in-app overlay).</summary>
     public RebaseWizardViewModel RebaseWizard { get; }
 
@@ -192,7 +195,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             Task.FromResult<IReadOnlyList<TagInfo>>([]);
 
         public Task CreateAnnotatedTagAsync(
-            string repositoryPath, string name, string message, CancellationToken ct = default) =>
+            string repositoryPath, string name, string? message, CancellationToken ct = default) =>
             Task.FromException(new InvalidOperationException("Tag service is not available."));
 
         public Task PushTagAsync(
@@ -276,6 +279,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [ObservableProperty] private int _selectedRemovedLines;
     [ObservableProperty] private bool _stagedExpanded = true;
     [ObservableProperty] private bool _unstagedExpanded = true;
+    [ObservableProperty] private bool _recentViewedFilesExpanded = true;
     [ObservableProperty] private bool _workspaceExpanded = true;
     [ObservableProperty] private bool _branchesExpanded;
     [ObservableProperty] private BranchInfo? _selectedSidebarBranch;
@@ -408,6 +412,16 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
 
     IReadOnlyList<FileItemViewModel> IPendingChangesReviewHost.PendingFiles => BuildAllPendingFiles();
 
+    RecentViewedFilesStore IPendingChangesReviewHost.RecentViewedFiles => RecentViewedFiles;
+
+    IReadOnlySet<string> IPendingChangesReviewHost.ChangeListPaths => BuildChangeListPathSet();
+
+    FilePath? IFileHistoryBrowseHost.BrowseSubjectPath => SelectedFile?.Path;
+
+    CommitId? IFileHistoryBrowseHost.CurrentRevision => null;
+
+    DiffOptions IFileHistoryBrowseHost.BuildDiffOptions() => BuildDiffOptions();
+
     private static string NormalizeRepositoryKey(string path)
     {
         var full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -425,6 +439,249 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         foreach (var file in _allConflicted)
             if (seen.Add(file.Path.Value)) result.Add(file);
         return result;
+    }
+
+    private HashSet<string> BuildChangeListPathSet()
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in _allStaged)
+            set.Add(file.Path.Value);
+        foreach (var file in _allUnstaged)
+            set.Add(file.Path.Value);
+        foreach (var file in _allConflicted)
+            set.Add(file.Path.Value);
+        return set;
+    }
+
+    async Task IPendingChangesReviewHost.OpenViewedFileAsync(FilePath path, CancellationToken ct) =>
+        await OpenViewedFileAsync(path, ct).ConfigureAwait(true);
+
+    /// <summary>Opens a clean (or out-of-list) file in the diff viewer and records it in Recent Files.</summary>
+    public async Task OpenViewedFileAsync(FilePath path, CancellationToken ct = default)
+    {
+        if (_repoPath is null)
+            return;
+
+        if (WorkspaceMode != WorkspaceMode.FileStatus)
+            WorkspaceMode = WorkspaceMode.FileStatus;
+
+        var changePaths = BuildChangeListPathSet();
+        if (changePaths.Contains(path.Value))
+        {
+            await ((IPendingChangesReviewHost)this).SelectFileAsync(path).ConfigureAwait(true);
+            return;
+        }
+
+        var file = RecentViewedFiles.Remember(path, changePaths);
+        OnPropertyChanged(nameof(HasRecentViewedFiles));
+        SelectedFile = file;
+        await LoadCleanFileDiffAsync(file, ct).ConfigureAwait(true);
+    }
+
+    public bool HasRecentViewedFiles => RecentViewedFiles.HasItems;
+
+    [RelayCommand]
+    private void ClearRecentViewedFiles()
+    {
+        var clearSelection = SelectedFile is { } sel
+            && RecentViewedFiles.Find(sel.Path.Value) is not null
+            && !_allStaged.Any(f => string.Equals(f.Path.Value, sel.Path.Value, StringComparison.Ordinal))
+            && !_allUnstaged.Any(f => string.Equals(f.Path.Value, sel.Path.Value, StringComparison.Ordinal))
+            && !_allConflicted.Any(f => string.Equals(f.Path.Value, sel.Path.Value, StringComparison.Ordinal));
+
+        RecentViewedFiles.Clear();
+        OnPropertyChanged(nameof(HasRecentViewedFiles));
+        if (clearSelection)
+            SelectedFile = null;
+    }
+
+    async Task IFileHistoryBrowseHost.PresentFileHistoryDiffAsync(FilePath path, FileDiff diff, CancellationToken ct)
+    {
+        // Browse loads resume off the UI thread after ConfigureAwait(false); marshal so
+        // PresentDiffAsync / FileItemViewModel stats notify Avalonia controls safely.
+        FileItemViewModel? file = null;
+        CancellationTokenSource? cts = null;
+        Task? present = null;
+
+        await InvokeOnUiAsync(() =>
+        {
+            file = SelectedFile;
+            if (file is null || !string.Equals(file.Path.Value, path.Value, StringComparison.Ordinal))
+            {
+                file = RecentViewedFiles.Find(path.Value)
+                       ?? _allStaged.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal))
+                       ?? _allUnstaged.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal))
+                       ?? _allConflicted.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal))
+                       ?? new FileItemViewModel(path, ChangeKind.Modified, isStagedList: false);
+                _skipNextSelectedFileLoad = true;
+                SelectedFile = file;
+            }
+
+            _diffCts?.Cancel();
+            cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _diffCts = cts;
+            CanStageFromDiff = false;
+            StagingDisabledReason = "History browse diffs are read-only.";
+            OnPropertyChanged(nameof(CanStageLines));
+            OnPropertyChanged(nameof(CanUnstageLines));
+            OnPropertyChanged(nameof(CanDiscardLines));
+            IsLoadingDiff = true;
+            present = _diff.PresentDiffAsync(file, diff, DiffTarget.HeadToWorktree, cts, cts.Token);
+        }).ConfigureAwait(false);
+
+        try
+        {
+            if (present is not null)
+                await present.ConfigureAwait(false);
+
+            await InvokeOnUiAsync(() =>
+            {
+                if (cts is null || !ReferenceEquals(_diffCts, cts))
+                    return;
+                DiffEmptyMessage = DiffRows.Count == 0 ? "No differences" : "Select a file to view its diff";
+                OnPropertyChanged(nameof(DiffFooterText));
+            }).ConfigureAwait(false);
+        }
+        finally
+        {
+            await InvokeOnUiAsync(() =>
+            {
+                if (cts is null)
+                    return;
+                if (Interlocked.CompareExchange(ref _diffCts, null, cts) == cts)
+                {
+                    IsLoadingDiff = false;
+                    IsDiffRefreshing = false;
+                    cts.Dispose();
+                }
+            }).ConfigureAwait(false);
+        }
+    }
+
+    async Task IFileHistoryBrowseHost.ExitFileHistoryBrowseAsync()
+    {
+        PendingReview.FileHistoryBrowse.ClearSelectionHighlight(PendingReview.FileHistory);
+        if (SelectedFile is not null)
+            await LoadDiffForSelectionAsync(SelectedFile).ConfigureAwait(true);
+    }
+
+    async Task IFileHistoryBrowseHost.OpenPathInFileHistoryBrowseAsync(FilePath path, string oid, CancellationToken ct)
+    {
+        await SelectPathForHistoryBrowseAsync(path).ConfigureAwait(true);
+        await PendingReview.FileHistoryBrowse.ReloadForPathAsync(path, oid, ct).ConfigureAwait(true);
+    }
+
+    /// <summary>
+    /// Selects <paramref name="path"/> for history browse without loading a clean/normal diff or resetting browse mode.
+    /// </summary>
+    private Task SelectPathForHistoryBrowseAsync(FilePath path)
+    {
+        if (_repoPath is null)
+            return Task.CompletedTask;
+
+        if (WorkspaceMode != WorkspaceMode.FileStatus)
+            WorkspaceMode = WorkspaceMode.FileStatus;
+
+        var changePaths = BuildChangeListPathSet();
+        FileItemViewModel? file;
+        if (changePaths.Contains(path.Value))
+        {
+            file = _allStaged.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal))
+                   ?? _allUnstaged.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal))
+                   ?? _allConflicted.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal));
+            if (file is null)
+                return Task.CompletedTask;
+
+            if (!ReferenceEquals(SelectedFile, file))
+            {
+                _skipNextSelectedFileLoad = true;
+                SelectedFile = file;
+            }
+        }
+        else
+        {
+            file = RecentViewedFiles.Remember(path, changePaths);
+            OnPropertyChanged(nameof(HasRecentViewedFiles));
+            if (!ReferenceEquals(SelectedFile, file))
+            {
+                _skipNextSelectedFileLoad = true;
+                SelectedFile = file;
+            }
+        }
+
+        // Refresh History tab cache for the new subject without exiting browse mode
+        // (IsPathNavigationInProgress suppresses Reset in OnFileSelectionChanged).
+        PendingReview.OnFileSelectionChanged(file, null);
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadCleanFileDiffAsync(FileItemViewModel file, CancellationToken ct)
+    {
+        if (_repoPath is null)
+            return;
+
+        PendingReview.FileHistoryBrowse.Reset();
+        PendingReview.FileHistoryBrowse.ClearSelectionHighlight(PendingReview.FileHistory);
+
+        _diffCts?.Cancel();
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _diffCts = cts;
+        CanStageFromDiff = false;
+        StagingDisabledReason = "Viewed files outside the change list are read-only.";
+        OnPropertyChanged(nameof(CanStageLines));
+        OnPropertyChanged(nameof(CanUnstageLines));
+        OnPropertyChanged(nameof(CanDiscardLines));
+        IsLoadingDiff = true;
+        DiffEmptyMessage = "Select a file to view its diff";
+        try
+        {
+            var maxBytes = _settings.Current.MaxDiffPatchBytes;
+            var fullPath = RepositoryPathResolver.ResolveUnderRoot(_repoPath, file.Path);
+            byte[] bytes;
+            if (System.IO.File.Exists(fullPath))
+            {
+                var info = new FileInfo(fullPath);
+                if (info.Length > maxBytes)
+                    throw new DiffTooLargeException(maxBytes, info.Length);
+                bytes = await System.IO.File.ReadAllBytesAsync(fullPath, cts.Token).ConfigureAwait(true);
+            }
+            else
+            {
+                bytes = [];
+            }
+
+            var scope = DiffTarget.HeadToWorktree.AsWorkingCopy();
+            var diff = CleanFileDiff.Create(file.Path, bytes, scope);
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
+            await _diff.PresentDiffAsync(file, diff, DiffTarget.HeadToWorktree, cts, cts.Token)
+                .ConfigureAwait(true);
+            OnPropertyChanged(nameof(DiffFooterText));
+            PendingReview.OnFileSelectionChanged(file, _currentDiff);
+        }
+        catch (OperationCanceledException)
+        {
+            // ignored
+        }
+        catch (Exception ex)
+        {
+            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                return;
+            DiffRows.Clear();
+            _currentDiff = null;
+            DiffEmptyMessage = $"Failed to open file: {ex.Message}";
+            OnPropertyChanged(nameof(DiffFooterText));
+            _notifications.Error(DiffEmptyMessage, exception: ex);
+        }
+        finally
+        {
+            if (Interlocked.CompareExchange(ref _diffCts, null, cts) == cts)
+            {
+                IsLoadingDiff = false;
+                IsDiffRefreshing = false;
+                cts.Dispose();
+            }
+        }
     }
 
     IReadOnlyList<AiChangedFileFact> IPendingChangesReviewHost.BuildChangedFileFacts(AiReviewScope scope)
@@ -843,6 +1100,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             if (isNewRepository)
             {
                 PendingReview.ResetState();
+                RecentViewedFiles.Clear();
             }
             await RefreshAsync();
             activity?.SetTag("wc.total_count", _allStaged.Count + _allUnstaged.Count + _allConflicted.Count);
@@ -1292,7 +1550,19 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
 
         if (SelectedFileCount <= 1)
-            _ = LoadDiffForSelectionAsync(value);
+        {
+            if (value is not null
+                && RecentViewedFiles.Find(value.Path.Value) is not null
+                && !BuildChangeListPathSet().Contains(value.Path.Value)
+                && !PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode)
+            {
+                _ = LoadCleanFileDiffAsync(value, CancellationToken.None);
+            }
+            else
+            {
+                _ = LoadDiffForSelectionAsync(value);
+            }
+        }
     }
 
     partial void OnShowMarkdownPreviewChanged(bool value)

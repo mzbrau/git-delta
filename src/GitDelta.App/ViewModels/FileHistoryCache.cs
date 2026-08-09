@@ -12,6 +12,15 @@ public enum FileHistoryLoadState
     Failed,
 }
 
+public enum FileHistoryCommitFilesLoadState
+{
+    NotLoaded,
+    Loading,
+    Ready,
+    Failed,
+}
+
+/// <summary>Immutable timeline facts for one history row (created / recent / current).</summary>
 public sealed record FileHistoryEntry(
     string Oid,
     string ShortOid,
@@ -20,6 +29,78 @@ public sealed record FileHistoryEntry(
     string AuthorName,
     bool IsCreated,
     bool IsCurrent);
+
+public sealed partial class FileHistoryCommitFileItem : ObservableObject
+{
+    public FileHistoryCommitFileItem(FilePath path, ChangeKind kind)
+    {
+        Path = path;
+        Kind = kind;
+    }
+
+    public FilePath Path { get; }
+    public ChangeKind Kind { get; }
+    public string Name => Path.Name;
+    public string DisplayPath => Path.Value;
+}
+
+public sealed partial class FileHistoryItemViewModel : ObservableObject
+{
+    public FileHistoryItemViewModel(FileHistoryEntry entry)
+    {
+        Oid = entry.Oid;
+        ShortOid = entry.ShortOid;
+        Subject = entry.Subject;
+        AuthorDate = entry.AuthorDate;
+        AuthorName = entry.AuthorName;
+        IsCreated = entry.IsCreated;
+        IsCurrent = entry.IsCurrent;
+    }
+
+    public string Oid { get; }
+    public string ShortOid { get; }
+    public string Subject { get; }
+    public DateTimeOffset AuthorDate { get; }
+    public string AuthorName { get; }
+    public bool IsCreated { get; }
+    public bool IsCurrent { get; }
+
+    [ObservableProperty] private bool _isExpanded;
+    [ObservableProperty] private bool _isSelected;
+    [ObservableProperty] private FileHistoryCommitFilesLoadState _filesState = FileHistoryCommitFilesLoadState.NotLoaded;
+    [ObservableProperty] private string? _filesErrorMessage;
+
+    public ObservableCollection<FileHistoryCommitFileItem> CommitFiles { get; } = [];
+
+    public bool IsFilesNotLoaded => FilesState == FileHistoryCommitFilesLoadState.NotLoaded;
+    public bool IsFilesLoading => FilesState == FileHistoryCommitFilesLoadState.Loading;
+    public bool IsFilesReady => FilesState == FileHistoryCommitFilesLoadState.Ready;
+    public bool IsFilesFailed => FilesState == FileHistoryCommitFilesLoadState.Failed;
+    public bool CanExpand => !IsCurrent && !string.IsNullOrEmpty(Oid);
+
+    partial void OnFilesStateChanged(FileHistoryCommitFilesLoadState value)
+    {
+        OnPropertyChanged(nameof(IsFilesNotLoaded));
+        OnPropertyChanged(nameof(IsFilesLoading));
+        OnPropertyChanged(nameof(IsFilesReady));
+        OnPropertyChanged(nameof(IsFilesFailed));
+    }
+
+    public void ApplyFiles(IReadOnlyList<(FilePath Path, ChangeKind Kind)> files)
+    {
+        CommitFiles.Clear();
+        foreach (var (path, kind) in files)
+            CommitFiles.Add(new FileHistoryCommitFileItem(path, kind));
+        FilesErrorMessage = null;
+        FilesState = FileHistoryCommitFilesLoadState.Ready;
+    }
+
+    public void ApplyFilesFailure(string message)
+    {
+        FilesErrorMessage = message;
+        FilesState = FileHistoryCommitFilesLoadState.Failed;
+    }
+}
 
 /// <summary>In-memory cache of on-demand file history timelines, keyed by session+path.</summary>
 public sealed class FileHistoryCache
@@ -74,7 +155,7 @@ public sealed partial class FileHistoryCacheEntry : ObservableObject
 
     [ObservableProperty] private FileHistoryLoadState _state = FileHistoryLoadState.NotLoaded;
     [ObservableProperty] private string? _errorMessage;
-    public ObservableCollection<FileHistoryEntry> Entries { get; } = [];
+    public ObservableCollection<FileHistoryItemViewModel> Entries { get; } = [];
 
     public bool IsNotLoaded => State == FileHistoryLoadState.NotLoaded;
     public bool IsLoading => State == FileHistoryLoadState.Loading;
@@ -93,7 +174,7 @@ public sealed partial class FileHistoryCacheEntry : ObservableObject
     {
         Entries.Clear();
         foreach (var entry in entries)
-            Entries.Add(entry);
+            Entries.Add(new FileHistoryItemViewModel(entry));
         ErrorMessage = null;
         State = FileHistoryLoadState.Ready;
     }
@@ -102,6 +183,12 @@ public sealed partial class FileHistoryCacheEntry : ObservableObject
     {
         ErrorMessage = message;
         State = FileHistoryLoadState.Failed;
+    }
+
+    public void ClearSelection()
+    {
+        foreach (var entry in Entries)
+            entry.IsSelected = false;
     }
 
     public static IReadOnlyList<FileHistoryEntry> BuildTimeline(
@@ -140,8 +227,6 @@ public sealed partial class FileHistoryCacheEntry : ObservableObject
                 IsCurrent: false));
         }
 
-        // Newest first for display after created? Plan: Created + last few + Current.
-        // Sort: created first (oldest), then recent chronological ascending, then current marker.
         list.Sort((a, b) => a.AuthorDate.CompareTo(b.AuthorDate));
 
         list.Add(new FileHistoryEntry(

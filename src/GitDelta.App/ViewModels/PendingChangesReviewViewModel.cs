@@ -49,6 +49,15 @@ public interface IPendingChangesReviewHost
 
     /// <summary>Clears the File Status file selection and ListBox highlights (used when opening the Comments pane).</summary>
     void ClearFileSelection();
+
+    /// <summary>Session MRU of files opened outside staged/unstaged lists.</summary>
+    RecentViewedFilesStore RecentViewedFiles { get; }
+
+    /// <summary>Paths currently listed under staged, unstaged, or conflicted.</summary>
+    IReadOnlySet<string> ChangeListPaths { get; }
+
+    /// <summary>Opens a tracked file that is not in the change lists (readable view + Recent Files).</summary>
+    Task OpenViewedFileAsync(FilePath path, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -63,7 +72,9 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     private readonly IConfirmDialog _confirm;
     private readonly NotificationService _notifications;
     private readonly IGitHistoryService _history;
+    private readonly IGitDiffService _diff;
     private readonly FileHistoryCache _fileHistoryCache = new();
+    private readonly FileHistoryBrowseController _fileHistoryBrowse;
 
     private IPendingChangesReviewHost? _host;
     private IDisposable? _aiProgressSubscription;
@@ -82,7 +93,8 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         ISettingsStore settings,
         IConfirmDialog confirm,
         NotificationService notifications,
-        IGitHistoryService history)
+        IGitHistoryService history,
+        IGitDiffService? diff = null)
     {
         _ai = ai;
         _localComments = localComments;
@@ -90,7 +102,15 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         _confirm = confirm;
         _notifications = notifications;
         _history = history;
+        _diff = diff ?? new NullGitDiffService();
+        _fileHistoryBrowse = new FileHistoryBrowseController(
+            _history,
+            _diff,
+            () => _host as IFileHistoryBrowseHost);
     }
+
+    /// <summary>Shared file-history browse controller for the WC diff pane.</summary>
+    public FileHistoryBrowseController FileHistoryBrowse => _fileHistoryBrowse;
 
     /// <summary>Raised when the comment draft should receive keyboard focus.</summary>
     public event Action? FocusCommentDraftRequested;
@@ -132,10 +152,11 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         AiFileBriefing = null;
         IsChangeBriefingSelected = false;
         ShowAiSidePanel = false;
-        IsAiFileBriefingTabSelected = true;
+        AiSidePanelTab = AiSidePanelTab.FileBriefing;
         IsGeneratingFileBriefing = false;
         FileHistory = null;
         _fileHistoryCache.ClearAll();
+        _fileHistoryBrowse.Reset();
         AiAdHocInstructions = "";
         AiLastError = null;
         AiActivityLog = "";
@@ -186,11 +207,11 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     /// <summary>True when the "Change briefing" row (rather than a file or Comments) is the active selection.</summary>
     [ObservableProperty] private bool _isChangeBriefingSelected;
 
-    /// <summary>Whether the AI side panel (file briefing / chat tabs) is expanded.</summary>
+    /// <summary>Whether the AI side panel (file briefing / history / chat tabs) is expanded.</summary>
     [ObservableProperty] private bool _showAiSidePanel;
 
-    /// <summary>True when the "File briefing" tab is active in the AI side panel; false selects the chat tab.</summary>
-    [ObservableProperty] private bool _isAiFileBriefingTabSelected = true;
+    /// <summary>Active tab in the AI side panel.</summary>
+    [ObservableProperty] private AiSidePanelTab _aiSidePanelTab = AiSidePanelTab.FileBriefing;
 
     /// <summary>True while a manually requested file briefing is in flight.</summary>
     [ObservableProperty] private bool _isGeneratingFileBriefing;
@@ -300,8 +321,14 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     /// <summary>The Comments row is only offered once at least one local comment exists.</summary>
     public bool ShowCommentsRow => LocalComments.Count > 0;
 
-    /// <summary>True when the chat tab (rather than the file-briefing tab) is active in the AI side panel.</summary>
-    public bool IsAiChatTabSelected => !IsAiFileBriefingTabSelected;
+    /// <summary>True when the "File briefing" tab is active in the AI side panel.</summary>
+    public bool IsAiFileBriefingTabSelected => AiSidePanelTab == AiSidePanelTab.FileBriefing;
+
+    /// <summary>True when the History tab is active in the AI side panel.</summary>
+    public bool IsAiHistoryTabSelected => AiSidePanelTab == AiSidePanelTab.History;
+
+    /// <summary>True when the chat tab is active in the AI side panel.</summary>
+    public bool IsAiChatTabSelected => AiSidePanelTab == AiSidePanelTab.Chat;
 
     public bool CanSendAiChat =>
         !string.IsNullOrWhiteSpace(AiChatInput) && !IsAiRunActive && !IsAiChatBusy;
@@ -415,8 +442,14 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         NotifyAiFileDetailChanged();
     }
 
-    partial void OnIsAiFileBriefingTabSelectedChanged(bool value) =>
+    partial void OnAiSidePanelTabChanged(AiSidePanelTab value)
+    {
+        OnPropertyChanged(nameof(IsAiFileBriefingTabSelected));
+        OnPropertyChanged(nameof(IsAiHistoryTabSelected));
         OnPropertyChanged(nameof(IsAiChatTabSelected));
+        if (value == AiSidePanelTab.History)
+            _ = EnsureFileHistoryLoadedAsync();
+    }
 
     partial void OnIsGeneratingFileBriefingChanged(bool value)
     {
@@ -461,10 +494,60 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     private void ToggleAiSidePanel() => ShowAiSidePanel = !ShowAiSidePanel;
 
     [RelayCommand]
-    private void SelectAiFileBriefingTab() => IsAiFileBriefingTabSelected = true;
+    private void SelectAiFileBriefingTab() => AiSidePanelTab = AiSidePanelTab.FileBriefing;
 
     [RelayCommand]
-    private void SelectAiChatTab() => IsAiFileBriefingTabSelected = false;
+    private void SelectAiHistoryTab() => AiSidePanelTab = AiSidePanelTab.History;
+
+    [RelayCommand]
+    private void SelectAiChatTab() => AiSidePanelTab = AiSidePanelTab.Chat;
+
+    [RelayCommand]
+    private async Task SelectFileHistoryItemAsync(FileHistoryItemViewModel? item)
+    {
+        if (item is null)
+            return;
+        try
+        {
+            await _fileHistoryBrowse.SelectHistoryItemAsync(item, FileHistory, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to load history diff: {ex.Message}", exception: ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ToggleFileHistoryItemExpandedAsync(FileHistoryItemViewModel? item)
+    {
+        if (item is null)
+            return;
+        await _fileHistoryBrowse.ToggleExpandedAsync(item).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    private async Task SelectFileHistoryCommitFileAsync(FileHistoryCommitFileItem? file)
+    {
+        if (file is null || FileHistory is null)
+            return;
+
+        var item = FileHistory.Entries.FirstOrDefault(e => e.CommitFiles.Contains(file))
+                   ?? FileHistory.Entries.FirstOrDefault(e => e.IsSelected)
+                   ?? FileHistory.Entries.FirstOrDefault(e => e.IsExpanded);
+        if (item is null)
+            return;
+
+        try
+        {
+            await _fileHistoryBrowse.SelectCommitFileAsync(item, file, FileHistory, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to open commit file: {ex.Message}", exception: ex);
+        }
+    }
 
     [RelayCommand(CanExecute = nameof(AiButtonEnabled))]
     private async Task RequestAiReviewAsync()
@@ -852,7 +935,7 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     private async Task ToggleAiChatAsync()
     {
         ShowAiSidePanel = true;
-        IsAiFileBriefingTabSelected = false;
+        AiSidePanelTab = AiSidePanelTab.Chat;
         OnPropertyChanged(nameof(AiChatSelectedFileLabel));
         OnPropertyChanged(nameof(AiChatPlaceholder));
         if (_host is null || AiChatMessages.Count > 0)
@@ -1069,9 +1152,17 @@ public partial class PendingChangesReviewViewModel : ObservableObject
 
     /// <summary>Loads the on-demand commit-history timeline for the currently selected file into <see cref="FileHistory"/>.</summary>
     [RelayCommand]
-    private async Task LoadFileHistoryAsync()
+    private async Task LoadFileHistoryAsync() => await EnsureFileHistoryLoadedAsync().ConfigureAwait(false);
+
+    private async Task EnsureFileHistoryLoadedAsync()
     {
-        if (_host?.SelectedFile is not { } file || FileHistory is not { } entry || !entry.IsNotLoaded)
+        if (_host?.SelectedFile is not { } file)
+            return;
+
+        var path = file.Path.Value;
+        var entry = FileHistory ?? _fileHistoryCache.GetOrCreate(SessionKey, path);
+        FileHistory = entry;
+        if (entry.State is not (FileHistoryLoadState.NotLoaded or FileHistoryLoadState.Failed))
             return;
 
         var repositoryPath = _host.RepositoryPath;
@@ -1081,7 +1172,6 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         entry.State = FileHistoryLoadState.Loading;
         try
         {
-            var path = file.Path.Value;
             var createdTask = _history.GetFileCreatedCommitAsync(repositoryPath, path);
             var recentTask = _history.ListFileHistoryAsync(repositoryPath, path, take: 5);
             await Task.WhenAll(createdTask, recentTask).ConfigureAwait(false);
@@ -1122,6 +1212,16 @@ public partial class PendingChangesReviewViewModel : ObservableObject
             return;
         }
 
+        // Keep browse mode when the controller is intentionally changing the subject path
+        // (sibling commit file / breadcrumb back). Exit browse when the user picks another
+        // file outside that navigation, or clears selection.
+        if (_fileHistoryBrowse.IsFileHistoryBrowseMode
+            && !_fileHistoryBrowse.IsPathNavigationInProgress
+            && (path is null || !string.Equals(path, _boundSelectionPath, StringComparison.Ordinal)))
+        {
+            _fileHistoryBrowse.Reset();
+        }
+
         _aiFileCts?.Cancel();
         _aiFileCts = null;
 
@@ -1144,6 +1244,9 @@ public partial class PendingChangesReviewViewModel : ObservableObject
             IsCommentsSelected = false;
             IsChangeBriefingSelected = false;
         }
+
+        if (AiSidePanelTab == AiSidePanelTab.History && file is not null)
+            _ = EnsureFileHistoryLoadedAsync();
 
         if (file is null || diff is null)
             return;

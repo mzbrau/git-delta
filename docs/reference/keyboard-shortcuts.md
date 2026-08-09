@@ -24,6 +24,16 @@ Active when you are in a pull request workspace and not typing in a text field.
 PR shortcuts use **Control** on both Windows and macOS.
 :::
 
+## Global (repository open)
+
+| Shortcut | Action |
+| --- | --- |
+| **Ctrl+T** | Quick-open a tracked file |
+
+:::note
+**Ctrl+T** uses **Control** on both Windows and macOS (same convention as PR shortcuts).
+:::
+
 ## Comments and AI chat
 
 | Shortcut | Action |

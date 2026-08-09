@@ -124,17 +124,30 @@ public sealed class TagReleaseDialogViewModelTests
     }
 
     [Test]
-    public async Task CanAddAndPush_Requires_Name_And_Message()
+    public async Task CanAddAndPush_Requires_Name_Only()
     {
         var vm = CreateVm();
         await vm.OpenAsync("/tmp/repo", "main");
         Assert.That(vm.CanAddAndPush, Is.False);
 
         vm.NewTagName = "v1";
-        Assert.That(vm.CanAddAndPush, Is.False);
-
-        vm.TagMessage = "msg";
         Assert.That(vm.CanAddAndPush, Is.True);
+        Assert.That(vm.AddAndPushCommand.CanExecute(null), Is.True);
+    }
+
+    [Test]
+    public async Task AddAndPush_Empty_Message_Creates_Lightweight_Tag()
+    {
+        var vm = CreateVm();
+        await vm.OpenAsync("/tmp/repo", "main");
+
+        vm.NewTagName = "v1.2.0";
+        vm.TagMessage = "   ";
+        await vm.AddAndPushCommand.ExecuteAsync(null);
+
+        await _tags.Received(1).CreateAnnotatedTagAsync("/tmp/repo", "v1.2.0", "", Arg.Any<CancellationToken>());
+        await _tags.Received(1).PushTagAsync("/tmp/repo", "v1.2.0", Arg.Any<IProgress<string>?>(), Arg.Any<CancellationToken>());
+        Assert.That(_completedCount, Is.EqualTo(1));
     }
 
     [Test]

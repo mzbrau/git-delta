@@ -59,6 +59,13 @@ internal static class GitDiffArgumentBuilder
             case DiffScope.Revisions rev:
                 args.Add($"{rev.Base.Value}...{rev.Head.Value}");
                 break;
+            case DiffScope.RevisionsTwoDot rev:
+                args.Add(rev.Base.Value);
+                args.Add(rev.Head.Value);
+                break;
+            case DiffScope.RevisionToWorktree rev:
+                args.Add(rev.Revision.Value);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(scope), scope, null);
         }
