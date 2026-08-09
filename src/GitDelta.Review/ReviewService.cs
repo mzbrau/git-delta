@@ -93,7 +93,7 @@ public sealed class ReviewService(
     }
 
     private Task<string> RevParseAsync(string repoPath, string refName, CancellationToken ct) =>
-        gates.For(repoPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repoPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                     repoPath,
@@ -110,5 +110,5 @@ public sealed class ReviewService(
                 throw new GitException($"git rev-parse {refName} returned empty output");
 
             return sha;
-        }, ct);
+        }, ct), ct);
 }

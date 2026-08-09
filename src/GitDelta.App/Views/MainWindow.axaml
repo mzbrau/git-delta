@@ -195,6 +195,9 @@
           <TextBlock DockPanel.Dock="Right" Text="{Binding AppVersion}" FontSize="10"
                      Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
                      VerticalAlignment="Center" Opacity="0.7" />
+          <ProgressBar DockPanel.Dock="Left" Width="120" Height="3" Margin="0,0,10,0"
+                       IsIndeterminate="True" VerticalAlignment="Center"
+                       IsVisible="{Binding IsOpeningRepository}" />
           <TextBlock Text="{Binding StatusText}" FontSize="10"
                      Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
                      VerticalAlignment="Center" />
@@ -298,12 +301,14 @@
                   <icons:MaterialIcon Kind="ChevronLeft" Width="16" Height="16" />
                 </Button>
                 <Button DockPanel.Dock="Right" Classes="Ghost" Padding="4" Margin="2,0,0,0"
-                        Click="OnOpenRepository" ToolTip.Tip="Open repository…">
+                        Click="OnOpenRepository" ToolTip.Tip="Open repository…"
+                        IsEnabled="{Binding IsOpeningRepository, Converter={x:Static conv:ForgeConverters.InvertBool}}">
                   <icons:MaterialIcon Kind="FolderOpen" Width="16" Height="16" />
                 </Button>
                 <Button x:Name="RepoSwitcherButton" Classes="Ghost"
                         HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
-                        Padding="6,4" ToolTip.Tip="{Binding CurrentRepositoryTooltip}">
+                        Padding="6,4" ToolTip.Tip="{Binding CurrentRepositoryTooltip}"
+                        IsEnabled="{Binding IsOpeningRepository, Converter={x:Static conv:ForgeConverters.InvertBool}}">
                   <Button.Flyout>
                     <Flyout Placement="BottomEdgeAlignedLeft" Opened="OnRepoSwitcherFlyoutOpened">
                       <Border MinWidth="260" MaxWidth="360" MaxHeight="380" Padding="8">
@@ -957,12 +962,14 @@
                     </StackPanel>
                   </Button>
                 </DockPanel>
-                <ListBox ItemsSource="{Binding WorkingCopy.RecentViewedFiles.Items}"
-                         SelectedItem="{Binding WorkingCopy.SelectedFile}"
+                <ListBox x:Name="RecentViewedFileList"
+                         ItemsSource="{Binding WorkingCopy.RecentViewedFiles.Items}"
+                         SelectedItem="{Binding WorkingCopy.SelectedFile, Mode=OneWay}"
                          SelectionMode="Single"
                          Classes="FileList"
                          MaxHeight="140"
-                         IsVisible="{Binding WorkingCopy.RecentViewedFilesExpanded}">
+                         IsVisible="{Binding WorkingCopy.RecentViewedFilesExpanded}"
+                         SelectionChanged="OnRecentViewedFileSelectionChanged">
                   <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="vm:FileItemViewModel">
                       <TextBlock Text="{Binding Path.Value}" Classes="MonoPath" FontSize="11" TextTrimming="CharacterEllipsis"
@@ -1533,11 +1540,14 @@
                   Height="24" Background="{DynamicResource ForgeSurfaceContainerBrush}"
                   BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
             <Grid ColumnDefinitions="*,*">
-              <TextBlock Grid.Column="0" Text="PREVIOUS VERSION" FontSize="10" FontWeight="Bold"
+              <TextBlock Grid.Column="0"
+                         Text="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.PreviousSideLabel}"
+                         FontSize="10" FontWeight="Bold"
                          Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
                          VerticalAlignment="Center" Margin="12,0" />
               <Border Grid.Column="1" BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0">
-                <TextBlock Text="NEW VERSION" FontSize="10" FontWeight="Bold"
+                <TextBlock Text="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.NewSideLabel}"
+                           FontSize="10" FontWeight="Bold"
                            Foreground="{DynamicResource ForgePrimaryBrush}"
                            VerticalAlignment="Center" Margin="12,0" />
               </Border>
@@ -2139,6 +2149,9 @@
                                             <StackPanel Orientation="Horizontal" Spacing="4">
                                               <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
                                                          FontSize="10" Opacity="0.55" />
+                                              <TextBlock Text="{Binding AuthorName}" FontSize="10" Opacity="0.55"
+                                                         TextTrimming="CharacterEllipsis"
+                                                         IsVisible="{Binding AuthorName, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
                                               <Border Classes="Chip" IsVisible="{Binding IsCreated}">
                                                 <TextBlock Text="Created" FontSize="9" />
                                               </Border>
@@ -3188,6 +3201,9 @@
                                             <StackPanel Orientation="Horizontal" Spacing="4">
                                               <TextBlock Text="{Binding AuthorDate, Converter={x:Static conv:ForgeConverters.RelativeTime}}"
                                                          FontSize="10" Opacity="0.55" />
+                                              <TextBlock Text="{Binding AuthorName}" FontSize="10" Opacity="0.55"
+                                                         TextTrimming="CharacterEllipsis"
+                                                         IsVisible="{Binding AuthorName, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}" />
                                               <Border Classes="Chip" IsVisible="{Binding IsCreated}">
                                                 <TextBlock Text="Created" FontSize="9" />
                                               </Border>
@@ -3824,11 +3840,14 @@
                       Height="24" Background="{DynamicResource ForgeSurfaceContainerBrush}"
                       BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
                 <Grid ColumnDefinitions="*,*">
-                  <TextBlock Grid.Column="0" Text="PREVIOUS VERSION" FontSize="10" FontWeight="Bold"
+                  <TextBlock Grid.Column="0"
+                             Text="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.PreviousSideLabel}"
+                             FontSize="10" FontWeight="Bold"
                              Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}"
                              VerticalAlignment="Center" Margin="12,0" />
                   <Border Grid.Column="1" BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0">
-                    <TextBlock Text="NEW VERSION" FontSize="10" FontWeight="Bold"
+                    <TextBlock Text="{Binding WorkingCopy.PendingReview.FileHistoryBrowse.NewSideLabel}"
+                               FontSize="10" FontWeight="Bold"
                                Foreground="{DynamicResource ForgePrimaryBrush}"
                                VerticalAlignment="Center" Margin="12,0" />
                   </Border>

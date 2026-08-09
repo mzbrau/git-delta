@@ -1306,6 +1306,32 @@ public partial class MainWindow : Window
         SyncFileSelection();
     }
 
+    private void OnRecentViewedFileSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionSync) return;
+        if (e.AddedItems.Count == 0)
+            return;
+        if (sender is not ListBox list)
+            return;
+        if (list.SelectedItem is not FileItemViewModel file)
+            return;
+
+        // Recent is single-select and mutually exclusive with staged/unstaged/conflicted.
+        _suppressSelectionSync = true;
+        try
+        {
+            StagedFileList.SelectedItems?.Clear();
+            UnstagedFileList.SelectedItems?.Clear();
+            ConflictedFileList.SelectedItems?.Clear();
+        }
+        finally
+        {
+            _suppressSelectionSync = false;
+        }
+
+        Vm.WorkingCopy.SelectRecentViewedFile(file);
+    }
+
     private void OnFileSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionSync) return;
@@ -1343,6 +1369,9 @@ public partial class MainWindow : Window
             UnstagedFileList.SelectedItems?.Clear();
         if (!ReferenceEquals(source, ConflictedFileList))
             ConflictedFileList.SelectedItems?.Clear();
+        // OneWay-bound; clearing highlight must not null WorkingCopy.SelectedFile.
+        if (!ReferenceEquals(source, RecentViewedFileList))
+            RecentViewedFileList.SelectedItem = null;
     }
 
     private void SyncFileSelection()

@@ -23,7 +23,7 @@ public sealed class GitHistoryService(
         int take,
         string revision = "HEAD",
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             if (take <= 0)
                 return (IReadOnlyList<CommitInfo>)Array.Empty<CommitInfo>();
@@ -41,7 +41,7 @@ public sealed class GitHistoryService(
             var result = await runner.RunAsync(repositoryPath, args, options: null, token)
                 .ConfigureAwait(false);
             return (IReadOnlyList<CommitInfo>)ParseCommitLog(result.Stdout);
-        }, ct);
+        }, ct), ct);
 
     public Task<IReadOnlyList<CommitInfo>> ListCommitsRangeAsync(
         string repositoryPath,
@@ -49,7 +49,7 @@ public sealed class GitHistoryService(
         string headRef = "HEAD",
         bool oldestFirst = false,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             if (string.IsNullOrWhiteSpace(baseRef) || string.IsNullOrWhiteSpace(headRef))
                 return (IReadOnlyList<CommitInfo>)Array.Empty<CommitInfo>();
@@ -66,14 +66,14 @@ public sealed class GitHistoryService(
             var result = await runner.RunAsync(repositoryPath, args, options: null, token)
                 .ConfigureAwait(false);
             return (IReadOnlyList<CommitInfo>)ParseCommitLog(result.Stdout);
-        }, ct);
+        }, ct), ct);
 
     public Task<IReadOnlyList<CommitInfo>> ListFileHistoryAsync(
         string repositoryPath,
         string path,
         int take,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             if (take <= 0 || string.IsNullOrWhiteSpace(path))
                 return (IReadOnlyList<CommitInfo>)Array.Empty<CommitInfo>();
@@ -92,13 +92,13 @@ public sealed class GitHistoryService(
             var result = await runner.RunAsync(repositoryPath, args, options: null, token)
                 .ConfigureAwait(false);
             return (IReadOnlyList<CommitInfo>)ParseCommitLog(result.Stdout);
-        }, ct);
+        }, ct), ct);
 
     public Task<CommitInfo?> GetFileCreatedCommitAsync(
         string repositoryPath,
         string path,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             if (string.IsNullOrWhiteSpace(path))
                 return (CommitInfo?)null;
@@ -119,12 +119,12 @@ public sealed class GitHistoryService(
                 .ConfigureAwait(false);
             var commits = ParseCommitLog(result.Stdout);
             return commits.Count > 0 ? commits[0] : null;
-        }, ct);
+        }, ct), ct);
 
     public Task<IReadOnlyList<FilePath>> ListTrackedFilesAsync(
         string repositoryPath,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                 repositoryPath,
@@ -160,13 +160,13 @@ public sealed class GitHistoryService(
 
             list.Sort((a, b) => string.CompareOrdinal(a.Value, b.Value));
             return (IReadOnlyList<FilePath>)list;
-        }, ct);
+        }, ct), ct);
 
     public Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetCommitFilesAsync(
         string repositoryPath,
         string oid,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                 repositoryPath,
@@ -176,13 +176,13 @@ public sealed class GitHistoryService(
 
             return (IReadOnlyList<(FilePath Path, ChangeKind Kind)>)
                 GitStashService.ParseNameStatus(result.Stdout);
-        }, ct);
+        }, ct), ct);
 
     public Task<CommitStat> GetCommitStatAsync(
         string repositoryPath,
         string oid,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                 repositoryPath,
@@ -191,7 +191,7 @@ public sealed class GitHistoryService(
                 token).ConfigureAwait(false);
 
             return ParseNumstat(oid, result.Stdout);
-        }, ct);
+        }, ct), ct);
 
     public Task<string> GetCommitPatchAsync(
         string repositoryPath,
@@ -199,8 +199,14 @@ public sealed class GitHistoryService(
         FilePath path,
         DiffOptions options,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
+            // Resolve the path as it existed in oid (follows renames from the current path).
+            // Using the current path alone after --follow listing yields empty create patches
+            // and full-file adds for rename commits.
+            var atCommit = await ResolvePathAtCommitAsync(repositoryPath, oid, path.Value, token)
+                .ConfigureAwait(false);
+
             // `git show` handles root commits; `--format=` suppresses the commit header.
             var args = new List<string>
             {
@@ -212,6 +218,10 @@ public sealed class GitHistoryService(
                 "--no-ext-diff",
             };
 
+            if (options.DetectRenames)
+                args.Add("-M");
+            if (options.DetectCopies)
+                args.Add("-C");
             if (options.IgnoreAllSpace)
                 args.Add("-w");
             if (options.IgnoreSpaceChange)
@@ -221,14 +231,129 @@ public sealed class GitHistoryService(
 
             args.Add(oid);
             args.Add("--");
-            args.Add(path.Value);
+            if (atCommit.OldPath is { Length: > 0 } oldPath)
+                args.Add(oldPath);
+            args.Add(atCommit.Path);
 
             var maxBytes = settings?.Current.MaxDiffPatchBytes ?? 32 * 1024 * 1024;
             var processOptions = new GitProcessOptions { MaxStdoutBytes = maxBytes };
             var result = await runner.RunAsync(repositoryPath, args, processOptions, token)
                 .ConfigureAwait(false);
             return result.Stdout;
-        }, ct);
+        }, ct), ct);
+
+    private async Task<PathAtCommit> ResolvePathAtCommitAsync(
+        string repositoryPath,
+        string oid,
+        string currentPath,
+        CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(oid) || string.IsNullOrWhiteSpace(currentPath))
+            return new PathAtCommit(currentPath, null);
+
+        var args = new List<string>
+        {
+            "log",
+            "HEAD",
+            "-M",
+            "--follow",
+            "--name-status",
+            "--format=%H",
+            "--",
+            currentPath,
+        };
+
+        var result = await runner.RunAsync(repositoryPath, args, options: null, token)
+            .ConfigureAwait(false);
+        return ParsePathAtCommit(result.Stdout, oid) ?? new PathAtCommit(currentPath, null);
+    }
+
+    /// <summary>
+    /// Parses <c>git log --follow --name-status --format=%H</c> output for the name-status
+    /// entry belonging to <paramref name="oid"/> (full or unique prefix).
+    /// </summary>
+    public static PathAtCommit? ParsePathAtCommit(string stdout, string oid)
+    {
+        if (string.IsNullOrEmpty(stdout) || string.IsNullOrWhiteSpace(oid))
+            return null;
+
+        string? currentOid = null;
+        foreach (var rawLine in stdout.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r');
+            if (line.Length == 0)
+                continue;
+
+            if (LooksLikeCommitOid(line))
+            {
+                currentOid = line;
+                continue;
+            }
+
+            if (currentOid is null || !OidEqualsOrPrefix(currentOid, oid))
+                continue;
+
+            var tab = line.IndexOf('\t');
+            if (tab <= 0)
+                continue;
+
+            var status = line[..tab].Trim();
+            var pathPart = line[(tab + 1)..];
+            if (status.Length > 0 && (status[0] == 'R' || status[0] == 'C'))
+            {
+                var mid = pathPart.IndexOf('\t');
+                if (mid > 0)
+                {
+                    var oldPath = pathPart[..mid];
+                    var newPath = pathPart[(mid + 1)..];
+                    if (!string.IsNullOrWhiteSpace(newPath))
+                        return new PathAtCommit(newPath, string.IsNullOrWhiteSpace(oldPath) ? null : oldPath);
+                }
+            }
+
+            // Non-rename: path is the sole field (or last field if unexpected tabs).
+            var lastTab = pathPart.LastIndexOf('\t');
+            if (lastTab >= 0)
+                pathPart = pathPart[(lastTab + 1)..];
+            if (!string.IsNullOrWhiteSpace(pathPart))
+                return new PathAtCommit(pathPart, null);
+        }
+
+        return null;
+    }
+
+    private static bool LooksLikeCommitOid(string line)
+    {
+        if (line.Length < 7 || line.Length > 40)
+            return false;
+        foreach (var c in line)
+        {
+            var isHex = (c >= '0' && c <= '9')
+                        || (c >= 'a' && c <= 'f')
+                        || (c >= 'A' && c <= 'F');
+            if (!isHex)
+                return false;
+        }
+
+        return true;
+    }
+
+    private static bool OidEqualsOrPrefix(string fullOid, string candidate)
+    {
+        if (fullOid.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+            return true;
+        // Allow unique-prefix matching (UI may pass short OIDs).
+        if (candidate.Length >= 7
+            && fullOid.StartsWith(candidate, StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (fullOid.Length >= 7
+            && candidate.StartsWith(fullOid, StringComparison.OrdinalIgnoreCase))
+            return true;
+        return false;
+    }
+
+    /// <summary>Path of a followed file as it existed in a commit, plus rename/copy source when present.</summary>
+    public readonly record struct PathAtCommit(string Path, string? OldPath);
 
     public static List<CommitInfo> ParseCommitLog(string stdout)
     {

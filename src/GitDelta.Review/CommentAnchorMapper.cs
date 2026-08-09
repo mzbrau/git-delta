@@ -136,7 +136,7 @@ public sealed class CommentAnchorMapper(
         string commitSha,
         FilePath path,
         CancellationToken ct) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var spec = $"{commitSha}:{path.Value}";
             var result = await runner.RunAsync(
@@ -154,5 +154,5 @@ public sealed class CommentAnchorMapper(
                 throw new GitException($"git rev-parse {spec} returned empty output");
 
             return ContentId.FromSha(sha);
-        }, ct);
+        }, ct), ct);
 }

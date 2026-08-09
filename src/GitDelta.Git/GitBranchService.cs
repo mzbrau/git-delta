@@ -10,7 +10,7 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
     private const string FieldSeparator = "\u0001";
 
     public Task<IReadOnlyList<BranchInfo>> ListBranchesAsync(string repositoryPath, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var format = string.Join(
                 FieldSeparator,
@@ -26,52 +26,52 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
                 token).ConfigureAwait(false);
 
             return (IReadOnlyList<BranchInfo>)ParseBranches(result.Stdout);
-        }, ct);
+        }, ct), ct);
 
     public Task CheckoutAsync(string repositoryPath, string branch, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunWorktreeWriteAsync(
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(
             token => runner.RunAsync(repositoryPath, ["checkout", branch], options: null, token),
-            ct);
+            ct), ct);
 
     public Task CreateBranchAsync(string repositoryPath, string name, bool checkout, CancellationToken ct = default)
     {
         if (checkout)
         {
-            return gates.For(repositoryPath).RunWorktreeWriteAsync(
+            return gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(
                 token => runner.RunAsync(repositoryPath, ["checkout", "-b", name], options: null, token),
-                ct);
+                ct), ct);
         }
 
-        return gates.For(repositoryPath).RunIndexWriteAsync(
+        return gates.WithGateAsync(repositoryPath, gate => gate.RunIndexWriteAsync(
             token => runner.RunAsync(repositoryPath, ["branch", "--", name], options: null, token),
-            ct);
+            ct), ct);
     }
 
     public Task DeleteBranchAsync(string repositoryPath, string name, bool force, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunIndexWriteAsync(
+        gates.WithGateAsync(repositoryPath, gate => gate.RunIndexWriteAsync(
             token => runner.RunAsync(repositoryPath, ["branch", force ? "-D" : "-d", "--", name], options: null, token),
-            ct);
+            ct), ct);
 
     public Task RenameBranchAsync(string repositoryPath, string oldName, string newName, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunIndexWriteAsync(
+        gates.WithGateAsync(repositoryPath, gate => gate.RunIndexWriteAsync(
             token => runner.RunAsync(repositoryPath, ["branch", "-m", "--", oldName, newName], options: null, token),
-            ct);
+            ct), ct);
 
     public Task FetchAsync(string repositoryPath, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunNetworkAsync(
+        gates.WithGateAsync(repositoryPath, gate => gate.RunNetworkAsync(
             token => runner.RunAsync(
                 repositoryPath,
                 ["fetch", "--prune"],
                 new GitProcessOptions { Timeout = TimeSpan.FromMinutes(2) },
                 token),
-            ct);
+            ct), ct);
 
     public Task<BranchDivergence> GetDivergenceAsync(
         string repositoryPath,
         string baseRef,
         string headRef,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                 repositoryPath,
@@ -80,7 +80,7 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
                 token).ConfigureAwait(false);
 
             return ParseDivergence(result.Stdout);
-        }, ct);
+        }, ct), ct);
 
     internal static BranchDivergence ParseDivergence(string rawOutput)
     {

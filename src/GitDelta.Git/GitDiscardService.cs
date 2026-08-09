@@ -31,7 +31,7 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
         var preImage = await objectReader.HashObjectAsync(repositoryPath, absolutePath, write: true, ct).ConfigureAwait(false);
         var isTracked = await IsTrackedAsync(repositoryPath, path, ct).ConfigureAwait(false);
 
-        await gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
+        await gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async token =>
         {
             if (isTracked)
             {
@@ -41,7 +41,7 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
             {
                 File.Delete(absolutePath);
             }
-        }, ct).ConfigureAwait(false);
+        }, ct), ct).ConfigureAwait(false);
 
         RecordDiscarded(path, preImage, wasUntracked: !isTracked);
     }
@@ -53,14 +53,14 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
             ? await objectReader.HashObjectAsync(repositoryPath, absolutePath, write: true, ct).ConfigureAwait(false)
             : null;
 
-        await gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
+        await gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async token =>
         {
             await runner.RunAsync(
                 repositoryPath,
                 ["restore", "--source=HEAD", "--staged", "--worktree", "--", path.Value],
                 options: null,
                 token).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+        }, ct), ct).ConfigureAwait(false);
 
         if (preImage is { } oid)
             RecordDiscarded(path, oid, wasUntracked: false);
@@ -76,11 +76,11 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
             ? await objectReader.HashObjectAsync(repositoryPath, absolutePath, write: true, ct).ConfigureAwait(false)
             : null;
 
-        await gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
+        await gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async token =>
         {
             var options = new GitProcessOptions { StdinText = patch };
             await runner.RunAsync(repositoryPath, ["apply", "--reverse", "--whitespace=nowarn", "-"], options, token).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+        }, ct), ct).ConfigureAwait(false);
 
         if (preImage is { } oid)
             RecordDiscarded(path, oid, wasUntracked: false);
@@ -90,7 +90,7 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
     {
         var content = await objectReader.ReadBlobAsync(repositoryPath, entry.ObjectId, ct).ConfigureAwait(false);
 
-        await gates.For(repositoryPath).RunWorktreeWriteAsync(async _ =>
+        await gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async _ =>
         {
             var absolutePath = Path.Combine(repositoryPath, entry.Path.Value);
             var directory = Path.GetDirectoryName(absolutePath);
@@ -98,7 +98,7 @@ public sealed class GitDiscardService(IGitProcessRunner runner, IGitObjectReader
                 Directory.CreateDirectory(directory);
 
             await File.WriteAllBytesAsync(absolutePath, content, ct).ConfigureAwait(false);
-        }, ct).ConfigureAwait(false);
+        }, ct), ct).ConfigureAwait(false);
 
         RemoveFromRecentlyDiscarded(entry);
     }

@@ -15,7 +15,7 @@ public sealed class GitStashService(
     private static readonly Regex StashRefIndex = new(@"^stash@\{(\d+)\}$", RegexOptions.Compiled);
 
     public Task<IReadOnlyList<StashInfo>> ListStashesAsync(string repositoryPath, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                 repositoryPath,
@@ -24,14 +24,14 @@ public sealed class GitStashService(
                 token).ConfigureAwait(false);
 
             return (IReadOnlyList<StashInfo>)ParseStashList(result.Stdout);
-        }, ct);
+        }, ct), ct);
 
     public Task StashPushAsync(
         string repositoryPath,
         string? message,
         bool includeUntracked = false,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async token =>
         {
             var args = new List<string> { "stash", "push" };
             if (includeUntracked)
@@ -43,36 +43,36 @@ public sealed class GitStashService(
             }
 
             await runner.RunAsync(repositoryPath, args, options: null, token).ConfigureAwait(false);
-        }, ct);
+        }, ct), ct);
 
     public Task ApplyStashAsync(string repositoryPath, int index, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunWorktreeWriteAsync(
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(
             token => runner.RunAsync(
                 repositoryPath,
                 ["stash", "apply", $"stash@{{{index}}}"],
                 options: null,
                 token),
-            ct);
+            ct), ct);
 
     public Task StashPopAsync(string repositoryPath, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunWorktreeWriteAsync(
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(
             token => runner.RunAsync(repositoryPath, ["stash", "pop"], options: null, token),
-            ct);
+            ct), ct);
 
     public Task DropStashAsync(string repositoryPath, int index, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunWorktreeWriteAsync(
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(
             token => runner.RunAsync(
                 repositoryPath,
                 ["stash", "drop", $"stash@{{{index}}}"],
                 options: null,
                 token),
-            ct);
+            ct), ct);
 
     public Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetStashFilesAsync(
         string repositoryPath,
         int index,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             var stashRef = $"stash@{{{index}}}";
             var result = await runner.RunAsync(
@@ -100,7 +100,7 @@ public sealed class GitStashService(
             }
 
             return (IReadOnlyList<(FilePath Path, ChangeKind Kind)>)files;
-        }, ct);
+        }, ct), ct);
 
     public Task<string> GetStashPatchAsync(
         string repositoryPath,
@@ -108,7 +108,7 @@ public sealed class GitStashService(
         FilePath path,
         DiffOptions options,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunReadAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             // stash show does not reliably accept pathspecs; diff the WIP commit against its base.
             var stashRef = $"stash@{{{index}}}";
@@ -146,7 +146,7 @@ public sealed class GitStashService(
                 },
                 token).ConfigureAwait(false);
             return untracked.Succeeded ? untracked.Stdout : "";
-        }, ct);
+        }, ct), ct);
 
     private static List<string> BuildDiffArgs(DiffOptions options)
     {

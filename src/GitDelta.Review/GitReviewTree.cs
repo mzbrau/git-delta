@@ -15,7 +15,7 @@ internal sealed class GitReviewTree(
 
     public async ValueTask<ReadOnlyMemory<byte>> ReadAsync(FilePath path, CancellationToken ct)
     {
-        var bytes = await gates.For(repoPath).RunReadAsync(async token =>
+        var bytes = await gates.WithGateAsync(repoPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                     repoPath,
@@ -28,14 +28,14 @@ internal sealed class GitReviewTree(
                 throw new GitException($"git show {commit.Value}:{path.Value} failed: {result.Stderr}");
 
             return Encoding.UTF8.GetBytes(result.Stdout);
-        }, ct).ConfigureAwait(false);
+        }, ct), ct).ConfigureAwait(false);
 
         return bytes.AsMemory();
     }
 
     public async ValueTask<IReadOnlyList<FilePath>> ListAsync(FilePath prefix, CancellationToken ct)
     {
-        return await gates.For(repoPath).RunReadAsync(async token =>
+        return await gates.WithGateAsync(repoPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                     repoPath,
@@ -65,12 +65,12 @@ internal sealed class GitReviewTree(
             }
 
             return (IReadOnlyList<FilePath>)paths;
-        }, ct).ConfigureAwait(false);
+        }, ct), ct).ConfigureAwait(false);
     }
 
     public async ValueTask<IReadOnlyList<SearchHit>> SearchAsync(string pattern, CancellationToken ct)
     {
-        return await gates.For(repoPath).RunReadAsync(async token =>
+        return await gates.WithGateAsync(repoPath, gate => gate.RunReadAsync(async token =>
         {
             var result = await runner.RunAsync(
                     repoPath,
@@ -95,7 +95,7 @@ internal sealed class GitReviewTree(
             }
 
             return (IReadOnlyList<SearchHit>)hits;
-        }, ct).ConfigureAwait(false);
+        }, ct), ct).ConfigureAwait(false);
     }
 
     private static SearchHit? ParseGrepLine(string line)

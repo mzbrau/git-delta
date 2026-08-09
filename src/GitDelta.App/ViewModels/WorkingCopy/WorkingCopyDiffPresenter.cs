@@ -286,8 +286,18 @@ public partial class WorkingCopyViewModel
         if (!_vm.IsFileStatusMode || _vm.SelectedFile is null)
             return;
 
+        // Soft status refresh must not exit history browse or replace the painted history diff.
+        if (_vm.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode)
+            return;
+
         if (!IsPathInWorkingLists(_vm.SelectedFile.Path.Value, _vm.SelectedFile.IsStagedList))
         {
+            if (_vm.IsRecentOnlySelection(_vm.SelectedFile))
+            {
+                await _vm.ReloadCleanFileDiffAsync(_vm.SelectedFile, CancellationToken.None);
+                return;
+            }
+
             _vm._warmStore.InvalidatePath(_vm.SelectedFile.Path.Value);
             _vm.DiffRows.Clear();
             _vm._currentDiff = null;

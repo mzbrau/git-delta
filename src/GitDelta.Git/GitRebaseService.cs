@@ -18,7 +18,7 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
         string ontoRef,
         IReadOnlyList<RebaseTodoEntry> todo,
         CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async token =>
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(ontoRef);
             ArgumentNullException.ThrowIfNull(todo);
@@ -119,10 +119,10 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
                 if (!retainSession)
                     CleanupSession(repositoryPath, sessionDir);
             }
-        }, ct);
+        }, ct), ct);
 
     public Task<RebaseRunResult> ContinueAsync(string repositoryPath, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async token =>
         {
             var env = TryBuildContinueEnvironment(repositoryPath);
             var result = await runner.RunAsync(
@@ -140,10 +140,10 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
                 CleanupSession(repositoryPath);
 
             return interpreted;
-        }, ct);
+        }, ct), ct);
 
     public Task AbortAsync(string repositoryPath, CancellationToken ct = default) =>
-        gates.For(repositoryPath).RunWorktreeWriteAsync(async token =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async token =>
         {
             var inProgress = GitRepositoryPaths.DetectInProgress(repositoryPath);
             if (inProgress == InProgressOperation.Rebase)
@@ -153,7 +153,7 @@ public sealed class GitRebaseService(IGitProcessRunner runner, IRepositoryGatePr
             }
 
             CleanupSession(repositoryPath);
-        }, ct);
+        }, ct), ct);
 
     private static RebaseRunResult InterpretResult(string repositoryPath, GitCommandResult result)
     {

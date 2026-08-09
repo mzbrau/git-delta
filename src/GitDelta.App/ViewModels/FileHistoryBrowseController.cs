@@ -30,6 +30,9 @@ public sealed partial class FileHistoryBrowseController : ObservableObject
         _hostFactory = hostFactory;
     }
 
+    private const string DefaultPreviousSideLabel = "PREVIOUS VERSION";
+    private const string DefaultNewSideLabel = "NEW VERSION";
+
     [ObservableProperty] private bool _isFileHistoryBrowseMode;
     [ObservableProperty] private FileHistoryCompareMode _compareMode = FileHistoryCompareMode.InCommit;
     [ObservableProperty] private string? _selectedOid;
@@ -38,6 +41,8 @@ public sealed partial class FileHistoryBrowseController : ObservableObject
     [ObservableProperty] private bool _isLoading;
     [ObservableProperty] private string _breadcrumbTrail = "";
     [ObservableProperty] private bool _canNavigateBack;
+    [ObservableProperty] private string _previousSideLabel = DefaultPreviousSideLabel;
+    [ObservableProperty] private string _newSideLabel = DefaultNewSideLabel;
 
     public bool CanExitFileHistoryBrowseMode => IsFileHistoryBrowseMode;
 
@@ -67,16 +72,24 @@ public sealed partial class FileHistoryBrowseController : ObservableObject
         }
     }
 
-    partial void OnIsFileHistoryBrowseModeChanged(bool value) =>
+    partial void OnIsFileHistoryBrowseModeChanged(bool value)
+    {
         OnPropertyChanged(nameof(CanExitFileHistoryBrowseMode));
+        RefreshSideLabels();
+    }
 
     partial void OnCompareModeChanged(FileHistoryCompareMode value)
     {
         OnPropertyChanged(nameof(IsCompareInCommit));
         OnPropertyChanged(nameof(IsCompareVsCurrent));
+        RefreshSideLabels();
         if (IsFileHistoryBrowseMode && !string.IsNullOrEmpty(SelectedOid))
             _ = ReloadAsync();
     }
+
+    partial void OnSelectedShortOidChanged(string? value) => RefreshSideLabels();
+
+    partial void OnSelectedOidChanged(string? value) => RefreshSideLabels();
 
     public void Reset()
     {
@@ -91,6 +104,7 @@ public sealed partial class FileHistoryBrowseController : ObservableObject
         IsLoading = false;
         _currentPath = null;
         RefreshBreadcrumb();
+        RefreshSideLabels();
     }
 
     public void ClearSelectionHighlight(FileHistoryCacheEntry? cache)
@@ -329,14 +343,21 @@ public sealed partial class FileHistoryBrowseController : ObservableObject
         var token = cts.Token;
 
         IsLoading = true;
+        var presented = false;
         try
         {
+            await host.BeginFileHistoryDiffLoadAsync().ConfigureAwait(false);
+            if (!ReferenceEquals(_cts, cts))
+                return;
+
             var options = host.BuildDiffOptions();
             FileDiff diff;
             if (CompareMode == FileHistoryCompareMode.InCommit)
             {
                 var raw = await _history.GetCommitPatchAsync(host.RepositoryPath, oid, subject, options, token)
                     .ConfigureAwait(false);
+                // Empty patch after path-at-commit resolve means a true no-op (or missing blob),
+                // not a create mis-resolved to the current path.
                 diff = string.IsNullOrWhiteSpace(raw)
                     ? CleanFileDiff.Create(subject, Array.Empty<byte>(), new DiffScope.RevisionToWorktree(CommitId.FromSha(oid)))
                     : PatchParser.Parse(raw, new DiffScope.RevisionToWorktree(CommitId.FromSha(oid)));
@@ -358,6 +379,7 @@ public sealed partial class FileHistoryBrowseController : ObservableObject
                 return;
 
             await host.PresentFileHistoryDiffAsync(subject, diff, token).ConfigureAwait(false);
+            presented = true;
         }
         catch (OperationCanceledException)
         {
@@ -374,11 +396,33 @@ public sealed partial class FileHistoryBrowseController : ObservableObject
             if (ReferenceEquals(_cts, cts))
             {
                 IsLoading = false;
+                if (!presented)
+                    await host.EndFileHistoryDiffLoadAsync().ConfigureAwait(false);
                 cts.Dispose();
                 if (ReferenceEquals(_cts, cts))
                     _cts = null;
             }
         }
+    }
+
+    private void RefreshSideLabels()
+    {
+        if (IsFileHistoryBrowseMode
+            && CompareMode == FileHistoryCompareMode.VsCurrent
+            && (!string.IsNullOrEmpty(SelectedShortOid) || !string.IsNullOrEmpty(SelectedOid)))
+        {
+            var previous = !string.IsNullOrEmpty(SelectedShortOid)
+                ? SelectedShortOid!
+                : SelectedOid!.Length > 7
+                    ? SelectedOid[..7]
+                    : SelectedOid;
+            PreviousSideLabel = previous;
+            NewSideLabel = "CURRENT";
+            return;
+        }
+
+        PreviousSideLabel = DefaultPreviousSideLabel;
+        NewSideLabel = DefaultNewSideLabel;
     }
 
     private readonly record struct BrowseFrame(FilePath Path, string Oid, string? ShortOid, string? Subject);

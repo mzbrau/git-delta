@@ -13,10 +13,8 @@ namespace GitDelta.Git;
 /// </summary>
 public sealed class GitStatusService(IGitProcessRunner runner, IRepositoryGateProvider gates) : IGitStatusService
 {
-    public Task<RepositoryStatus> GetStatusAsync(string repositoryPath, CancellationToken ct = default)
-    {
-        var gate = gates.For(repositoryPath);
-        return gate.RunReadAsync(async token =>
+    public Task<RepositoryStatus> GetStatusAsync(string repositoryPath, CancellationToken ct = default) =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             // Captured at the start of the guarded read window: this is the epoch this status
             // is guaranteed to be at least as fresh as. Capturing it any later would let a
@@ -52,6 +50,5 @@ public sealed class GitStatusService(IGitProcessRunner runner, IRepositoryGatePr
             {
                 GitDeltaMeters.StatusRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
             }
-        }, ct);
-    }
+        }, ct), ct);
 }

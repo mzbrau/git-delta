@@ -495,6 +495,16 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             SelectedFile = null;
     }
 
+    Task IFileHistoryBrowseHost.BeginFileHistoryDiffLoadAsync() =>
+        InvokeOnUiAsync(() => IsLoadingDiff = true);
+
+    Task IFileHistoryBrowseHost.EndFileHistoryDiffLoadAsync() =>
+        InvokeOnUiAsync(() =>
+        {
+            IsLoadingDiff = false;
+            IsDiffRefreshing = false;
+        });
+
     async Task IFileHistoryBrowseHost.PresentFileHistoryDiffAsync(FilePath path, FileDiff diff, CancellationToken ct)
     {
         // Browse loads resume off the UI thread after ConfigureAwait(false); marshal so
@@ -1316,6 +1326,11 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                     restored.Add(match);
             }
 
+            // History browse subjects (recent-only / sibling paths) are often outside the change
+            // lists. Clearing selection here would Reset browse mode via OnFileSelectionChanged(null).
+            if (restored.Count == 0 && PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode)
+                return;
+
             ApplySelectionState(restored, requestViewSync: true);
         }
         finally
@@ -1436,6 +1451,43 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         ApplySelectionState(selected, requestViewSync: false);
     }
 
+    /// <summary>
+    /// Selects a Recent Files entry exclusively (clears staged/unstaged multi-select state)
+    /// and loads the read-only clean file view.
+    /// </summary>
+    public void SelectRecentViewedFile(FileItemViewModel file)
+    {
+        _selectedFiles.Clear();
+        _selectedFiles.Add(file);
+        SelectedFileCount = 1;
+        HasStagedSelection = false;
+        HasUnstagedSelection = false;
+        DiffEmptyDetail = null;
+        DiffOverlayMessage = null;
+
+        if (!ReferenceEquals(SelectedFile, file))
+        {
+            // OnSelectedFileChanged loads the clean view when recent-only.
+            SelectedFile = file;
+        }
+        else if (IsRecentOnlySelection(file)
+                 && !PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode)
+        {
+            _ = LoadCleanFileDiffAsync(file, CancellationToken.None);
+        }
+
+        UpdateDiffOverlay();
+    }
+
+    /// <summary>True when the selection is a Recent Files entry outside the WC change lists.</summary>
+    public bool IsRecentOnlySelection(FileItemViewModel? file) =>
+        file is not null
+        && RecentViewedFiles.Find(file.Path.Value) is not null
+        && !BuildChangeListPathSet().Contains(file.Path.Value);
+
+    internal Task ReloadCleanFileDiffAsync(FileItemViewModel file, CancellationToken ct) =>
+        LoadCleanFileDiffAsync(file, ct);
+
     private void ApplySelectionState(IReadOnlyList<FileItemViewModel> selected, bool requestViewSync)
     {
         _selectedFiles.Clear();
@@ -1552,8 +1604,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         if (SelectedFileCount <= 1)
         {
             if (value is not null
-                && RecentViewedFiles.Find(value.Path.Value) is not null
-                && !BuildChangeListPathSet().Contains(value.Path.Value)
+                && IsRecentOnlySelection(value)
                 && !PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode)
             {
                 _ = LoadCleanFileDiffAsync(value, CancellationToken.None);

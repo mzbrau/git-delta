@@ -34,7 +34,7 @@ public sealed class WorkingCopyMaterialiser(
         if (scope is not (AiReviewScope.WorkingCopyStaged or AiReviewScope.WorkingCopyAll))
             throw new ArgumentOutOfRangeException(nameof(scope), scope, "Expected a working-copy scope.");
 
-        return await gates.For(repositoryPath).RunReadAsync(async token =>
+        return await gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
         {
             if (scope == AiReviewScope.WorkingCopyStaged)
             {
@@ -78,7 +78,7 @@ public sealed class WorkingCopyMaterialiser(
                 TryDeleteFile(indexPath);
                 TryDeleteFile(indexPath + ".lock");
             }
-        }, ct).ConfigureAwait(false);
+        }, ct), ct).ConfigureAwait(false);
     }
 
     /// <summary>Exports a tree OID to the shared content-addressed trees cache.</summary>
@@ -134,7 +134,7 @@ public sealed class WorkingCopyMaterialiser(
         var tarPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"gitdelta-tree-{Guid.NewGuid():N}.tar");
         try
         {
-            await gates.For(repositoryPath).RunReadAsync(async token =>
+            await gates.WithGateAsync(repositoryPath, gate => gate.RunReadAsync(async token =>
             {
                 var result = await runner.RunAsync(
                         repositoryPath,
@@ -147,7 +147,7 @@ public sealed class WorkingCopyMaterialiser(
                     throw new GitException($"git archive --format=tar {treeOid} failed: {result.Stderr}");
 
                 return true;
-            }, ct).ConfigureAwait(false);
+            }, ct), ct).ConfigureAwait(false);
 
             await TarFile.ExtractToDirectoryAsync(tarPath, targetDirectory, overwriteFiles: true, ct)
                 .ConfigureAwait(false);
