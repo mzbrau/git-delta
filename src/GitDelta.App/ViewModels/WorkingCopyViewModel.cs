@@ -1109,6 +1109,16 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             _watcher.WatchRepository(path);
             if (isNewRepository)
             {
+                // Gates are per-repo and start at epoch 0; the VM watermark must not carry
+                // writes from the previous repository or RefreshAsync will discard status.
+                _statusEpoch = 0;
+                _lastStatus = null;
+                _pending.Clear();
+                FileFilter = "";
+                ApplySelectionState([], requestViewSync: true);
+                RebuildFileListsTimed(
+                    new RepositoryStatus([], [], [], InProgressOperation.None, CurrentBranch: null, Epoch: 0),
+                    "repo_switch");
                 PendingReview.ResetState();
                 RecentViewedFiles.Clear();
             }
