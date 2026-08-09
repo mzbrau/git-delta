@@ -54,6 +54,8 @@ public static class ServiceConfiguration
         services.AddSingleton<IReviewSubmitDialog>(sp => sp.GetRequiredService<AvaloniaReviewSubmitDialog>());
         services.AddSingleton<AvaloniaCheckoutBlockedDialog>();
         services.AddSingleton<ICheckoutBlockedDialog>(sp => sp.GetRequiredService<AvaloniaCheckoutBlockedDialog>());
+        services.AddSingleton<AvaloniaCheckoutPullRequestDialog>();
+        services.AddSingleton<ICheckoutPullRequestDialog>(sp => sp.GetRequiredService<AvaloniaCheckoutPullRequestDialog>());
         services.AddSingleton<DiagnosticsOverlayViewModel>();
         services.AddSingleton<GitConsoleViewModel>();
 

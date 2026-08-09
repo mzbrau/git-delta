@@ -215,8 +215,8 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
     [ObservableProperty] private AiChangeBriefingResult? _aiChangeBriefing;
     [ObservableProperty] private AiFileBriefingResult? _aiFileBriefing;
     [ObservableProperty] private bool _isChangeBriefingSelected;
-    [ObservableProperty] private bool _showAiSidePanel = true;
-    [ObservableProperty] private AiSidePanelTab _aiSidePanelTab = AiSidePanelTab.FileBriefing;
+    [ObservableProperty] private bool _showFilePanel = true;
+    [ObservableProperty] private FilePanelTab _filePanelTab = FilePanelTab.FileBriefing;
     [ObservableProperty] private bool _isGeneratingFileBriefing;
     [ObservableProperty] private FileHistoryCacheEntry? _fileHistory;
     [ObservableProperty] private string _aiChatInput = "";
@@ -623,7 +623,7 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
         OnPropertyChanged(nameof(CanMutateSelectedThreadComments));
         OnPropertyChanged(nameof(CanReplyToSelectedThread));
         if (ShowSideThreadPanel)
-            OpenCommentsInAiSidePanel();
+            OpenCommentsInFilePanel();
         ExpandedThreadChanged?.Invoke();
     }
 
@@ -641,14 +641,14 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
         OnPropertyChanged(nameof(HasExpandedAiAnnotation));
         OnPropertyChanged(nameof(ShowSideThreadPanel));
         if (ShowSideThreadPanel)
-            OpenCommentsInAiSidePanel();
+            OpenCommentsInFilePanel();
         ExpandedThreadChanged?.Invoke();
     }
 
-    private void OpenCommentsInAiSidePanel()
+    private void OpenCommentsInFilePanel()
     {
-        ShowAiSidePanel = true;
-        AiSidePanelTab = AiSidePanelTab.Comments;
+        ShowFilePanel = true;
+        FilePanelTab = FilePanelTab.Comments;
     }
 
     partial void OnIsEditingCommentChanged(bool value)
@@ -680,10 +680,10 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
     public bool HasAiFileBriefing => AiFileBriefing is not null;
     public bool CanGenerateFileBriefing =>
         HasAiRun && SelectedFile is not null && !HasAiFileBriefing && !IsGeneratingFileBriefing;
-    public bool IsAiFileBriefingTabSelected => AiSidePanelTab == AiSidePanelTab.FileBriefing;
-    public bool IsAiHistoryTabSelected => AiSidePanelTab == AiSidePanelTab.History;
-    public bool IsAiChatTabSelected => AiSidePanelTab == AiSidePanelTab.Chat;
-    public bool IsAiCommentsTabSelected => AiSidePanelTab == AiSidePanelTab.Comments;
+    public bool IsAiFileBriefingTabSelected => FilePanelTab == FilePanelTab.FileBriefing;
+    public bool IsAiHistoryTabSelected => FilePanelTab == FilePanelTab.History;
+    public bool IsAiChatTabSelected => FilePanelTab == FilePanelTab.Chat;
+    public bool IsAiCommentsTabSelected => FilePanelTab == FilePanelTab.Comments;
     public bool ShowConversationRow =>
         !string.IsNullOrWhiteSpace(PullRequestBody) ||
         Timeline.Count > 0 ||
@@ -813,13 +813,13 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
         GenerateFileBriefingCommand.NotifyCanExecuteChanged();
     }
 
-    partial void OnAiSidePanelTabChanged(AiSidePanelTab value)
+    partial void OnFilePanelTabChanged(FilePanelTab value)
     {
         OnPropertyChanged(nameof(IsAiFileBriefingTabSelected));
         OnPropertyChanged(nameof(IsAiHistoryTabSelected));
         OnPropertyChanged(nameof(IsAiChatTabSelected));
         OnPropertyChanged(nameof(IsAiCommentsTabSelected));
-        if (value == AiSidePanelTab.History)
+        if (value == FilePanelTab.History)
             _ = EnsureFileHistoryLoadedAsync();
     }
 
@@ -833,19 +833,19 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
     private void ToggleAiReviewSection() => AiReviewSectionExpanded = !AiReviewSectionExpanded;
 
     [RelayCommand]
-    private void ToggleAiSidePanel() => ShowAiSidePanel = !ShowAiSidePanel;
+    private void ToggleFilePanel() => ShowFilePanel = !ShowFilePanel;
 
     [RelayCommand]
-    private void SelectAiFileBriefingTab() => AiSidePanelTab = AiSidePanelTab.FileBriefing;
+    private void SelectAiFileBriefingTab() => FilePanelTab = FilePanelTab.FileBriefing;
 
     [RelayCommand]
-    private void SelectAiHistoryTab() => AiSidePanelTab = AiSidePanelTab.History;
+    private void SelectAiHistoryTab() => FilePanelTab = FilePanelTab.History;
 
     [RelayCommand]
-    private void SelectAiChatTab() => AiSidePanelTab = AiSidePanelTab.Chat;
+    private void SelectAiChatTab() => FilePanelTab = FilePanelTab.Chat;
 
     [RelayCommand]
-    private void SelectAiCommentsTab() => AiSidePanelTab = AiSidePanelTab.Comments;
+    private void SelectAiCommentsTab() => FilePanelTab = FilePanelTab.Comments;
 
     [RelayCommand]
     private async Task SelectFileHistoryItemAsync(FileHistoryItemViewModel? item)
@@ -1024,7 +1024,7 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
             {
                 ApplyAiRunSnapshot(snapshot);
                 if (snapshot.State == AiRunState.Complete)
-                    ShowAiSidePanel = true;
+                    ShowFilePanel = true;
             }).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -1187,8 +1187,8 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
         ShowAiProgressDialog = false;
         ShowAiInstructionsDialog = false;
         ShowAiChat = false;
-        ShowAiSidePanel = false;
-        AiSidePanelTab = AiSidePanelTab.FileBriefing;
+        ShowFilePanel = false;
+        FilePanelTab = FilePanelTab.FileBriefing;
         AiChatInput = "";
         AiChatMessages.Clear();
         if (_session is not null)
@@ -1291,9 +1291,9 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
     [RelayCommand]
     private async Task ToggleAiChatAsync()
     {
-        ShowAiSidePanel = true;
+        ShowFilePanel = true;
         ShowAiChat = true;
-        AiSidePanelTab = AiSidePanelTab.Chat;
+        FilePanelTab = FilePanelTab.Chat;
         if (_session is null || AiChatMessages.Count > 0)
             return;
 
@@ -1999,7 +1999,7 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
             return;
 
         ForceSideThreadPanel = true;
-        OpenCommentsInAiSidePanel();
+        OpenCommentsInFilePanel();
     }
 
     [RelayCommand]

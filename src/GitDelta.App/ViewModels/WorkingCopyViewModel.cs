@@ -3842,6 +3842,118 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
     }
 
+    /// <summary>
+    /// Fetches remotes, then checks out <paramref name="branchName"/>, creating a local tracking
+    /// branch from <c>origin/{branchName}</c> (or another matching remote) when needed.
+    /// </summary>
+    public async Task CheckoutRemoteBranchAsync(string branchName, CancellationToken ct = default)
+    {
+        if (_repoPath is null || string.IsNullOrWhiteSpace(branchName))
+            return;
+
+        try
+        {
+            await _branches.FetchAsync(_repoPath, ct).ConfigureAwait(false);
+            var branches = await _branches.ListBranchesAsync(_repoPath, ct).ConfigureAwait(false);
+            var remoteRef = branches
+                .Where(b => b.IsRemote)
+                .Select(b => b.Name)
+                .FirstOrDefault(n =>
+                    string.Equals(n, "origin/" + branchName, StringComparison.Ordinal)
+                    || n.EndsWith("/" + branchName, StringComparison.Ordinal))
+                ?? "origin/" + branchName;
+
+            await CheckoutOrCreateTrackingWithDirtyHandlingAsync(branchName, remoteRef, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Checkout failed: {ex.Message}", exception: ex);
+        }
+    }
+
+    private async Task CheckoutOrCreateTrackingWithDirtyHandlingAsync(
+        string localBranch,
+        string remoteRef,
+        CancellationToken ct)
+    {
+        if (_repoPath is null)
+            return;
+
+        try
+        {
+            await _branches.CheckoutOrCreateTrackingAsync(_repoPath, localBranch, remoteRef, ct)
+                .ConfigureAwait(false);
+            await RefreshAsync().ConfigureAwait(false);
+            await LoadBranchesAsync().ConfigureAwait(false);
+            _notifications.Info($"Checked out {localBranch}.");
+        }
+        catch (GitException ex) when (ex.Message.Contains("local changes", StringComparison.OrdinalIgnoreCase)
+                                       || ex.StderrSummary?.Contains("would be overwritten", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var choice = await _checkoutBlockedDialog.ShowAsync(localBranch).ConfigureAwait(false);
+            if (choice is CheckoutBlockedChoice.StashOnly or CheckoutBlockedChoice.StashAndRestore)
+            {
+                await StashThenCheckoutTrackingAsync(
+                        localBranch,
+                        remoteRef,
+                        restoreAfter: choice == CheckoutBlockedChoice.StashAndRestore,
+                        ct)
+                    .ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task StashThenCheckoutTrackingAsync(
+        string localBranch,
+        string remoteRef,
+        bool restoreAfter,
+        CancellationToken ct)
+    {
+        if (_repoPath is null)
+            return;
+
+        try
+        {
+            await _stash.StashPushAsync(_repoPath, "GitDelta auto-stash", ct: ct).ConfigureAwait(false);
+            await _branches.CheckoutOrCreateTrackingAsync(_repoPath, localBranch, remoteRef, ct)
+                .ConfigureAwait(false);
+
+            if (restoreAfter)
+            {
+                try
+                {
+                    await _stash.StashPopAsync(_repoPath, ct: ct).ConfigureAwait(false);
+                    _notifications.Info("Stashed, checked out, and restored working changes.");
+                }
+                catch (Exception ex)
+                {
+                    _notifications.Error(
+                        $"Checked out, but stash pop failed: {ex.Message}",
+                        () => _ = PopStashAsync(),
+                        ex);
+                }
+            }
+            else
+            {
+                _notifications.Info("Stashed and checked out. Your stash was kept.");
+            }
+
+            await RefreshAsync().ConfigureAwait(false);
+            await LoadBranchesAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Stash and checkout failed: {ex.Message}", exception: ex);
+            await RefreshAsync().ConfigureAwait(false);
+            await LoadBranchesAsync().ConfigureAwait(false);
+        }
+    }
+
     private async Task StashThenCheckoutAsync(string targetRef, bool restoreAfter)
     {
         if (_repoPath is null) return;

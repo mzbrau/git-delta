@@ -34,6 +34,17 @@ See [GitHub accounts](../review/github-accounts.md).
 | Ignore whitespace | Default whitespace handling |
 | Context lines | Default context around hunks |
 
+## Shortcuts
+
+| Setting | Description |
+| --- | --- |
+| Keyboard shortcuts | View and remap application shortcuts |
+| Change | Capture the next key chord for a binding |
+| Reset / Clear | Restore the default gesture or unbind |
+| Reset all to defaults | Restore every binding |
+
+Gestures use `Ctrl+…` on Windows and macOS. Diff viewer copy and AI chat Enter keys remain fixed. See [Keyboard shortcuts](./keyboard-shortcuts.md) for the default table and id names used in `settings.json`.
+
 ## Git
 
 | Setting | Description |

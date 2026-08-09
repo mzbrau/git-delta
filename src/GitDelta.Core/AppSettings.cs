@@ -1,3 +1,5 @@
+using GitDelta.Core.Settings;
+
 namespace GitDelta.Core;
 
 public sealed record DiffOptions(
@@ -179,6 +181,12 @@ public sealed record AppSettings
 
     /// <summary>Local repository to GitHub account bindings.</summary>
     public List<RepositoryAccountBinding> RepositoryBindings { get; set; } = [];
+
+    /// <summary>
+    /// Configurable keyboard shortcuts. Missing entries inherit catalog defaults;
+    /// empty gesture strings mean unbound.
+    /// </summary>
+    public KeyboardShortcutBindings Shortcuts { get; set; } = KeyboardShortcutBindings.CreateDefaults();
 
     public DiffOptions ToDiffOptions() => new(
         Algorithm: DiffAlgorithm,

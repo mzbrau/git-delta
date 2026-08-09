@@ -47,6 +47,59 @@ public sealed class GitBranchService(IGitProcessRunner runner, IRepositoryGatePr
             ct), ct);
     }
 
+    public Task CheckoutOrCreateTrackingAsync(
+        string repositoryPath,
+        string localBranch,
+        string remoteRef,
+        CancellationToken ct = default) =>
+        gates.WithGateAsync(repositoryPath, gate => gate.RunWorktreeWriteAsync(async token =>
+        {
+            // Avoid nested gate acquisition — list refs with the runner directly.
+            var format = string.Join(FieldSeparator, "%(refname)", "%(HEAD)", "%(upstream:short)", "%(objectname)");
+            var listed = await runner.RunAsync(
+                    repositoryPath,
+                    ["for-each-ref", $"--format={format}", "refs/heads"],
+                    options: null,
+                    token)
+                .ConfigureAwait(false);
+            var hasLocal = listed.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.Split(FieldSeparator))
+                .Any(fields => fields.Length > 0
+                    && string.Equals(
+                        fields[0],
+                        "refs/heads/" + localBranch,
+                        StringComparison.Ordinal));
+
+            if (hasLocal)
+            {
+                await runner.RunAsync(repositoryPath, ["checkout", localBranch], options: null, token)
+                    .ConfigureAwait(false);
+                return;
+            }
+
+            // Start the local branch at the remote-tracking tip. --track needs a configured
+            // remote URL; starting from the ref works for plain refs/remotes/… tips too.
+            await runner.RunAsync(
+                    repositoryPath,
+                    ["checkout", "-B", localBranch, remoteRef],
+                    options: null,
+                    token)
+                .ConfigureAwait(false);
+            try
+            {
+                await runner.RunAsync(
+                        repositoryPath,
+                        ["branch", "--set-upstream-to=" + remoteRef, localBranch],
+                        options: null,
+                        token)
+                    .ConfigureAwait(false);
+            }
+            catch (GitException)
+            {
+                // Upstream is best-effort when the remote is not fully configured.
+            }
+        }, ct), ct);
+
     public Task DeleteBranchAsync(string repositoryPath, string name, bool force, CancellationToken ct = default) =>
         gates.WithGateAsync(repositoryPath, gate => gate.RunIndexWriteAsync(
             token => runner.RunAsync(repositoryPath, ["branch", force ? "-D" : "-d", "--", name], options: null, token),

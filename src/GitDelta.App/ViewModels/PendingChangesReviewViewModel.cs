@@ -151,8 +151,8 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         AiChangeBriefing = null;
         AiFileBriefing = null;
         IsChangeBriefingSelected = false;
-        ShowAiSidePanel = false;
-        AiSidePanelTab = AiSidePanelTab.FileBriefing;
+        ShowFilePanel = false;
+        FilePanelTab = FilePanelTab.FileBriefing;
         IsGeneratingFileBriefing = false;
         FileHistory = null;
         _fileHistoryCache.ClearAll();
@@ -207,11 +207,11 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     /// <summary>True when the "Change briefing" row (rather than a file or Comments) is the active selection.</summary>
     [ObservableProperty] private bool _isChangeBriefingSelected;
 
-    /// <summary>Whether the AI side panel (file briefing / history / chat tabs) is expanded.</summary>
-    [ObservableProperty] private bool _showAiSidePanel;
+    /// <summary>Whether the File Panel (file briefing / history / chat tabs) is expanded.</summary>
+    [ObservableProperty] private bool _showFilePanel;
 
-    /// <summary>Active tab in the AI side panel.</summary>
-    [ObservableProperty] private AiSidePanelTab _aiSidePanelTab = AiSidePanelTab.FileBriefing;
+    /// <summary>Active tab in the File Panel.</summary>
+    [ObservableProperty] private FilePanelTab _filePanelTab = FilePanelTab.FileBriefing;
 
     /// <summary>True while a manually requested file briefing is in flight.</summary>
     [ObservableProperty] private bool _isGeneratingFileBriefing;
@@ -321,14 +321,14 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     /// <summary>The Comments row is only offered once at least one local comment exists.</summary>
     public bool ShowCommentsRow => LocalComments.Count > 0;
 
-    /// <summary>True when the "File briefing" tab is active in the AI side panel.</summary>
-    public bool IsAiFileBriefingTabSelected => AiSidePanelTab == AiSidePanelTab.FileBriefing;
+    /// <summary>True when the "File briefing" tab is active in the File Panel.</summary>
+    public bool IsAiFileBriefingTabSelected => FilePanelTab == FilePanelTab.FileBriefing;
 
-    /// <summary>True when the History tab is active in the AI side panel.</summary>
-    public bool IsAiHistoryTabSelected => AiSidePanelTab == AiSidePanelTab.History;
+    /// <summary>True when the History tab is active in the File Panel.</summary>
+    public bool IsAiHistoryTabSelected => FilePanelTab == FilePanelTab.History;
 
-    /// <summary>True when the chat tab is active in the AI side panel.</summary>
-    public bool IsAiChatTabSelected => AiSidePanelTab == AiSidePanelTab.Chat;
+    /// <summary>True when the chat tab is active in the File Panel.</summary>
+    public bool IsAiChatTabSelected => FilePanelTab == FilePanelTab.Chat;
 
     public bool CanSendAiChat =>
         !string.IsNullOrWhiteSpace(AiChatInput) && !IsAiRunActive && !IsAiChatBusy;
@@ -442,12 +442,12 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         NotifyAiFileDetailChanged();
     }
 
-    partial void OnAiSidePanelTabChanged(AiSidePanelTab value)
+    partial void OnFilePanelTabChanged(FilePanelTab value)
     {
         OnPropertyChanged(nameof(IsAiFileBriefingTabSelected));
         OnPropertyChanged(nameof(IsAiHistoryTabSelected));
         OnPropertyChanged(nameof(IsAiChatTabSelected));
-        if (value == AiSidePanelTab.History)
+        if (value == FilePanelTab.History)
             _ = EnsureFileHistoryLoadedAsync();
     }
 
@@ -491,16 +491,16 @@ public partial class PendingChangesReviewViewModel : ObservableObject
     private void SelectChangeBriefing() => IsChangeBriefingSelected = true;
 
     [RelayCommand]
-    private void ToggleAiSidePanel() => ShowAiSidePanel = !ShowAiSidePanel;
+    private void ToggleFilePanel() => ShowFilePanel = !ShowFilePanel;
 
     [RelayCommand]
-    private void SelectAiFileBriefingTab() => AiSidePanelTab = AiSidePanelTab.FileBriefing;
+    private void SelectAiFileBriefingTab() => FilePanelTab = FilePanelTab.FileBriefing;
 
     [RelayCommand]
-    private void SelectAiHistoryTab() => AiSidePanelTab = AiSidePanelTab.History;
+    private void SelectAiHistoryTab() => FilePanelTab = FilePanelTab.History;
 
     [RelayCommand]
-    private void SelectAiChatTab() => AiSidePanelTab = AiSidePanelTab.Chat;
+    private void SelectAiChatTab() => FilePanelTab = FilePanelTab.Chat;
 
     [RelayCommand]
     private async Task SelectFileHistoryItemAsync(FileHistoryItemViewModel? item)
@@ -671,7 +671,7 @@ public partial class PendingChangesReviewViewModel : ObservableObject
             {
                 ApplyAiRunSnapshot(snapshot);
                 if (snapshot.State == AiRunState.Complete)
-                    ShowAiSidePanel = true;
+                    ShowFilePanel = true;
             }).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -930,12 +930,12 @@ public partial class PendingChangesReviewViewModel : ObservableObject
         }
     }
 
-    /// <summary>Expands the AI side panel (if collapsed) and switches it to the chat tab.</summary>
+    /// <summary>Expands the File Panel (if collapsed) and switches it to the chat tab.</summary>
     [RelayCommand]
     private async Task ToggleAiChatAsync()
     {
-        ShowAiSidePanel = true;
-        AiSidePanelTab = AiSidePanelTab.Chat;
+        ShowFilePanel = true;
+        FilePanelTab = FilePanelTab.Chat;
         OnPropertyChanged(nameof(AiChatSelectedFileLabel));
         OnPropertyChanged(nameof(AiChatPlaceholder));
         if (_host is null || AiChatMessages.Count > 0)
@@ -1245,7 +1245,7 @@ public partial class PendingChangesReviewViewModel : ObservableObject
             IsChangeBriefingSelected = false;
         }
 
-        if (AiSidePanelTab == AiSidePanelTab.History && file is not null)
+        if (FilePanelTab == FilePanelTab.History && file is not null)
             _ = EnsureFileHistoryLoadedAsync();
 
         if (file is null || diff is null)

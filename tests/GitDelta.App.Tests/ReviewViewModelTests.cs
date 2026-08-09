@@ -1441,7 +1441,7 @@ public sealed class ReviewViewModelTests
         Assert.That(vm.HasExpandedInlineThread, Is.False);
         Assert.That(vm.ShowSideThreadPanel, Is.True);
         Assert.That(vm.SelectedThread, Is.Not.Null);
-        Assert.That(vm.ShowAiSidePanel, Is.True);
+        Assert.That(vm.ShowFilePanel, Is.True);
         Assert.That(vm.IsAiCommentsTabSelected, Is.True);
     }
 
@@ -2204,7 +2204,7 @@ public sealed class ReviewViewModelTests
         var vm = CreateViewModel(Substitute.For<IPullRequestService>(), settings);
 
         Assert.That(vm.HasAiFileBriefing, Is.False);
-        Assert.That(vm.ShowAiSidePanel, Is.True);
+        Assert.That(vm.ShowFilePanel, Is.True);
 
         vm.SelectedFile = new FileItemViewModel(FilePath.From("src/Empty.cs"), ChangeKind.Modified, isStagedList: false);
         Assert.That(vm.HasAiFileBriefing, Is.False);
@@ -2216,8 +2216,8 @@ public sealed class ReviewViewModelTests
             ["Interesting finding"]);
         Assert.That(vm.HasAiFileBriefing, Is.True);
 
-        vm.ToggleAiSidePanelCommand.Execute(null);
-        Assert.That(vm.ShowAiSidePanel, Is.False);
+        vm.ToggleFilePanelCommand.Execute(null);
+        Assert.That(vm.ShowFilePanel, Is.False);
         Assert.That(vm.HasAiFileBriefing, Is.True);
     }
 

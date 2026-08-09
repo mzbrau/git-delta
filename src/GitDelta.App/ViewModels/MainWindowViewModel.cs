@@ -41,6 +41,10 @@ public partial class MainWindowViewModel : ObservableObject
         IRepositoryLocator repositoryLocator,
         IConfirmDialog confirm,
         IGitHistoryService history,
+        LocalRepositoryLocator localRepositoryLocator,
+        IGitStatusService statusService,
+        IGitCloneService cloneService,
+        ICheckoutPullRequestDialog checkoutPullRequestDialog,
         IAIReviewService? ai = null)
     {
         WorkingCopy = workingCopy;
@@ -54,6 +58,10 @@ public partial class MainWindowViewModel : ObservableObject
         _accounts = accounts;
         _repositoryLocator = repositoryLocator;
         _confirm = confirm;
+        _repositoryLocatorForPr = localRepositoryLocator;
+        _statusForPrCheckout = statusService;
+        _cloneService = cloneService;
+        _checkoutPrDialog = checkoutPullRequestDialog;
         _ai = ai ?? NullAIReviewService.Instance;
         RecentRepositories = new(_settings.Current.RecentRepositories);
         DevelopmentFolder = _settings.Current.DevelopmentFolder ?? "";
@@ -107,7 +115,12 @@ public partial class MainWindowViewModel : ObservableObject
                 // after the loading overlay clears.
                 if (Review.IsPullRequestMode && WorkingCopy.IsHistoryMode)
                     WorkingCopy.SelectFileStatusCommand.Execute(null);
+
+                CheckoutPullRequestBranchCommand.NotifyCanExecuteChanged();
             }
+
+            if (e.PropertyName is nameof(ReviewViewModel.SelectedPullRequest))
+                CheckoutPullRequestBranchCommand.NotifyCanExecuteChanged();
         };
 
         _expandedNavigatorWidth = Math.Max(MinNavigatorWidth, _settings.Current.NavigatorWidth);
@@ -152,7 +165,7 @@ public partial class MainWindowViewModel : ObservableObject
     public System.Collections.ObjectModel.ObservableCollection<GitHubAccountSettings> GitHubAccounts { get; }
     public System.Collections.ObjectModel.ObservableCollection<string> EnterpriseHostUrls { get; }
 
-    public string[] SettingsCategories { get; } = ["General", "Accounts", "Diff", "Git", "AI", "Diagnostics"];
+    public string[] SettingsCategories { get; } = ["General", "Accounts", "Diff", "Git", "Shortcuts", "AI", "Diagnostics"];
 
     [ObservableProperty] private string _selectedSettingsCategory = "General";
     [ObservableProperty] private GitHubAccountSettings? _selectedGitHubAccount;
@@ -255,6 +268,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool IsSettingsAccounts => SelectedSettingsCategory == "Accounts";
     public bool IsSettingsDiff => SelectedSettingsCategory == "Diff";
     public bool IsSettingsGit => SelectedSettingsCategory == "Git";
+    public bool IsSettingsShortcuts => SelectedSettingsCategory == "Shortcuts";
     public bool IsSettingsAi => SelectedSettingsCategory == "AI";
     public bool IsSettingsDiagnostics => SelectedSettingsCategory == "Diagnostics";
     public bool ShowAddAccountForm => IsAddingGitHubAccount || SelectedGitHubAccount is null;
@@ -275,6 +289,7 @@ public partial class MainWindowViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSettingsAccounts));
         OnPropertyChanged(nameof(IsSettingsDiff));
         OnPropertyChanged(nameof(IsSettingsGit));
+        OnPropertyChanged(nameof(IsSettingsShortcuts));
         OnPropertyChanged(nameof(IsSettingsAi));
         OnPropertyChanged(nameof(IsSettingsDiagnostics));
 
@@ -283,6 +298,9 @@ public partial class MainWindowViewModel : ObservableObject
 
         if (value == "AI" && AiAvailableModels.Count == 0)
             _ = RefreshAiModelsAsync();
+
+        if (value == "Shortcuts")
+            ReloadShortcutBindingsUi();
     }
 
     partial void OnSelectedGitHubAccountChanged(GitHubAccountSettings? value)
@@ -434,13 +452,13 @@ public partial class MainWindowViewModel : ObservableObject
 
         if (ShowPullRequestPane)
         {
-            Review.ShowAiSidePanel = true;
-            Review.AiSidePanelTab = AiSidePanelTab.History;
+            Review.ShowFilePanel = true;
+            Review.FilePanelTab = FilePanelTab.History;
         }
         else
         {
-            WorkingCopy.PendingReview.ShowAiSidePanel = true;
-            WorkingCopy.PendingReview.AiSidePanelTab = AiSidePanelTab.History;
+            WorkingCopy.PendingReview.ShowFilePanel = true;
+            WorkingCopy.PendingReview.FilePanelTab = FilePanelTab.History;
         }
     }
 
@@ -680,6 +698,8 @@ public partial class MainWindowViewModel : ObservableObject
         ShowSettings = true;
         if (SelectedSettingsCategory == "Accounts" && !IsAddingGitHubAccount && SelectedGitHubAccount is null && GitHubAccounts.Count > 0)
             SelectedGitHubAccount = GitHubAccounts[0];
+        if (SelectedSettingsCategory == "Shortcuts")
+            ReloadShortcutBindingsUi();
     }
 
     [RelayCommand]

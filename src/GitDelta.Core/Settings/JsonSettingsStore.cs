@@ -36,6 +36,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         var loaded = JsonSerializer.Deserialize<AppSettings>(json);
         if (loaded is not null)
         {
+            loaded.Shortcuts ??= KeyboardShortcutBindings.CreateDefaults();
             lock (_lock)
                 _current = loaded;
         }
@@ -144,5 +145,6 @@ public sealed class JsonSettingsStore : ISettingsStore
         EnterpriseHostUrls = [.. s.EnterpriseHostUrls],
         Accounts = [.. s.Accounts],
         RepositoryBindings = [.. s.RepositoryBindings],
+        Shortcuts = (s.Shortcuts ?? KeyboardShortcutBindings.CreateDefaults()).Clone(),
     };
 }

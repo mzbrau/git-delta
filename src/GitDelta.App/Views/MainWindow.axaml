@@ -1152,6 +1152,12 @@
                           ToolTip.Tip="Open on GitHub">
                     <icons:MaterialIcon Kind="Github" Width="18" Height="18" />
                   </Button>
+                  <Button DockPanel.Dock="Right" Classes="IconOnly" Width="28" Height="28" Padding="4"
+                          Margin="0,0,4,0"
+                          Command="{Binding CheckoutPullRequestBranchCommand}"
+                          ToolTip.Tip="Checkout branch">
+                    <icons:MaterialIcon Kind="SourceBranch" Width="18" Height="18" />
+                  </Button>
                   <Button DockPanel.Dock="Right" Classes="IconOnly" Width="24" Height="24" Padding="3"
                           Margin="0,0,4,0"
                           Command="{Binding Review.CancelAiReviewCommand}"
@@ -1442,9 +1448,9 @@
                   <icons:MaterialIcon Kind="LanguageMarkdown" Width="18" Height="18" />
                 </Button>
                 <Button Classes="ReviewAction"
-                        Classes.Pressed="{Binding WorkingCopy.PendingReview.ShowAiSidePanel}"
-                        Command="{Binding WorkingCopy.PendingReview.ToggleAiSidePanelCommand}"
-                        ToolTip.Tip="Toggle AI panel">
+                        Classes.Pressed="{Binding WorkingCopy.PendingReview.ShowFilePanel}"
+                        Command="{Binding WorkingCopy.PendingReview.ToggleFilePanelCommand}"
+                        ToolTip.Tip="Toggle File Panel">
                   <icons:MaterialIcon Kind="DockRight" Width="18" Height="18" />
                 </Button>
                 <Border Width="1" Height="22" Margin="2,0"
@@ -1987,20 +1993,20 @@
 
               <GridSplitter Grid.Column="1" Width="4" ResizeDirection="Columns"
                             Background="{DynamicResource ForgeOutlineVariantBrush}"
-                            IsVisible="{Binding WorkingCopy.PendingReview.ShowAiSidePanel}" />
+                            IsVisible="{Binding WorkingCopy.PendingReview.ShowFilePanel}" />
 
-              <!-- AI side panel: File Briefing / Chat tabs -->
+              <!-- File Panel: File Briefing / Chat tabs -->
               <Border Grid.Column="2" Padding="0"
                       Background="{DynamicResource ForgeSurfaceContainerBrush}"
                       BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0"
-                      IsVisible="{Binding WorkingCopy.PendingReview.ShowAiSidePanel}">
+                      IsVisible="{Binding WorkingCopy.PendingReview.ShowFilePanel}">
                 <DockPanel>
                   <Border DockPanel.Dock="Top" Padding="10,8"
                           BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
                     <DockPanel>
                       <Button DockPanel.Dock="Right" Classes="IconOnly" Width="24" Height="24" Padding="3"
-                              Command="{Binding WorkingCopy.PendingReview.ToggleAiSidePanelCommand}"
-                              ToolTip.Tip="Collapse AI panel">
+                              Command="{Binding WorkingCopy.PendingReview.ToggleFilePanelCommand}"
+                              ToolTip.Tip="Collapse File Panel">
                         <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
                       </Button>
                       <StackPanel Orientation="Horizontal" Spacing="4">
@@ -2312,9 +2318,9 @@
                   <icons:MaterialIcon Kind="LanguageMarkdown" Width="18" Height="18" />
                 </Button>
                 <Button Classes="ReviewAction"
-                        Classes.Pressed="{Binding Review.ShowAiSidePanel}"
-                        Command="{Binding Review.ToggleAiSidePanelCommand}"
-                        ToolTip.Tip="Toggle AI panel">
+                        Classes.Pressed="{Binding Review.ShowFilePanel}"
+                        Command="{Binding Review.ToggleFilePanelCommand}"
+                        ToolTip.Tip="Toggle File Panel">
                   <icons:MaterialIcon Kind="DockRight" Width="18" Height="18" />
                 </Button>
                 <Border Width="1" Height="22" Margin="2,0"
@@ -3029,20 +3035,20 @@
 
               <GridSplitter Grid.Column="1" Width="4" ResizeDirection="Columns"
                             Background="{DynamicResource ForgeOutlineVariantBrush}"
-                            IsVisible="{Binding Review.ShowAiSidePanel}" />
+                            IsVisible="{Binding Review.ShowFilePanel}" />
 
-              <!-- AI side panel: File Briefing / Chat tabs -->
+              <!-- File Panel: File Briefing / Chat tabs -->
               <Border Grid.Column="2" Padding="0"
                       Background="{DynamicResource ForgeSurfaceContainerBrush}"
                       BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="1,0,0,0"
-                      IsVisible="{Binding Review.ShowAiSidePanel}">
+                      IsVisible="{Binding Review.ShowFilePanel}">
                 <DockPanel>
                   <Border DockPanel.Dock="Top" Padding="10,8"
                           BorderBrush="{DynamicResource ForgeOutlineVariantBrush}" BorderThickness="0,0,0,1">
                     <DockPanel>
                       <Button DockPanel.Dock="Right" Classes="IconOnly" Width="24" Height="24" Padding="3"
-                              Command="{Binding Review.ToggleAiSidePanelCommand}"
-                              ToolTip.Tip="Collapse AI panel">
+                              Command="{Binding Review.ToggleFilePanelCommand}"
+                              ToolTip.Tip="Collapse File Panel">
                         <icons:MaterialIcon Kind="ChevronRight" Width="14" Height="14" />
                       </Button>
                       <StackPanel Orientation="Horizontal" Spacing="4">
@@ -4256,6 +4262,58 @@
                               Command="{Binding ClearAiDataCommand}"
                               IsEnabled="{Binding IsClearingAiData, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
                     </StackPanel>
+                  </StackPanel>
+                </ScrollViewer>
+
+                <!-- Shortcuts -->
+                <ScrollViewer IsVisible="{Binding IsSettingsShortcuts}" HorizontalScrollBarVisibility="Disabled">
+                  <StackPanel Spacing="12">
+                    <DockPanel>
+                      <Button DockPanel.Dock="Right" Classes="Ghost" Content="Reset all to defaults"
+                              Command="{Binding ResetAllShortcutsCommand}" />
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="KEYBOARD SHORTCUTS" Classes="PanelHeader" Opacity="0.7" />
+                        <TextBlock Text="App shortcuts use Control on Windows and macOS. Diff copy (Ctrl/Cmd+C) and chat Enter keys are fixed."
+                                   FontSize="11" Opacity="0.65" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </DockPanel>
+
+                    <TextBlock Text="{Binding ShortcutCaptureHint}"
+                               IsVisible="{Binding IsCapturingShortcut}"
+                               FontSize="12" FontWeight="SemiBold"
+                               Foreground="{DynamicResource ForgePrimaryBrush}"
+                               TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ShortcutConflictSummary}"
+                               FontSize="11" Opacity="0.75" TextWrapping="Wrap" />
+
+                    <ItemsControl ItemsSource="{Binding ShortcutBindings}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ShortcutBindingRowViewModel">
+                          <DockPanel Margin="0,0,0,8">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4">
+                              <Button Classes="Ghost" Content="Change" FontSize="11"
+                                      Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).BeginCaptureShortcutCommand}"
+                                      CommandParameter="{Binding}" />
+                              <Button Classes="Ghost" Content="Reset" FontSize="11"
+                                      Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).ResetShortcutCommand}"
+                                      CommandParameter="{Binding}" />
+                              <Button Classes="Ghost" Content="Clear" FontSize="11"
+                                      Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).ClearShortcutCommand}"
+                                      CommandParameter="{Binding}" />
+                            </StackPanel>
+                            <StackPanel Spacing="2" Margin="0,0,12,0">
+                              <TextBlock Text="{Binding DisplayName}" FontSize="13" />
+                              <TextBlock Text="{Binding Category}" FontSize="11" Opacity="0.65" />
+                              <TextBlock FontSize="12" FontFamily="{DynamicResource ForgeCodeFont}"
+                                         Text="{Binding GestureDisplay}" />
+                              <TextBlock Text="{Binding ConflictHint}" FontSize="11"
+                                         Foreground="{DynamicResource ForgeErrorBrush}"
+                                         TextWrapping="Wrap" />
+                            </StackPanel>
+                          </DockPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                   </StackPanel>
                 </ScrollViewer>
 

@@ -10,7 +10,7 @@ You can review **uncommitted** work with the same review mindset you use for pul
 
 ## Where it lives
 
-On **File Status**, use the Change Briefing / Comments rows and the AI panel when enabled.
+On **File Status**, use the Change Briefing / Comments rows and the File Panel when enabled.
 
 ## What you can do
 

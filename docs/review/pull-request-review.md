@@ -13,12 +13,27 @@ The PR workspace is built for reading diffs and leaving high-quality review comm
 | Action | Purpose |
 | --- | --- |
 | **Open on GitHub** | View the PR in the browser |
+| **Checkout branch** | Fetch and check out the PR head branch in a local clone (see below) |
 | Reviewer badges | Who is assigned / reviewing |
 | **Submit** | Upload pending comments / submit a review (badge shows pending count) |
 | **Request changes / Approve** | Submit with that decision (via the submit flow) |
 | Mark as not viewed | Clear viewed state for navigation |
 | Begin file comment | Start a file-level comment |
 | AI review | Optional assist — see [AI assist](./ai-assist.md) |
+
+### Checkout branch
+
+Use **Checkout branch** (next to **Open on GitHub**) when you want to work on the PR head branch in your working copy:
+
+1. Git Delta locates local clones under your [development folder](./github-accounts.md) that match the PR repository.
+2. A confirmation dialog shows the branch name and each candidate clone’s pending-change status (clean / staged+unstaged / conflicted).
+3. If several clones match, pick which one to use (the choice is remembered as a repository binding).
+4. If no clone exists, you are prompted to clone into the development folder first.
+5. After confirm: the selected repository becomes active, Git Delta **fetches**, checks out the head branch (creating a local tracking branch from `origin/…` when needed), and leaves pull request mode so you land on **File Status**.
+
+If checkout is blocked by local changes, the usual stash / stash-and-restore prompt appears. This does **not** use the internal `refs/gitdelta/pr/…` review ref — that remains for PR review materialisation only.
+
+If locate/clone fails, see [Troubleshooting](../reference/troubleshooting.md).
 
 ## File list
 

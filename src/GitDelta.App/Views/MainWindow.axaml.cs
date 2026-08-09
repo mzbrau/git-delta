@@ -34,12 +34,12 @@ public partial class MainWindow : Window
     private bool _aiChatScrollSubscribed;
     private bool _aiChatRowSubscribed;
     private bool _aiProgressScrollSubscribed;
-    private double _prAiSidePanelWidth = 320;
+    private double _prFilePanelWidth = 320;
     private bool _wcAiChatScrollSubscribed;
     private bool _wcAiChatRowSubscribed;
     private bool _wcAiProgressScrollSubscribed;
     private bool _magicCommitActivityScrollSubscribed;
-    private double _wcAiSidePanelWidth = 320;
+    private double _wcFilePanelWidth = 320;
     private bool _inlineCommentLayoutHooked;
     private bool _wcInlineCommentLayoutHooked;
     private bool _syncingInlineCommentLayout;
@@ -125,8 +125,8 @@ public partial class MainWindow : Window
             _wcAiChatRowSubscribed = true;
         }
 
-        SyncAiSidePanelWidth();
-        SyncWcAiSidePanelWidth();
+        SyncFilePanelWidth();
+        SyncWcFilePanelWidth();
 
         vm.Review.FocusCommentDraftRequested += FocusPrCommentDraft;
         vm.Review.FocusFileFilterRequested += FocusPrFileFilter;
@@ -785,12 +785,27 @@ public partial class MainWindow : Window
         if (DataContext is not MainWindowViewModel vm)
             return;
 
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.T)
+        if (vm.IsCapturingShortcut)
         {
-            if (vm.WorkingCopy.HasRepository)
+            if (e.Key == Key.Escape)
             {
                 e.Handled = true;
-                _ = vm.ShowQuickOpenCommand.ExecuteAsync(null);
+                vm.CancelCaptureShortcutCommand.Execute(null);
+                return;
+            }
+
+            var chord = Services.AvaloniaKeyMapper.FormatChord(e.KeyModifiers, e.Key);
+            if (!string.IsNullOrEmpty(chord) && vm.TryApplyCapturedShortcut(chord))
+            {
+                e.Handled = true;
+                return;
+            }
+
+            // Swallow modifier-only presses while capturing.
+            if (e.Key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift
+                or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin)
+            {
+                e.Handled = true;
             }
 
             return;
@@ -807,79 +822,25 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!vm.Review.IsPullRequestMode)
+        var ctrl = e.KeyModifiers.HasFlag(KeyModifiers.Control);
+        var shift = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
+        var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+        var keyToken = Services.AvaloniaKeyMapper.ToKeyToken(e.Key);
+        var textEntry = IsTextEntryFocused();
+
+        var id = GitDelta.Core.Settings.KeyboardShortcutResolver.MatchWithAliases(
+            vm.SettingsShortcutsSnapshot(),
+            ctrl,
+            shift,
+            alt,
+            keyToken,
+            textEntry);
+
+        if (id is null)
             return;
 
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.Enter)
-        {
+        if (vm.TryHandleKeyboardShortcut(id))
             e.Handled = true;
-            _ = vm.Review.SubmitCommentShortcutCommand.ExecuteAsync(null);
-            return;
-        }
-
-        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.F)
-        {
-            e.Handled = true;
-            vm.Review.RequestFileFilterFocusCommand.Execute(null);
-            return;
-        }
-
-        if (e.KeyModifiers != KeyModifiers.None)
-            return;
-
-        if (IsTextEntryFocused())
-            return;
-
-        switch (e.Key)
-        {
-            case Key.Escape:
-                if (vm.Review.IsMentionPopupOpen)
-                {
-                    e.Handled = true;
-                    vm.Review.DismissMentionPopupCommand.Execute(null);
-                }
-                else if (vm.Review.HasDraftCommentAnchor || vm.Review.IsEditingComment)
-                {
-                    e.Handled = true;
-                    vm.Review.ClearDraftCommentAnchorCommand.Execute(null);
-                }
-                else if (vm.Review.HasExpandedInlineThread || vm.Review.ShowSideThreadPanel)
-                {
-                    e.Handled = true;
-                    vm.Review.ClearExpandedThreadCommand.Execute(null);
-                }
-                break;
-            case Key.J:
-            case Key.Down:
-                e.Handled = true;
-                vm.Review.SelectNextFileCommand.Execute(null);
-                break;
-            case Key.K:
-            case Key.Up:
-                e.Handled = true;
-                vm.Review.SelectPreviousFileCommand.Execute(null);
-                break;
-            case Key.V:
-                e.Handled = true;
-                _ = vm.Review.ToggleSelectedViewedCommand.ExecuteAsync(null);
-                break;
-            case Key.N:
-                e.Handled = true;
-                vm.Review.SelectNextThreadCommand.Execute(null);
-                break;
-            case Key.P:
-                e.Handled = true;
-                vm.Review.SelectPreviousThreadCommand.Execute(null);
-                break;
-            case Key.C:
-                e.Handled = true;
-                vm.Review.FocusCommentDraftCommand.Execute(null);
-                break;
-            case Key.Oem2:
-                e.Handled = true;
-                vm.Review.RequestFileFilterFocusCommand.Execute(null);
-                break;
-        }
     }
 
     private bool IsTextEntryFocused()
@@ -905,24 +866,24 @@ public partial class MainWindow : Window
 
     private void OnReviewPropertyChangedForAiChat(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(ReviewViewModel.ShowAiSidePanel)
+        if (e.PropertyName is nameof(ReviewViewModel.ShowFilePanel)
             or nameof(ReviewViewModel.IsConversationSelected))
-            SyncAiSidePanelWidth();
+            SyncFilePanelWidth();
         else if (e.PropertyName == nameof(ReviewViewModel.IsAiFileBriefingTabSelected))
             ScrollAiChatToEnd();
     }
 
-    private void SyncAiSidePanelWidth()
+    private void SyncFilePanelWidth()
     {
         if (DataContext is not MainWindowViewModel vm) return;
         if (this.FindControl<Grid>("PrDiffChatGrid") is not { } grid) return;
         if (grid.ColumnDefinitions.Count < 3) return;
 
         var column = grid.ColumnDefinitions[2];
-        var show = vm.Review.ShowAiSidePanel && !vm.Review.IsConversationSelected;
+        var show = vm.Review.ShowFilePanel && !vm.Review.IsConversationSelected;
         if (show)
         {
-            var width = Math.Clamp(_prAiSidePanelWidth, 240, 560);
+            var width = Math.Clamp(_prFilePanelWidth, 240, 560);
             column.MinWidth = 240;
             column.MaxWidth = 560;
             column.Width = new GridLength(width);
@@ -931,7 +892,7 @@ public partial class MainWindow : Window
         else
         {
             if (column.Width.IsAbsolute && column.Width.Value >= 240)
-                _prAiSidePanelWidth = Math.Clamp(column.Width.Value, 240, 560);
+                _prFilePanelWidth = Math.Clamp(column.Width.Value, 240, 560);
             column.MinWidth = 0;
             column.MaxWidth = 560;
             column.Width = new GridLength(0);
@@ -941,7 +902,7 @@ public partial class MainWindow : Window
     private void ScrollAiChatToEnd()
     {
         if (DataContext is not MainWindowViewModel vm ||
-            !vm.Review.ShowAiSidePanel || !vm.Review.IsAiChatTabSelected)
+            !vm.Review.ShowFilePanel || !vm.Review.IsAiChatTabSelected)
             return;
         Dispatcher.UIThread.Post(() =>
         {
@@ -1000,25 +961,25 @@ public partial class MainWindow : Window
 
     private void OnWcReviewPropertyChangedForAiChat(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(PendingChangesReviewViewModel.ShowAiSidePanel)
+        if (e.PropertyName is nameof(PendingChangesReviewViewModel.ShowFilePanel)
             or nameof(PendingChangesReviewViewModel.IsCommentsSelected))
-            SyncWcAiSidePanelWidth();
+            SyncWcFilePanelWidth();
         else if (e.PropertyName == nameof(PendingChangesReviewViewModel.IsAiFileBriefingTabSelected))
             ScrollWcAiChatToEnd();
     }
 
-    private void SyncWcAiSidePanelWidth()
+    private void SyncWcFilePanelWidth()
     {
         if (DataContext is not MainWindowViewModel vm) return;
         if (this.FindControl<Grid>("WcDiffChatGrid") is not { } grid) return;
         if (grid.ColumnDefinitions.Count < 3) return;
 
         var column = grid.ColumnDefinitions[2];
-        var show = vm.WorkingCopy.PendingReview.ShowAiSidePanel
+        var show = vm.WorkingCopy.PendingReview.ShowFilePanel
                    && !vm.WorkingCopy.PendingReview.IsCommentsSelected;
         if (show)
         {
-            var width = Math.Clamp(_wcAiSidePanelWidth, 240, 560);
+            var width = Math.Clamp(_wcFilePanelWidth, 240, 560);
             column.MinWidth = 240;
             column.MaxWidth = 560;
             column.Width = new GridLength(width);
@@ -1027,7 +988,7 @@ public partial class MainWindow : Window
         else
         {
             if (column.Width.IsAbsolute && column.Width.Value >= 240)
-                _wcAiSidePanelWidth = Math.Clamp(column.Width.Value, 240, 560);
+                _wcFilePanelWidth = Math.Clamp(column.Width.Value, 240, 560);
             column.MinWidth = 0;
             column.MaxWidth = 560;
             column.Width = new GridLength(0);
@@ -1037,7 +998,7 @@ public partial class MainWindow : Window
     private void ScrollWcAiChatToEnd()
     {
         if (DataContext is not MainWindowViewModel vm ||
-            !vm.WorkingCopy.PendingReview.ShowAiSidePanel || !vm.WorkingCopy.PendingReview.IsAiChatTabSelected)
+            !vm.WorkingCopy.PendingReview.ShowFilePanel || !vm.WorkingCopy.PendingReview.IsAiChatTabSelected)
             return;
         Dispatcher.UIThread.Post(() =>
         {
@@ -1069,8 +1030,8 @@ public partial class MainWindow : Window
         if (Vm.WindowWidth >= 640) Width = Vm.WindowWidth;
         if (Vm.WindowHeight >= 480) Height = Vm.WindowHeight;
         ApplyColumnWidths();
-        SyncAiSidePanelWidth();
-        SyncWcAiSidePanelWidth();
+        SyncFilePanelWidth();
+        SyncWcFilePanelWidth();
 
         if (global::GitDelta.App.App.Services.GetService(typeof(AvaloniaConfirmDialog)) is AvaloniaConfirmDialog confirm)
             confirm.Owner = this;
@@ -1080,6 +1041,8 @@ public partial class MainWindow : Window
             reviewSubmit.Owner = this;
         if (global::GitDelta.App.App.Services.GetService(typeof(AvaloniaCheckoutBlockedDialog)) is AvaloniaCheckoutBlockedDialog checkoutBlocked)
             checkoutBlocked.Owner = this;
+        if (global::GitDelta.App.App.Services.GetService(typeof(AvaloniaCheckoutPullRequestDialog)) is AvaloniaCheckoutPullRequestDialog checkoutPr)
+            checkoutPr.Owner = this;
 
         // Defer repo open so the window can paint first.
         Dispatcher.UIThread.Post(() => _ = Vm.TryOpenLastRepositoryAsync(), DispatcherPriority.Background);
