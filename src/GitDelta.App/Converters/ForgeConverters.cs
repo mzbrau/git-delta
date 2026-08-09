@@ -172,6 +172,10 @@ public static class ForgeConverters
         new FuncValueConverter<bool, MaterialIconKind>(expanded =>
             expanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight);
 
+    public static readonly IValueConverter SelectedRowBrush =
+        new FuncValueConverter<bool, IBrush>(selected =>
+            selected ? Brush("ForgePrimaryContainerBrush") : Brushes.Transparent);
+
     public static readonly IValueConverter IsPositive =
         new FuncValueConverter<int, bool>(v => v > 0);
 

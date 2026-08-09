@@ -122,7 +122,8 @@ public sealed class MainWindowViewModelTests
             _notifications,
             _accounts,
             _repositoryLocator,
-            confirm);
+            confirm,
+            Substitute.For<IGitHistoryService>());
     }
 
     [Test]

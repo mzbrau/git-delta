@@ -133,16 +133,19 @@ public interface IGitRemoteService
     Task<string?> GetRemoteUrlAsync(string repositoryPath, string remoteName = "origin", CancellationToken ct = default);
 }
 
-/// <summary>List, create annotated tags, and push tags.</summary>
+/// <summary>List, create tags, and push tags.</summary>
 public interface IGitTagService
 {
     Task<IReadOnlyList<TagInfo>> ListTagsAsync(string repositoryPath, CancellationToken ct = default);
 
-    /// <summary>Creates an annotated tag on <c>HEAD</c> (<c>git tag -a -m</c>).</summary>
+    /// <summary>
+    /// Creates a tag on <c>HEAD</c>. Non-empty <paramref name="message"/> creates an annotated tag
+    /// (<c>git tag -a -m</c>); whitespace/empty creates a lightweight tag (<c>git tag</c>).
+    /// </summary>
     Task CreateAnnotatedTagAsync(
         string repositoryPath,
         string name,
-        string message,
+        string? message,
         CancellationToken ct = default);
 
     /// <summary>Pushes a single tag ref to <c>origin</c>.</summary>
@@ -252,6 +255,11 @@ public interface IGitHistoryService
     Task<CommitInfo?> GetFileCreatedCommitAsync(
         string repositoryPath,
         string path,
+        CancellationToken ct = default);
+
+    /// <summary>Tracked paths in the index (<c>git ls-files -z</c>), sorted.</summary>
+    Task<IReadOnlyList<FilePath>> ListTrackedFilesAsync(
+        string repositoryPath,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<(FilePath Path, ChangeKind Kind)>> GetCommitFilesAsync(

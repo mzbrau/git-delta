@@ -132,6 +132,7 @@ public partial class MainWindow : Window
         vm.Review.FocusFileFilterRequested += FocusPrFileFilter;
         vm.Review.ExpandedThreadChanged += SyncInlineCommentLayout;
         vm.Review.MentionPopupChanged += PositionMentionPopup;
+        vm.QuickOpen.FocusRequested += FocusQuickOpenQuery;
 
         vm.WorkingCopy.PendingReview.ExpandedLocalCommentChanged += SyncWcInlineCommentLayout;
         vm.WorkingCopy.PendingReview.RequestScrollToSelectedAnnotation += ScrollWcToSelectedAnnotation;
@@ -741,9 +742,72 @@ public partial class MainWindow : Window
         }
     }
 
+    private void FocusQuickOpenQuery()
+    {
+        if (this.FindControl<TextBox>("QuickOpenQueryBox") is not { } box)
+            return;
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            box.Focus();
+            box.CaretIndex = box.Text?.Length ?? 0;
+        }, DispatcherPriority.Input);
+    }
+
+    private void OnQuickOpenKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+            vm.QuickOpen.CloseCommand.Execute(null);
+            return;
+        }
+
+        if (e.Key is Key.Enter or Key.Return)
+        {
+            e.Handled = true;
+            _ = vm.QuickOpen.AcceptCommand.ExecuteAsync(vm.QuickOpen.SelectedResult);
+        }
+    }
+
+    private void OnQuickOpenResultActivated(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+        _ = vm.QuickOpen.AcceptCommand.ExecuteAsync(vm.QuickOpen.SelectedResult);
+    }
+
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
     {
-        if (DataContext is not MainWindowViewModel vm || !vm.Review.IsPullRequestMode)
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.T)
+        {
+            if (vm.WorkingCopy.HasRepository)
+            {
+                e.Handled = true;
+                _ = vm.ShowQuickOpenCommand.ExecuteAsync(null);
+            }
+
+            return;
+        }
+
+        if (vm.QuickOpen.IsOpen)
+        {
+            if (e.Key == Key.Escape)
+            {
+                e.Handled = true;
+                vm.QuickOpen.CloseCommand.Execute(null);
+            }
+
+            return;
+        }
+
+        if (!vm.Review.IsPullRequestMode)
             return;
 
         if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.Enter)
@@ -1143,6 +1207,12 @@ public partial class MainWindow : Window
 
     private void OnToggleUnstaged(object? sender, RoutedEventArgs e) =>
         Vm.WorkingCopy.UnstagedExpanded = !Vm.WorkingCopy.UnstagedExpanded;
+
+    private void OnToggleRecentViewedFiles(object? sender, RoutedEventArgs e) =>
+        Vm.WorkingCopy.RecentViewedFilesExpanded = !Vm.WorkingCopy.RecentViewedFilesExpanded;
+
+    private void OnTogglePrRecentViewedFiles(object? sender, RoutedEventArgs e) =>
+        Vm.Review.RecentViewedFilesExpanded = !Vm.Review.RecentViewedFilesExpanded;
 
     private void OnStashFileSelectionChanged(object? sender, SelectionChangedEventArgs e)
     {

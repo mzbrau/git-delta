@@ -83,6 +83,28 @@ public sealed class GitTagServiceTests
     }
 
     [Test]
+    public async Task CreateTag_Empty_Message_Creates_Lightweight_Tag()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "one\n")
+            .WithInitialCommit("init");
+        var path = repo.Build();
+
+        var service = CreateService();
+        await service.CreateAnnotatedTagAsync(path, "v1.0.0", "   ");
+
+        var tags = await service.ListTagsAsync(path);
+        Assert.That(tags, Has.Count.EqualTo(1));
+        Assert.That(tags[0].Name, Is.EqualTo("v1.0.0"));
+        Assert.That(tags[0].TargetOid, Is.Not.Null.And.Not.Empty);
+
+        // Lightweight tags point at a commit object (annotated tags are type "tag").
+        var runner = new GitProcessRunner(NullLogger<GitProcessRunner>.Instance, commandLog: null, assertNoUiSyncContext: false);
+        var type = await runner.RunAsync(path, ["cat-file", "-t", "refs/tags/v1.0.0"], options: null, CancellationToken.None);
+        Assert.That(type.Stdout.Trim(), Is.EqualTo("commit"));
+    }
+
+    [Test]
     public void ParseTags_Reads_Fields()
     {
         const char sep = '\u0001';

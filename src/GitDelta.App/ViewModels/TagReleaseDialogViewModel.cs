@@ -57,8 +57,7 @@ public partial class TagReleaseDialogViewModel : ObservableObject
         !IsBusy
         && !IsLoading
         && _repoPath is not null
-        && !string.IsNullOrWhiteSpace(NewTagName)
-        && !string.IsNullOrWhiteSpace(TagMessage);
+        && !string.IsNullOrWhiteSpace(NewTagName);
 
     public async Task OpenAsync(string repositoryPath, string? currentBranch)
     {
@@ -109,7 +108,7 @@ public partial class TagReleaseDialogViewModel : ObservableObject
 
         var name = NewTagName.Trim();
         var message = TagMessage.Trim();
-        if (string.IsNullOrEmpty(name) || string.IsNullOrEmpty(message))
+        if (string.IsNullOrEmpty(name))
             return;
 
         IsBusy = true;

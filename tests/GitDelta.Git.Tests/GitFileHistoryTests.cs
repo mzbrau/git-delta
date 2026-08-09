@@ -30,4 +30,21 @@ public sealed class GitFileHistoryTests
         Assert.That(created, Is.Not.Null);
         Assert.That(created!.Subject, Is.EqualTo("create a"));
     }
+
+    [Test]
+    public async Task ListTrackedFilesAsync_ReturnsSortedIndexPaths()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("z.txt", "z\n")
+            .WithFile("a/b.txt", "ab\n")
+            .WithInitialCommit("init");
+        var path = repo.Build();
+
+        var runner = new GitProcessRunner(NullLogger<GitProcessRunner>.Instance, commandLog: null, assertNoUiSyncContext: false);
+        var gates = new RepositoryGateProvider(runner);
+        var history = new GitHistoryService(runner, gates);
+
+        var files = await history.ListTrackedFilesAsync(path);
+        Assert.That(files.Select(f => f.Value), Is.EqualTo(new[] { "a/b.txt", "z.txt" }));
+    }
 }

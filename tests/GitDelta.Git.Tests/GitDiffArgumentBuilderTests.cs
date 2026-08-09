@@ -37,4 +37,33 @@ public sealed class GitDiffArgumentBuilderTests
         Assert.That(args, Does.Contain("--raw"));
         Assert.That(args, Does.Contain("-z"));
     }
+
+    [Test]
+    public void BuildPatchArgs_RevisionToWorktree_UsesSingleRevision()
+    {
+        var oid = CommitId.FromSha("ccc".PadRight(40, 'c'));
+        var scope = new DiffScope.RevisionToWorktree(oid);
+
+        var args = GitDiffArgumentBuilder.BuildPatchArgs(scope, DiffOptions.Default, FilePath.From("src/a.cs"));
+
+        Assert.That(args[0], Is.EqualTo("diff"));
+        Assert.That(args[1], Is.EqualTo(oid.Value));
+        Assert.That(args, Does.Contain("--"));
+        Assert.That(args[^1], Is.EqualTo("src/a.cs"));
+    }
+
+    [Test]
+    public void BuildPatchArgs_RevisionsTwoDot_UsesSpaceSeparatedRevisions()
+    {
+        var baseId = CommitId.FromSha("aaa".PadRight(40, 'a'));
+        var headId = CommitId.FromSha("bbb".PadRight(40, 'b'));
+        var scope = new DiffScope.RevisionsTwoDot(baseId, headId);
+
+        var args = GitDiffArgumentBuilder.BuildPatchArgs(scope, DiffOptions.Default, FilePath.From("src/a.cs"));
+
+        Assert.That(args[0], Is.EqualTo("diff"));
+        Assert.That(args[1], Is.EqualTo(baseId.Value));
+        Assert.That(args[2], Is.EqualTo(headId.Value));
+        Assert.That(args, Does.Not.Contain($"{baseId.Value}...{headId.Value}"));
+    }
 }

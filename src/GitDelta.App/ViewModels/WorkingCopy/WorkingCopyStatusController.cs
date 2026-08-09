@@ -96,6 +96,11 @@ public partial class WorkingCopyViewModel
 
         _vm.WorkingCopyChangeCount = _vm._allStaged.Count + _vm._allUnstaged.Count + _vm._allConflicted.Count;
         _vm.ApplyFileFilter();
+        var changePaths = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in _vm._allStaged.Concat(_vm._allUnstaged).Concat(_vm._allConflicted))
+            changePaths.Add(file.Path.Value);
+        _vm.RecentViewedFiles.ExcludePaths(changePaths);
+        _vm.OnPropertyChanged(nameof(WorkingCopyViewModel.HasRecentViewedFiles));
     }
 
     /// <summary>

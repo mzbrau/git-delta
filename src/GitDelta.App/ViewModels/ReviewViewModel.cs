@@ -19,7 +19,7 @@ using GitDelta.Review;
 
 namespace GitDelta.App.ViewModels;
 
-public partial class ReviewViewModel : ObservableObject
+public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
 {
     private readonly IPullRequestService _pullRequests;
     private readonly IReviewService _reviewService;
@@ -36,7 +36,9 @@ public partial class ReviewViewModel : ObservableObject
     private readonly ISyntaxTokenService? _syntaxTokens;
     private readonly IAIReviewService _ai;
     private readonly IGitHistoryService _history;
+    private readonly IGitDiffService _diff;
     private readonly FileHistoryCache _fileHistoryCache = new();
+    private readonly FileHistoryBrowseController _fileHistoryBrowse;
     private readonly List<PendingReviewMutation> _pending = [];
     private CancellationTokenSource? _diffCts;
     private CancellationTokenSource? _openCts;
@@ -70,6 +72,7 @@ public partial class ReviewViewModel : ObservableObject
         IIntraLineDiffer intraLine,
         IGitObjectReader objects,
         IGitHistoryService history,
+        IGitDiffService? diff = null,
         ISyntaxTokenService? syntaxTokens = null,
         IAIReviewService? ai = null)
     {
@@ -86,13 +89,40 @@ public partial class ReviewViewModel : ObservableObject
         _intraLine = intraLine;
         _objects = objects;
         _history = history;
+        _diff = diff ?? new NullGitDiffService();
         _syntaxTokens = syntaxTokens;
         _ai = ai ?? NullAIReviewService.Instance;
+        _fileHistoryBrowse = new FileHistoryBrowseController(
+            _history,
+            _diff,
+            () => this as IFileHistoryBrowseHost);
         ViewMode = settings.Current.DefaultDiffMode;
         _ignoreWhitespace = settings.Current.IgnoreWhitespace;
         _contextLines = settings.Current.ContextLines > 0 ? settings.Current.ContextLines : 3;
         _pullRequestFileListLayout = NormalizeFileListLayout(settings.Current.PullRequestFileListLayout);
         _outbox.DrainCompleted += (_, _) => _ = OnOutboxDrainCompletedAsync();
+    }
+
+    /// <summary>Shared file-history browse controller for the PR diff pane.</summary>
+    public FileHistoryBrowseController FileHistoryBrowse => _fileHistoryBrowse;
+
+    public RecentViewedFilesStore RecentViewedFiles { get; } = new();
+
+    public bool HasRecentViewedFiles => RecentViewedFiles.HasItems;
+
+    [ObservableProperty] private bool _recentViewedFilesExpanded = true;
+
+    [RelayCommand]
+    private void ClearRecentViewedFiles()
+    {
+        var clearSelection = SelectedFile is { } sel
+            && RecentViewedFiles.Find(sel.Path.Value) is not null
+            && !PrFiles.Any(f => string.Equals(f.Path.Value, sel.Path.Value, StringComparison.Ordinal));
+
+        RecentViewedFiles.Clear();
+        OnPropertyChanged(nameof(HasRecentViewedFiles));
+        if (clearSelection)
+            SelectedFile = null;
     }
 
     public ObservableCollection<PullRequestSummary> NeedsMyReview { get; } = [];
@@ -419,6 +449,9 @@ public partial class ReviewViewModel : ObservableObject
         GenerateFileBriefingCommand.NotifyCanExecuteChanged();
         OnPropertyChanged(nameof(AiChatSelectedFileLabel));
         OnPropertyChanged(nameof(AiChatPlaceholder));
+        // History browse path navigation selects a sibling/back file then presents the browse diff itself.
+        if (_fileHistoryBrowse.IsPathNavigationInProgress)
+            return;
         _ = LoadDiffForSelectionAsync(value);
         if (value is not null && !value.IsViewed && !value.IsViewedPending)
             _ = MarkFileViewedInternalAsync(value);
@@ -633,6 +666,7 @@ public partial class ReviewViewModel : ObservableObject
     public bool CanGenerateFileBriefing =>
         HasAiRun && SelectedFile is not null && !HasAiFileBriefing && !IsGeneratingFileBriefing;
     public bool IsAiFileBriefingTabSelected => AiSidePanelTab == AiSidePanelTab.FileBriefing;
+    public bool IsAiHistoryTabSelected => AiSidePanelTab == AiSidePanelTab.History;
     public bool IsAiChatTabSelected => AiSidePanelTab == AiSidePanelTab.Chat;
     public bool IsAiCommentsTabSelected => AiSidePanelTab == AiSidePanelTab.Comments;
     public bool ShowConversationRow =>
@@ -767,8 +801,11 @@ public partial class ReviewViewModel : ObservableObject
     partial void OnAiSidePanelTabChanged(AiSidePanelTab value)
     {
         OnPropertyChanged(nameof(IsAiFileBriefingTabSelected));
+        OnPropertyChanged(nameof(IsAiHistoryTabSelected));
         OnPropertyChanged(nameof(IsAiChatTabSelected));
         OnPropertyChanged(nameof(IsAiCommentsTabSelected));
+        if (value == AiSidePanelTab.History)
+            _ = EnsureFileHistoryLoadedAsync();
     }
 
     partial void OnPullRequestBodyChanged(string? value) => OnPropertyChanged(nameof(ShowConversationRow));
@@ -787,10 +824,60 @@ public partial class ReviewViewModel : ObservableObject
     private void SelectAiFileBriefingTab() => AiSidePanelTab = AiSidePanelTab.FileBriefing;
 
     [RelayCommand]
+    private void SelectAiHistoryTab() => AiSidePanelTab = AiSidePanelTab.History;
+
+    [RelayCommand]
     private void SelectAiChatTab() => AiSidePanelTab = AiSidePanelTab.Chat;
 
     [RelayCommand]
     private void SelectAiCommentsTab() => AiSidePanelTab = AiSidePanelTab.Comments;
+
+    [RelayCommand]
+    private async Task SelectFileHistoryItemAsync(FileHistoryItemViewModel? item)
+    {
+        if (item is null)
+            return;
+        try
+        {
+            await _fileHistoryBrowse.SelectHistoryItemAsync(item, FileHistory, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to load history diff: {ex.Message}", exception: ex);
+        }
+    }
+
+    [RelayCommand]
+    private async Task ToggleFileHistoryItemExpandedAsync(FileHistoryItemViewModel? item)
+    {
+        if (item is null)
+            return;
+        await _fileHistoryBrowse.ToggleExpandedAsync(item).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    private async Task SelectFileHistoryCommitFileAsync(FileHistoryCommitFileItem? file)
+    {
+        if (file is null || FileHistory is null)
+            return;
+
+        var item = FileHistory.Entries.FirstOrDefault(e => e.CommitFiles.Contains(file))
+                   ?? FileHistory.Entries.FirstOrDefault(e => e.IsSelected)
+                   ?? FileHistory.Entries.FirstOrDefault(e => e.IsExpanded);
+        if (item is null)
+            return;
+
+        try
+        {
+            await _fileHistoryBrowse.SelectCommitFileAsync(item, file, FileHistory, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _notifications.Error($"Failed to open commit file: {ex.Message}", exception: ex);
+        }
+    }
 
     [RelayCommand]
     private void SelectChangeBriefing() => IsChangeBriefingSelected = true;
@@ -1410,7 +1497,9 @@ public partial class ReviewViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task LoadFileHistoryAsync()
+    private async Task LoadFileHistoryAsync() => await EnsureFileHistoryLoadedAsync().ConfigureAwait(false);
+
+    private async Task EnsureFileHistoryLoadedAsync()
     {
         if (_session is null || SelectedFile is null)
             return;
@@ -1418,6 +1507,7 @@ public partial class ReviewViewModel : ObservableObject
         var prNodeId = _session.Detail.Summary.NodeId;
         var file = SelectedFile;
         var entry = _fileHistoryCache.GetOrCreate(prNodeId, file.Path.Value);
+        FileHistory = entry;
         if (entry.State is not (FileHistoryLoadState.NotLoaded or FileHistoryLoadState.Failed))
             return;
 
@@ -1430,7 +1520,13 @@ public partial class ReviewViewModel : ObservableObject
             await Task.WhenAll(recentTask, createdTask).ConfigureAwait(false);
 
             var timeline = FileHistoryCacheEntry.BuildTimeline(createdTask.Result, recentTask.Result);
-            await InvokeOnUiAsync(() => entry.ApplyResult(timeline)).ConfigureAwait(false);
+            await InvokeOnUiAsync(() =>
+            {
+                if (!ReferenceEquals(SelectedFile, file))
+                    return;
+                entry.ApplyResult(timeline);
+                FileHistory = entry;
+            }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -3043,6 +3139,9 @@ public partial class ReviewViewModel : ObservableObject
         _allThreads = [];
         LocalNotes = "";
         DiffEmptyMessage = "Select a pull request";
+        RecentViewedFiles.Clear();
+        OnPropertyChanged(nameof(HasRecentViewedFiles));
+        _fileHistoryBrowse.Reset();
     }
 
     [RelayCommand]
@@ -3586,6 +3685,138 @@ public partial class ReviewViewModel : ObservableObject
 
     private DiffOptions BuildDiffOptions() =>
         DiffPresentation.BuildDiffOptions(_settings.Current, IgnoreWhitespace, ShowFullFile, ContextLines);
+
+    string? IFileHistoryBrowseHost.RepositoryPath => _session?.RepositoryPath;
+
+    FilePath? IFileHistoryBrowseHost.BrowseSubjectPath => SelectedFile?.Path;
+
+    CommitId? IFileHistoryBrowseHost.CurrentRevision => _session?.Head;
+
+    DiffOptions IFileHistoryBrowseHost.BuildDiffOptions() => BuildDiffOptions();
+
+    async Task IFileHistoryBrowseHost.PresentFileHistoryDiffAsync(FilePath path, FileDiff diff, CancellationToken ct)
+    {
+        var file = SelectedFile;
+        if (file is null || !string.Equals(file.Path.Value, path.Value, StringComparison.Ordinal))
+        {
+            file = PrFiles.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal))
+                   ?? RecentViewedFiles.Find(path.Value)
+                   ?? new FileItemViewModel(path, ChangeKind.Modified, isStagedList: false);
+            SelectedFile = file;
+        }
+
+        var cts = new CancellationTokenSource();
+        var previous = Interlocked.Exchange(ref _diffCts, cts);
+        previous?.Cancel();
+        previous?.Dispose();
+        var token = cts.Token;
+
+        await InvokeOnUiAsync(() => IsLoadingDiff = true);
+        try
+        {
+            var viewMode = ViewMode;
+            var showFullFile = ShowFullFile;
+            IReadOnlyList<DiffRow> rows;
+            FileDiff enriched;
+            (enriched, rows) = await Task.Run(() =>
+            {
+                var withIntra = EnsureIntraLine(diff);
+                var projected = BuildProjectedRows(withIntra, viewMode, showFullFile);
+                return (withIntra, projected);
+            }, token).ConfigureAwait(false);
+
+            token.ThrowIfCancellationRequested();
+            await InvokeOnUiAsync(() =>
+            {
+                if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+                    return;
+                _currentDiff = enriched;
+                DiffRows.Reset(rows);
+                DiffEmptyMessage = rows.Count == 0 ? "No differences" : "Select a file to view its diff";
+                DiffAnnotations.Clear();
+            });
+        }
+        finally
+        {
+            await InvokeOnUiAsync(() =>
+            {
+                if (ReferenceEquals(_diffCts, cts))
+                    IsLoadingDiff = false;
+            });
+        }
+    }
+
+    async Task IFileHistoryBrowseHost.ExitFileHistoryBrowseAsync()
+    {
+        _fileHistoryBrowse.ClearSelectionHighlight(FileHistory);
+        await LoadDiffForSelectionAsync(SelectedFile).ConfigureAwait(false);
+    }
+
+    async Task IFileHistoryBrowseHost.OpenPathInFileHistoryBrowseAsync(FilePath path, string oid, CancellationToken ct)
+    {
+        SelectPathForHistoryBrowse(path);
+        await _fileHistoryBrowse.ReloadForPathAsync(path, oid, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Selects <paramref name="path"/> for history browse without presenting a clean file or resetting browse mode.
+    /// </summary>
+    private void SelectPathForHistoryBrowse(FilePath path)
+    {
+        if (_session is null)
+            return;
+
+        var existing = PrFiles.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal));
+        if (existing is not null)
+        {
+            SelectedFile = existing;
+            return;
+        }
+
+        var exclude = PrFiles.Select(f => f.Path.Value).ToHashSet(StringComparer.Ordinal);
+        var file = RecentViewedFiles.Remember(path, exclude);
+        OnPropertyChanged(nameof(HasRecentViewedFiles));
+        SelectedFile = file;
+    }
+
+    public async Task OpenViewedFileAsync(FilePath path, CancellationToken ct = default)
+    {
+        if (_session is null)
+            return;
+
+        var existing = PrFiles.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal));
+        if (existing is not null)
+        {
+            SelectedFile = existing;
+            return;
+        }
+
+        var exclude = PrFiles.Select(f => f.Path.Value).ToHashSet(StringComparer.Ordinal);
+        var file = RecentViewedFiles.Remember(path, exclude);
+        OnPropertyChanged(nameof(HasRecentViewedFiles));
+        SelectedFile = file;
+
+        // Prefer worktree contents for readable view (checkout should match PR head when reviewing).
+        var maxBytes = _settings.Current.MaxDiffPatchBytes;
+        byte[] bytes;
+        var fullPath = RepositoryPathResolver.ResolveUnderRoot(_session.RepositoryPath, path);
+        if (System.IO.File.Exists(fullPath))
+        {
+            var info = new FileInfo(fullPath);
+            if (info.Length > maxBytes)
+                throw new DiffTooLargeException(maxBytes, info.Length);
+            bytes = await System.IO.File.ReadAllBytesAsync(fullPath, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            bytes = [];
+        }
+
+        var scope = new DiffScope.RevisionsTwoDot(_session.Head, _session.Head);
+        var diff = CleanFileDiff.Create(path, bytes, scope);
+        await ((IFileHistoryBrowseHost)this).PresentFileHistoryDiffAsync(path, diff, ct).ConfigureAwait(false);
+        _fileHistoryBrowse.Reset();
+    }
 
     private FileDiff EnsureIntraLine(FileDiff diff) =>
         DiffPresentation.EnsureIntraLine(diff, _intraLine);
