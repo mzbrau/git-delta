@@ -1,6 +1,6 @@
 namespace GitDelta.App.ViewModels;
 
-public enum AiSidePanelTab
+public enum FilePanelTab
 {
     FileBriefing,
     History,

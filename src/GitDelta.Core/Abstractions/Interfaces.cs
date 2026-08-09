@@ -111,6 +111,17 @@ public interface IGitBranchService
     Task<IReadOnlyList<BranchInfo>> ListBranchesAsync(string repositoryPath, CancellationToken ct = default);
     Task CheckoutAsync(string repositoryPath, string branch, CancellationToken ct = default);
     Task CreateBranchAsync(string repositoryPath, string name, bool checkout, CancellationToken ct = default);
+
+    /// <summary>
+    /// Checks out <paramref name="localBranch"/>, creating it to track <paramref name="remoteRef"/>
+    /// (e.g. <c>origin/feature</c>) when the local branch does not already exist.
+    /// </summary>
+    Task CheckoutOrCreateTrackingAsync(
+        string repositoryPath,
+        string localBranch,
+        string remoteRef,
+        CancellationToken ct = default);
+
     Task DeleteBranchAsync(string repositoryPath, string name, bool force, CancellationToken ct = default);
     Task RenameBranchAsync(string repositoryPath, string oldName, string newName, CancellationToken ct = default);
     Task FetchAsync(string repositoryPath, CancellationToken ct = default);

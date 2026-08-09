@@ -113,6 +113,11 @@ public sealed class MainWindowViewModelTests
             Substitute.For<IGitHistoryService>(),
             ai: NullAIReviewService.Instance);
 
+        var localLocator = new LocalRepositoryLocator(
+            _repositoryLocator,
+            _settings,
+            Substitute.For<IGitRemoteService>());
+
         return new MainWindowViewModel(
             workingCopy,
             review,
@@ -123,7 +128,11 @@ public sealed class MainWindowViewModelTests
             _accounts,
             _repositoryLocator,
             confirm,
-            Substitute.For<IGitHistoryService>());
+            Substitute.For<IGitHistoryService>(),
+            localLocator,
+            _status,
+            Substitute.For<IGitCloneService>(),
+            new AlwaysConfirmCheckoutPullRequestDialog());
     }
 
     [Test]
@@ -184,6 +193,27 @@ public sealed class MainWindowViewModelTests
         var vm = CreateVm();
         Assert.That(vm.SelectRepositoryCommand.CanExecute("/tmp/repo"), Is.True);
         Assert.That(vm.RefreshCommand.CanExecute(null), Is.True);
+    }
+
+    [Test]
+    public void TryHandleKeyboardShortcut_Toggles_Navigator()
+    {
+        var vm = CreateVm();
+        Assert.That(vm.IsNavigatorCollapsed, Is.False);
+        Assert.That(vm.TryHandleKeyboardShortcut(GitDelta.Core.Settings.KeyboardShortcutIds.ToggleNavigator), Is.True);
+        Assert.That(vm.IsNavigatorCollapsed, Is.True);
+    }
+
+    [Test]
+    public void ReloadShortcutBindingsUi_Loads_Catalog_Defaults()
+    {
+        var vm = CreateVm();
+        vm.ReloadShortcutBindingsUi();
+        Assert.That(vm.ShortcutBindings, Is.Not.Empty);
+        Assert.That(
+            vm.ShortcutBindings.Any(r => r.Id == GitDelta.Core.Settings.KeyboardShortcutIds.Push
+                && r.Gesture == "Ctrl+Shift+P"),
+            Is.True);
     }
 
     private sealed class FixedReviewSubmitDialog(string? result) : IReviewSubmitDialog

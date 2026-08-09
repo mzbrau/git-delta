@@ -4,9 +4,38 @@ title: Keyboard shortcuts
 
 # Keyboard shortcuts
 
-## Pull request review mode
+All application shortcuts below are **configurable** under **Settings → Shortcuts** (and in `settings.json` under `shortcuts.bindings`). Empty gesture = unbound.
 
-Active when you are in a pull request workspace and not typing in a text field.
+App shortcuts use **Control** on both Windows and macOS (not Cmd). Diff copy still uses the platform copy chord (Ctrl/Cmd+C).
+
+## Defaults
+
+### Diff and layout
+
+| Shortcut | Action |
+| --- | --- |
+| **Ctrl+\\** | Toggle unified / side-by-side diff |
+| **Ctrl+Shift+L** | Toggle show full file |
+| **Ctrl+Shift+W** | Toggle ignore whitespace |
+| **Ctrl+B** | Toggle navigator sidebar |
+| **Ctrl+Shift+B** | Toggle File Panel |
+| **Ctrl+Alt+F** | Toggle filter / search mode (active file list) |
+| **Ctrl+Shift+T** | Toggle flat list / tree view (active file list) |
+
+### Remote and repository
+
+| Shortcut | Action |
+| --- | --- |
+| **Ctrl+Shift+P** | Push |
+| **Ctrl+Shift+U** | Pull |
+| **Ctrl+Shift+F** | Fetch |
+| **Ctrl+Shift+G** | View remote in browser |
+| **Ctrl+Shift+R** | Show repository in Finder / Explorer |
+| **Ctrl+T** | Quick-open a tracked file |
+
+### Pull request review
+
+Active when you are in a pull request workspace. Unmodified letter keys are ignored while typing in a text field.
 
 | Shortcut | Action |
 | --- | --- |
@@ -20,21 +49,11 @@ Active when you are in a pull request workspace and not typing in a text field.
 | **C** | Focus the comment draft |
 | **Esc** | Dismiss mention popup / clear draft / close expanded thread |
 
-:::note
-PR shortcuts use **Control** on both Windows and macOS.
-:::
+Arrow keys for next/previous file are built-in aliases when the primary binding is still an unmodified key.
 
-## Global (repository open)
+## Comments and AI chat (fixed)
 
-| Shortcut | Action |
-| --- | --- |
-| **Ctrl+T** | Quick-open a tracked file |
-
-:::note
-**Ctrl+T** uses **Control** on both Windows and macOS (same convention as PR shortcuts).
-:::
-
-## Comments and AI chat
+These editor-local gestures are **not** configurable:
 
 | Shortcut | Action |
 | --- | --- |
@@ -42,7 +61,7 @@ PR shortcuts use **Control** on both Windows and macOS.
 | **Shift+Enter** (AI chat) | New line |
 | **↑ / ↓ / Enter / Tab / Esc** in mention UI | Navigate, accept, or dismiss mentions |
 
-## Diff viewer
+## Diff viewer (fixed)
 
 | Shortcut | Action |
 | --- | --- |
@@ -56,6 +75,6 @@ PR shortcuts use **Control** on both Windows and macOS.
 | **Ctrl** (Windows) / **Cmd** (macOS) | Toggle individual items |
 | **Shift** | Range select |
 
-## Not mapped globally
+## Settings storage
 
-There are no global shortcuts today for commit, push, or stash — use the toolbar and commit dock.
+Bindings are stored in the app settings file as a map of shortcut id → gesture string (for example `"Push": "Ctrl+Shift+P"`). See [Settings](./settings.md).

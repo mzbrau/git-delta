@@ -99,6 +99,46 @@ public sealed class GitBranchServiceTests
     }
 
     [Test]
+    public async Task CheckoutOrCreateTracking_Creates_Local_From_Remote_Ref()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "one\n")
+            .WithInitialCommit("init");
+        var path = repo.Build();
+
+        var (service, runner) = CreateService();
+        await service.CreateBranchAsync(path, "feature", checkout: true);
+        await File.WriteAllTextAsync(Path.Combine(path, "a.txt"), "feature\n");
+        await RunCommitAsync(runner, path, "feature commit");
+        await service.CheckoutAsync(path, "main");
+
+        // Simulate a fetched remote-tracking ref without a configured remote URL.
+        await runner.RunAsync(path, ["update-ref", "refs/remotes/origin/feature", "refs/heads/feature"], options: null);
+        await service.DeleteBranchAsync(path, "feature", force: true);
+
+        await service.CheckoutOrCreateTrackingAsync(path, "feature", "origin/feature");
+
+        var branches = await service.ListBranchesAsync(path);
+        Assert.That(branches.Single(b => b.Name == "feature" && !b.IsRemote).IsCurrent, Is.True);
+    }
+
+    [Test]
+    public async Task CheckoutOrCreateTracking_Checks_Out_Existing_Local()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "one\n")
+            .WithInitialCommit("init");
+        var path = repo.Build();
+
+        var (service, _) = CreateService();
+        await service.CreateBranchAsync(path, "feature", checkout: false);
+        await service.CheckoutOrCreateTrackingAsync(path, "feature", "origin/feature");
+
+        var branches = await service.ListBranchesAsync(path);
+        Assert.That(branches.Single(b => b.Name == "feature" && !b.IsRemote).IsCurrent, Is.True);
+    }
+
+    [Test]
     public void ParseBranches_Reads_TipCommitterDate()
     {
         const char sep = '\u0001';
