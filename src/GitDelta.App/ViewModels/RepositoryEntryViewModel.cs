@@ -18,6 +18,7 @@ public partial class RepositoryEntryViewModel : ObservableObject
     public string? Branch { get; }
 
     [ObservableProperty] private bool _isCurrent;
+    [ObservableProperty] private bool _isPinned;
 
     public string BranchDisplay => string.IsNullOrWhiteSpace(Branch) ? "" : Branch;
     public bool HasBranch => !string.IsNullOrWhiteSpace(Branch);
@@ -32,4 +33,8 @@ public partial class RepositoryEntryViewModel : ObservableObject
                || (Branch?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false)
                || Path.Contains(filter, StringComparison.OrdinalIgnoreCase);
     }
+
+    public bool IsExactNameMatch(string? filter) =>
+        !string.IsNullOrWhiteSpace(filter)
+        && Name.Equals(filter.Trim(), StringComparison.OrdinalIgnoreCase);
 }

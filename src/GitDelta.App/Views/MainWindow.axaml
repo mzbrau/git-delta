@@ -331,28 +331,39 @@
                             <ItemsControl ItemsSource="{Binding FilteredRepositories}">
                               <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="vm:RepositoryEntryViewModel">
-                                  <Button Classes="Ghost"
-                                          Classes.NavSelected="{Binding IsCurrent}"
-                                          HorizontalAlignment="Stretch"
-                                          HorizontalContentAlignment="Left"
-                                          Padding="8,6" Margin="0,1"
-                                          Tag="{Binding Path}"
-                                          Click="OnRepositoryEntryClick"
-                                          ToolTip.Tip="{Binding Path}">
-                                    <StackPanel Spacing="2">
-                                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                                 TextTrimming="CharacterEllipsis" />
-                                      <DockPanel LastChildFill="True">
-                                        <TextBlock DockPanel.Dock="Right" Text="{Binding BranchDisplay}"
-                                                   IsVisible="{Binding HasBranch}"
-                                                   FontSize="11" Opacity="0.75" Margin="8,0,0,0"
-                                                   FontFamily="{DynamicResource ForgeCodeFont}" />
-                                        <TextBlock Text="{Binding RelativePath}" FontSize="11" Opacity="0.7"
-                                                   TextTrimming="CharacterEllipsis"
-                                                   FontFamily="{DynamicResource ForgeCodeFont}" />
-                                      </DockPanel>
-                                    </StackPanel>
-                                  </Button>
+                                  <DockPanel Margin="0,1,18,0">
+                                    <Button DockPanel.Dock="Right" Classes="Ghost"
+                                            Padding="6,4" VerticalAlignment="Center"
+                                            Command="{Binding #RootWindow.((vm:MainWindowViewModel)DataContext).ToggleRepositoryPinnedCommand}"
+                                            CommandParameter="{Binding Path}"
+                                            ToolTip.Tip="{Binding IsPinned, Converter={x:Static conv:ForgeConverters.RepositoryPinTooltip}}">
+                                      <icons:MaterialIcon Width="14" Height="14"
+                                                          Kind="{Binding IsPinned, Converter={x:Static conv:ForgeConverters.RepositoryPinKind}}"
+                                                          Opacity="{Binding IsPinned, Converter={x:Static conv:ForgeConverters.RepositoryPinOpacity}}" />
+                                    </Button>
+                                    <Button Classes="Ghost"
+                                            Classes.NavSelected="{Binding IsCurrent}"
+                                            HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Left"
+                                            Padding="8,6"
+                                            Tag="{Binding Path}"
+                                            Click="OnRepositoryEntryClick"
+                                            ToolTip.Tip="{Binding Path}">
+                                      <StackPanel Spacing="2">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <DockPanel LastChildFill="True">
+                                          <TextBlock DockPanel.Dock="Right" Text="{Binding BranchDisplay}"
+                                                     IsVisible="{Binding HasBranch}"
+                                                     FontSize="11" Opacity="0.75" Margin="8,0,0,0"
+                                                     FontFamily="{DynamicResource ForgeCodeFont}" />
+                                          <TextBlock Text="{Binding RelativePath}" FontSize="11" Opacity="0.7"
+                                                     TextTrimming="CharacterEllipsis"
+                                                     FontFamily="{DynamicResource ForgeCodeFont}" />
+                                        </DockPanel>
+                                      </StackPanel>
+                                    </Button>
+                                  </DockPanel>
                                 </DataTemplate>
                               </ItemsControl.ItemTemplate>
                             </ItemsControl>

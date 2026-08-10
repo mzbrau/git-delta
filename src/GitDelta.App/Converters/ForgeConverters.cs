@@ -172,6 +172,16 @@ public static class ForgeConverters
         new FuncValueConverter<bool, MaterialIconKind>(expanded =>
             expanded ? MaterialIconKind.ChevronDown : MaterialIconKind.ChevronRight);
 
+    public static readonly IValueConverter RepositoryPinKind =
+        new FuncValueConverter<bool, MaterialIconKind>(pinned =>
+            pinned ? MaterialIconKind.Pin : MaterialIconKind.PinOutline);
+
+    public static readonly IValueConverter RepositoryPinTooltip =
+        new FuncValueConverter<bool, string>(pinned => pinned ? "Unpin repository" : "Pin repository");
+
+    public static readonly IValueConverter RepositoryPinOpacity =
+        new FuncValueConverter<bool, double>(pinned => pinned ? 1.0 : 0.55);
+
     public static readonly IValueConverter SelectedRowBrush =
         new FuncValueConverter<bool, IBrush>(selected =>
             selected ? Brush("ForgePrimaryContainerBrush") : Brushes.Transparent);

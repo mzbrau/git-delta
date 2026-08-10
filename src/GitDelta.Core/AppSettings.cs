@@ -27,6 +27,10 @@ public sealed record AppSettings
     public int SyntaxHighlightingSizeCapBytes { get; set; } = 1_000_000;
     public int SyntaxHighlightingLineLengthCap { get; set; } = 10_000;
     public List<string> RecentRepositories { get; set; } = [];
+
+    /// <summary>Absolute repository paths pinned to the top of the repo switcher (most recently pinned first).</summary>
+    public List<string> PinnedRepositories { get; set; } = [];
+
     public double WindowWidth { get; set; } = 1280;
     public double WindowHeight { get; set; } = 800;
     public double NavigatorWidth { get; set; } = 260;

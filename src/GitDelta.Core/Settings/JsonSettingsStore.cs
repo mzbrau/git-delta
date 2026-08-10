@@ -107,6 +107,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         SyntaxHighlightingSizeCapBytes = s.SyntaxHighlightingSizeCapBytes,
         SyntaxHighlightingLineLengthCap = s.SyntaxHighlightingLineLengthCap,
         RecentRepositories = [.. s.RecentRepositories],
+        PinnedRepositories = [.. s.PinnedRepositories],
         WindowWidth = s.WindowWidth,
         WindowHeight = s.WindowHeight,
         NavigatorWidth = s.NavigatorWidth,

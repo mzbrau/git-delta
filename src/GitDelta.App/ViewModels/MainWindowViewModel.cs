@@ -547,10 +547,12 @@ public partial class MainWindowViewModel : ObservableObject
     private void AppendScannedRepositories(List<RepositoryEntryViewModel> entries)
     {
         var current = WorkingCopy.RepositoryPath;
+        var pinned = _settings.Current.PinnedRepositories;
         foreach (var entry in entries)
         {
             entry.IsCurrent = current is not null
                               && string.Equals(entry.Path, current, StringComparison.OrdinalIgnoreCase);
+            entry.IsPinned = IsPathPinned(entry.Path, pinned);
             ScannedRepositories.Add(entry);
         }
 
@@ -564,7 +566,9 @@ public partial class MainWindowViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(name))
             name = trimmed;
 
-        return new RepositoryEntryViewModel(path, name, FormatRepositoryPathLabel(path), branch);
+        var entry = new RepositoryEntryViewModel(path, name, FormatRepositoryPathLabel(path), branch);
+        entry.IsPinned = IsPathPinned(path, _settings.Current.PinnedRepositories);
+        return entry;
     }
 
     private string FormatRepositoryPathLabel(string path)
@@ -593,15 +597,73 @@ public partial class MainWindowViewModel : ObservableObject
     private void RebuildFilteredRepositories()
     {
         FilteredRepositories.Clear();
+        var filter = RepositoryFilter;
+        var pinIndex = BuildPinnedPathIndex(_settings.Current.PinnedRepositories);
         foreach (var entry in ScannedRepositories
-                     .Where(e => e.MatchesFilter(RepositoryFilter))
-                     .OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase))
+                     .Where(e => e.MatchesFilter(filter))
+                     .OrderByDescending(e => e.IsExactNameMatch(filter))
+                     .ThenBy(e => pinIndex.GetValueOrDefault(NormalizeRepoPath(e.Path), int.MaxValue))
+                     .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase))
             FilteredRepositories.Add(entry);
 
         OnPropertyChanged(nameof(HasFilteredRepositories));
         OnPropertyChanged(nameof(ShowRepositoryCatalogEmpty));
         OnPropertyChanged(nameof(ShowRepositoryCatalogScanning));
     }
+
+    [RelayCommand]
+    private void ToggleRepositoryPinned(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return;
+
+        var normalized = NormalizeRepoPath(path);
+        var nowPinned = false;
+        _settings.Update(s =>
+        {
+            var existingIndex = s.PinnedRepositories.FindIndex(p =>
+                string.Equals(NormalizeRepoPath(p), normalized, StringComparison.OrdinalIgnoreCase));
+            if (existingIndex >= 0)
+            {
+                s.PinnedRepositories.RemoveAt(existingIndex);
+                nowPinned = false;
+            }
+            else
+            {
+                s.PinnedRepositories.Insert(0, path);
+                nowPinned = true;
+            }
+        });
+
+        _ = _settings.SaveAsync();
+
+        foreach (var entry in ScannedRepositories)
+        {
+            if (string.Equals(NormalizeRepoPath(entry.Path), normalized, StringComparison.OrdinalIgnoreCase))
+                entry.IsPinned = nowPinned;
+        }
+
+        RebuildFilteredRepositories();
+    }
+
+    private static bool IsPathPinned(string path, IReadOnlyList<string> pinned) =>
+        pinned.Any(p => string.Equals(NormalizeRepoPath(p), NormalizeRepoPath(path), StringComparison.OrdinalIgnoreCase));
+
+    private static Dictionary<string, int> BuildPinnedPathIndex(IReadOnlyList<string> pinned)
+    {
+        var index = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < pinned.Count; i++)
+        {
+            var key = NormalizeRepoPath(pinned[i]);
+            if (!index.ContainsKey(key))
+                index[key] = i;
+        }
+
+        return index;
+    }
+
+    private static string NormalizeRepoPath(string path) =>
+        path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
     private void UpdateScannedCurrentFlags()
     {

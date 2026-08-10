@@ -29,6 +29,10 @@ public sealed class JsonSettingsStoreTests
             });
             store.AddRecentRepository("/repo/a");
             store.AddRecentRepository("/repo/b");
+            store.Update(s =>
+            {
+                s.PinnedRepositories = ["/pinned/b", "/pinned/a"];
+            });
             await store.SaveAsync();
 
             var loaded = new JsonSettingsStore(path);
@@ -45,6 +49,7 @@ public sealed class JsonSettingsStoreTests
             Assert.That(loaded.Current.DiffPrefetchPriorityPaths, Is.EqualTo(24));
             Assert.That(loaded.Current.DiffPrefetchNeighborRadius, Is.EqualTo(8));
             Assert.That(loaded.Current.RecentRepositories, Is.EqualTo(new[] { "/repo/b", "/repo/a" }));
+            Assert.That(loaded.Current.PinnedRepositories, Is.EqualTo(new[] { "/pinned/b", "/pinned/a" }));
         }
         finally
         {

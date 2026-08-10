@@ -216,6 +216,83 @@ public sealed class MainWindowViewModelTests
             Is.True);
     }
 
+    [Test]
+    public async Task FilteredRepositories_Pins_Sort_Before_Unpinned_In_Pin_Order()
+    {
+        StubScannedRepositories(
+            "/dev/zebra",
+            "/dev/alpha",
+            "/dev/beta");
+
+        var vm = CreateVm();
+        await vm.EnsureRepositoryCatalogAsync();
+
+        vm.ToggleRepositoryPinnedCommand.Execute("/dev/beta");
+        vm.ToggleRepositoryPinnedCommand.Execute("/dev/zebra");
+
+        Assert.That(_appSettings.PinnedRepositories, Is.EqualTo(new[] { "/dev/zebra", "/dev/beta" }));
+        Assert.That(vm.FilteredRepositories.Select(e => e.Name).ToArray(),
+            Is.EqualTo(new[] { "zebra", "beta", "alpha" }));
+        Assert.That(vm.FilteredRepositories.Take(2).All(e => e.IsPinned), Is.True);
+        Assert.That(vm.FilteredRepositories[2].IsPinned, Is.False);
+    }
+
+    [Test]
+    public async Task FilteredRepositories_Exact_Name_Match_Sorts_Above_Pinned_Substring()
+    {
+        StubScannedRepositories(
+            "/dev/aa-fig",
+            "/dev/fig",
+            "/dev/other");
+
+        _appSettings.PinnedRepositories.Add("/dev/aa-fig");
+
+        var vm = CreateVm();
+        await vm.EnsureRepositoryCatalogAsync();
+        vm.RepositoryFilter = "fig";
+
+        Assert.That(vm.FilteredRepositories.Select(e => e.Name).ToArray(),
+            Is.EqualTo(new[] { "fig", "aa-fig" }));
+        Assert.That(vm.FilteredRepositories[0].IsPinned, Is.False);
+        Assert.That(vm.FilteredRepositories[1].IsPinned, Is.True);
+    }
+
+    [Test]
+    public async Task ToggleRepositoryPinned_Unpins_And_Persists()
+    {
+        StubScannedRepositories("/dev/fig", "/dev/other");
+        _appSettings.PinnedRepositories.Add("/dev/fig");
+
+        var vm = CreateVm();
+        await vm.EnsureRepositoryCatalogAsync();
+
+        Assert.That(vm.FilteredRepositories[0].Name, Is.EqualTo("fig"));
+        Assert.That(vm.FilteredRepositories[0].IsPinned, Is.True);
+
+        vm.ToggleRepositoryPinnedCommand.Execute("/dev/fig");
+
+        Assert.That(_appSettings.PinnedRepositories, Is.Empty);
+        Assert.That(vm.FilteredRepositories.Single(e => e.Name == "fig").IsPinned, Is.False);
+        Assert.That(vm.FilteredRepositories.Select(e => e.Name).ToArray(),
+            Is.EqualTo(new[] { "fig", "other" }));
+        await _settings.Received().SaveAsync(Arg.Any<CancellationToken>());
+    }
+
+    private void StubScannedRepositories(params string[] paths)
+    {
+        _appSettings.DevelopmentFolder = "/dev";
+        _repositoryLocator.ScanLocalAsync(Arg.Any<CancellationToken>())
+            .Returns(ToAsync(paths.Select(p =>
+                new LocatedRepository(p, null, null, Path.GetFileName(p), null))));
+    }
+
+    private static async IAsyncEnumerable<LocatedRepository> ToAsync(IEnumerable<LocatedRepository> items)
+    {
+        foreach (var item in items)
+            yield return item;
+        await Task.CompletedTask;
+    }
+
     private sealed class FixedReviewSubmitDialog(string? result) : IReviewSubmitDialog
     {
         public Task<string?> ShowAsync(string title, string confirmLabel) =>
