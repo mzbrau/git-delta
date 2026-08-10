@@ -3717,22 +3717,32 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
 
     async Task IFileHistoryBrowseHost.PresentFileHistoryDiffAsync(FilePath path, FileDiff diff, CancellationToken ct)
     {
-        var file = SelectedFile;
-        if (file is null || !string.Equals(file.Path.Value, path.Value, StringComparison.Ordinal))
+        // Browse loads resume off the UI thread after ConfigureAwait(false); marshal so
+        // SelectedFile / DiffRows notify Avalonia controls safely.
+        FileItemViewModel? file = null;
+        CancellationTokenSource? cts = null;
+
+        await InvokeOnUiAsync(() =>
         {
-            file = PrFiles.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal))
-                   ?? RecentViewedFiles.Find(path.Value)
-                   ?? new FileItemViewModel(path, ChangeKind.Modified, isStagedList: false);
-            SelectedFile = file;
-        }
+            file = SelectedFile;
+            if (file is null || !string.Equals(file.Path.Value, path.Value, StringComparison.Ordinal))
+            {
+                file = PrFiles.FirstOrDefault(f => string.Equals(f.Path.Value, path.Value, StringComparison.Ordinal))
+                       ?? RecentViewedFiles.Find(path.Value)
+                       ?? new FileItemViewModel(path, ChangeKind.Modified, isStagedList: false);
+                SelectedFile = file;
+            }
 
-        var cts = new CancellationTokenSource();
-        var previous = Interlocked.Exchange(ref _diffCts, cts);
-        previous?.Cancel();
-        previous?.Dispose();
+            _diffCts?.Cancel();
+            cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            _diffCts = cts;
+            IsLoadingDiff = true;
+        }).ConfigureAwait(false);
+
+        if (cts is null || file is null)
+            return;
+
         var token = cts.Token;
-
-        await InvokeOnUiAsync(() => IsLoadingDiff = true);
         try
         {
             var viewMode = ViewMode;
@@ -3755,15 +3765,18 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
                 DiffRows.Reset(rows);
                 DiffEmptyMessage = rows.Count == 0 ? "No differences" : "Select a file to view its diff";
                 DiffAnnotations.Clear();
-            });
+            }).ConfigureAwait(false);
         }
         finally
         {
             await InvokeOnUiAsync(() =>
             {
-                if (ReferenceEquals(_diffCts, cts))
+                if (Interlocked.CompareExchange(ref _diffCts, null, cts) == cts)
+                {
                     IsLoadingDiff = false;
-            });
+                    cts.Dispose();
+                }
+            }).ConfigureAwait(false);
         }
     }
 
