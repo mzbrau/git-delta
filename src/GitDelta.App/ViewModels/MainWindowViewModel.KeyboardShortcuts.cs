@@ -269,7 +269,7 @@ public partial class MainWindowViewModel
 
         ShortcutConflictSummary = conflicts.Count == 0
             ? null
-            : $"{conflicts.Count} conflicting shortcut pair(s). Resolve before saving is blocked on Change.";
+            : $"{conflicts.Count} conflicting shortcut pair(s). Duplicate chords are ambiguous—change one binding so each chord is unique.";
     }
 
     [RelayCommand]

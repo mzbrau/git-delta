@@ -90,6 +90,52 @@ public sealed class RepositoryGateProviderTests
         Assert.That(Volatile.Read(ref calls), Is.EqualTo(1));
     }
 
+    [Test]
+    public async Task ForAsync_CanceledCaller_DoesNot_Fault_Shared_Resolution()
+    {
+        var calls = 0;
+        var releaseGit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var runner = Substitute.For<IGitProcessRunner>();
+        runner.RunAsync(
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<string>>(),
+                Arg.Any<GitProcessOptions?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(async callInfo =>
+            {
+                if (Interlocked.Increment(ref calls) == 1)
+                    entered.TrySetResult();
+                // Shared resolution must ignore caller cancel — do not observe the token.
+                await releaseGit.Task.ConfigureAwait(false);
+                return new GitCommandResult(0, "/tmp/repo/.git\n", "", false, false);
+            });
+
+        var provider = new RepositoryGateProvider(runner);
+        using var firstCts = new CancellationTokenSource();
+        var first = provider.ForAsync("/tmp/repo", firstCts.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+        firstCts.Cancel();
+        try
+        {
+            await first;
+            Assert.Fail("Expected canceled ForAsync to throw.");
+        }
+        catch (OperationCanceledException)
+        {
+            // TaskCanceledException from WaitAsync is fine — shared work must keep going.
+        }
+
+        var second = provider.ForAsync("/tmp/repo", CancellationToken.None);
+        releaseGit.SetResult();
+        var gate = await second.WaitAsync(TimeSpan.FromSeconds(2));
+
+        Assert.That(gate, Is.Not.Null);
+        Assert.That(Volatile.Read(ref calls), Is.EqualTo(1));
+    }
+
     /// <summary>Posts to the thread pool so awaiting ForAsync does not freeze the "UI" thread.</summary>
     private sealed class ThreadPoolSynchronizationContext : SynchronizationContext
     {

@@ -51,22 +51,31 @@ public sealed class RepositoryGateProvider : IRepositoryGateProvider
             if (!_inflightCommonDir.TryAdd(absRepoPath, tcs.Task))
                 continue;
 
-            try
-            {
-                var commonDir = await ResolveCommonDirCoreAsync(absRepoPath, ct).ConfigureAwait(false);
-                _commonDirByRepo.TryAdd(absRepoPath, commonDir);
-                tcs.SetResult(commonDir);
-                return commonDir;
-            }
-            catch (Exception ex)
-            {
-                tcs.TrySetException(ex);
-                throw;
-            }
-            finally
-            {
-                _inflightCommonDir.TryRemove(absRepoPath, out _);
-            }
+            // Shared resolution must not take a caller token — canceling one waiter must not
+            // fault the inflight task for others. Each caller cancels only its own WaitAsync.
+            _ = CompleteInflightCommonDirAsync(absRepoPath, tcs);
+
+            var resolved = await tcs.Task.WaitAsync(ct).ConfigureAwait(false);
+            return _commonDirByRepo.GetOrAdd(absRepoPath, resolved);
+        }
+    }
+
+    private async Task CompleteInflightCommonDirAsync(string absRepoPath, TaskCompletionSource<string> tcs)
+    {
+        try
+        {
+            var commonDir = await ResolveCommonDirCoreAsync(absRepoPath, CancellationToken.None)
+                .ConfigureAwait(false);
+            _commonDirByRepo.TryAdd(absRepoPath, commonDir);
+            tcs.SetResult(commonDir);
+        }
+        catch (Exception ex)
+        {
+            tcs.TrySetException(ex);
+        }
+        finally
+        {
+            _inflightCommonDir.TryRemove(absRepoPath, out _);
         }
     }
 
