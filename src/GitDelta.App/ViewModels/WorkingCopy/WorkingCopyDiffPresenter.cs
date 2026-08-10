@@ -294,6 +294,9 @@ public partial class WorkingCopyViewModel
         {
             if (_vm.IsRecentOnlySelection(_vm.SelectedFile))
             {
+                // Re-check after awaits above — browse may have started since the early return.
+                if (_vm.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode)
+                    return;
                 await _vm.ReloadCleanFileDiffAsync(_vm.SelectedFile, CancellationToken.None);
                 return;
             }

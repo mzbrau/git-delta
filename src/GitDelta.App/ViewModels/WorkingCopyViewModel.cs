@@ -630,6 +630,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         if (_repoPath is null)
             return;
 
+        // History browse owns the pane — a stale/racing clean load must not Reset browse mode.
+        if (PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode)
+            return;
+
         PendingReview.FileHistoryBrowse.Reset();
         PendingReview.FileHistoryBrowse.ClearSelectionHighlight(PendingReview.FileHistory);
 
@@ -660,12 +664,15 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 bytes = [];
             }
 
+            if (!OwnsCleanFileLoad(file, cts))
+                return;
+
             var scope = DiffTarget.HeadToWorktree.AsWorkingCopy();
             var diff = CleanFileDiff.Create(file.Path, bytes, scope);
-            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
-                return;
             await _diff.PresentDiffAsync(file, diff, DiffTarget.HeadToWorktree, cts, cts.Token)
                 .ConfigureAwait(true);
+            if (!OwnsCleanFileLoad(file, cts))
+                return;
             OnPropertyChanged(nameof(DiffFooterText));
             PendingReview.OnFileSelectionChanged(file, _currentDiff);
         }
@@ -675,7 +682,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
         catch (Exception ex)
         {
-            if (!ReferenceEquals(_diffCts, cts) || !ReferenceEquals(SelectedFile, file))
+            if (!OwnsCleanFileLoad(file, cts))
                 return;
             DiffRows.Clear();
             _currentDiff = null;
@@ -685,7 +692,13 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
         finally
         {
-            if (Interlocked.CompareExchange(ref _diffCts, null, cts) == cts)
+            // Browse may have entered while we were in flight; do not clear its spinner or CTS.
+            if (PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode)
+            {
+                if (!ReferenceEquals(_diffCts, cts))
+                    cts.Dispose();
+            }
+            else if (Interlocked.CompareExchange(ref _diffCts, null, cts) == cts)
             {
                 IsLoadingDiff = false;
                 IsDiffRefreshing = false;
@@ -693,6 +706,11 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             }
         }
     }
+
+    private bool OwnsCleanFileLoad(FileItemViewModel file, CancellationTokenSource cts) =>
+        ReferenceEquals(_diffCts, cts)
+        && ReferenceEquals(SelectedFile, file)
+        && !PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode;
 
     IReadOnlyList<AiChangedFileFact> IPendingChangesReviewHost.BuildChangedFileFacts(AiReviewScope scope)
     {

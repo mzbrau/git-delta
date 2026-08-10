@@ -134,6 +134,8 @@ public sealed class WorkingCopyRecentSelectionTests
                 FilePath.From("clean.txt"),
                 new HashSet<string>(StringComparer.Ordinal) { "dirty.txt" });
             vm.SelectRecentViewedFile(recent);
+            // Let the fire-and-forget clean-file load settle before entering browse mode.
+            await WaitForDiffRowsAsync(vm);
 
             var item = new FileHistoryItemViewModel(new FileHistoryEntry(
                 Oid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -145,9 +147,62 @@ public sealed class WorkingCopyRecentSelectionTests
                 IsCurrent: false));
 
             await vm.PendingReview.FileHistoryBrowse.SelectHistoryItemAsync(item, cache: null);
-            Assert.That(vm.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode, Is.True);
+            Assert.That(vm.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode, Is.True,
+                "SelectHistoryItemAsync should enter browse mode");
 
             await vm.RefreshAsync();
+
+            Assert.That(vm.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode, Is.True,
+                "RefreshAsync must not exit browse mode");
+            Assert.That(vm.PendingReview.FileHistoryBrowse.SelectedOid, Is.EqualTo(item.Oid));
+        }
+        finally
+        {
+            watcher.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task SelectHistoryItem_WhileCleanLoadInFlight_KeepsBrowseMode()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("clean.txt", "hello\nworld\n")
+            .WithInitialCommit("init")
+            .WithFile("dirty.txt", "dirty\n")
+            .WithCommit("add dirty");
+        var path = repo.Build();
+        File.WriteAllText(Path.Combine(path, "dirty.txt"), "dirty\nchanged\n");
+
+        // Large clean file so ReadAllBytesAsync stays in flight while browse starts.
+        var large = new string('x', 512 * 1024) + "\n";
+        File.WriteAllText(Path.Combine(path, "clean.txt"), large);
+
+        var (vm, watcher, _) = CreateVm(path, staged: false, unstagedPath: "dirty.txt");
+        try
+        {
+            await vm.OpenAsync(path);
+
+            var recent = vm.RecentViewedFiles.Remember(
+                FilePath.From("clean.txt"),
+                new HashSet<string>(StringComparer.Ordinal) { "dirty.txt" });
+            vm.SelectRecentViewedFile(recent);
+
+            var item = new FileHistoryItemViewModel(new FileHistoryEntry(
+                Oid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                ShortOid: "bbbbbbb",
+                Subject: "init",
+                AuthorDate: DateTimeOffset.UtcNow.AddDays(-1),
+                AuthorName: "A",
+                IsCreated: true,
+                IsCurrent: false));
+
+            await vm.PendingReview.FileHistoryBrowse.SelectHistoryItemAsync(item, cache: null);
+            Assert.That(vm.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode, Is.True);
+
+            // Give the superseded clean load time to resume and attempt Reset/OnFileSelectionChanged.
+            await Task.Delay(100);
+            for (var i = 0; i < 50 && vm.IsLoadingDiff; i++)
+                await Task.Delay(20);
 
             Assert.That(vm.PendingReview.FileHistoryBrowse.IsFileHistoryBrowseMode, Is.True);
             Assert.That(vm.PendingReview.FileHistoryBrowse.SelectedOid, Is.EqualTo(item.Oid));
