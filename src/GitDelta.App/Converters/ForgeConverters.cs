@@ -245,6 +245,16 @@ public static class ForgeConverters
             _ => Brush("ForgeOnSurfaceBrush"),
         });
 
+    /// <summary>History decoration chip background: secondary for tags, primary for branches.</summary>
+    public static readonly IValueConverter DecorationChipBackground =
+        new FuncValueConverter<bool, IBrush>(isTag =>
+            isTag ? Brush("ForgeSecondaryContainerBrush") : Brush("ForgePrimaryContainerBrush"));
+
+    /// <summary>History decoration chip foreground paired with <see cref="DecorationChipBackground"/>.</summary>
+    public static readonly IValueConverter DecorationChipForeground =
+        new FuncValueConverter<bool, IBrush>(isTag =>
+            isTag ? Brush("ForgeOnSecondaryContainerBrush") : Brush("ForgeOnSurfaceBrush"));
+
     private enum CheckCategory { Neutral, Success, Failure, Pending }
 
     private static CheckCategory CheckStateCategory(string? state)

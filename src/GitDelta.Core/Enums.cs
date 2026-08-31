@@ -71,6 +71,13 @@ public enum WorkspaceMode
     PullRequest,
 }
 
+/// <summary>Kind of a <c>git log %D</c> decoration on a commit.</summary>
+public enum CommitDecorationKind
+{
+    Branch,
+    Tag,
+}
+
 /// <summary>Viewed-state filter for pull request file lists.</summary>
 public enum ViewedFilter
 {
