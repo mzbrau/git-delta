@@ -416,6 +416,11 @@ public sealed partial class DiffViewer : Control
             DetachRowsNotify();
             AttachRowsNotify(change.NewValue as INotifyCollectionChanged);
             _selectionStart = _selectionEnd = -1;
+            _textSelActive = false;
+            _draggingText = false;
+            _pendingCodePress = false;
+            _textAnchor = default;
+            _textFocus = default;
             _hoverRowIndex = -1;
             _hoverSide = null;
             _hoverAddComment = false;
@@ -849,10 +854,11 @@ public sealed partial class DiffViewer : Control
                             SideBySideCodeX(contentLeft), y, muted);
                     else if (!row.LeftText.IsEmpty)
                     {
-                        var x = SideBySideCodeX(contentLeft) - _scrollX;
+                        var x = SideBySideCodeX(contentLeft);
                         var leftFormatted = GetDisplayText(i, side: 0, row.LeftText);
-                        DrawIntraLineHighlights(context, leftFormatted, row.LeftIntraLine, x, y, rowH, removedAccent);
-                        DrawSyntaxOrPlainText(context, i, side: 0, leftFormatted, x, y,
+                        DrawTextSelectionForRow(context, i, row, x, y, rowH, DiffSide.Old, includeUnifiedPrefix: false);
+                        DrawIntraLineHighlights(context, leftFormatted, row.LeftIntraLine, x - _scrollX, y, rowH, removedAccent);
+                        DrawSyntaxOrPlainText(context, i, side: 0, leftFormatted, x - _scrollX, y,
                             TextBrush(leftKind, contextText), LeftSyntaxTokens, row.OldLineNumber);
                     }
                 }
@@ -862,10 +868,11 @@ public sealed partial class DiffViewer : Control
                     DrawGutter(context, row.NewLineNumber, midX, y);
                     if (row.Kind is not DiffRowKind.HunkHeader and not DiffRowKind.Collapsed && !row.RightText.IsEmpty)
                     {
-                        var x = SideBySideCodeX(midX) - _scrollX;
+                        var x = SideBySideCodeX(midX);
                         var rightFormatted = GetDisplayText(i, side: 1, row.RightText);
-                        DrawIntraLineHighlights(context, rightFormatted, row.RightIntraLine, x, y, rowH, addedAccent);
-                        DrawSyntaxOrPlainText(context, i, side: 1, rightFormatted, x, y,
+                        DrawTextSelectionForRow(context, i, row, x, y, rowH, DiffSide.New, includeUnifiedPrefix: false);
+                        DrawIntraLineHighlights(context, rightFormatted, row.RightIntraLine, x - _scrollX, y, rowH, addedAccent);
+                        DrawSyntaxOrPlainText(context, i, side: 1, rightFormatted, x - _scrollX, y,
                             TextBrush(rightKind, contextText), RightSyntaxTokens, row.NewLineNumber);
                     }
                 }
@@ -898,13 +905,15 @@ public sealed partial class DiffViewer : Control
                     _ => " ",
                 };
                 var formatted = GetDisplayText(i, side: 2, text);
-                var x = UnifiedCodeX(contentLeft) - _scrollX;
+                var x = UnifiedCodeX(contentLeft);
                 var intra = row.Kind == DiffRowKind.Removed ? row.LeftIntraLine : row.RightIntraLine;
                 var accent = row.Kind == DiffRowKind.Added ? addedAccent : removedAccent;
                 // Offset highlights by the +/- prefix width.
                 var prefixBrush = TextBrush(row.Kind, contextText);
-                var prefixWidth = DrawPrefix(context, prefix, x, y, prefixBrush);
-                DrawIntraLineHighlights(context, formatted, intra, x + prefixWidth, y, rowH, accent);
+                var drawX = x - _scrollX;
+                var prefixWidth = DrawPrefix(context, prefix, drawX, y, prefixBrush);
+                DrawTextSelectionForRow(context, i, row, x, y, rowH, DiffSide.New, includeUnifiedPrefix: true);
+                DrawIntraLineHighlights(context, formatted, intra, drawX + prefixWidth, y, rowH, accent);
                 var tokens = row.Kind == DiffRowKind.Removed ? LeftSyntaxTokens : RightSyntaxTokens;
                 var lineNo = row.Kind == DiffRowKind.Removed ? row.OldLineNumber : row.NewLineNumber;
                 if (row.Kind == DiffRowKind.Context)
@@ -913,7 +922,7 @@ public sealed partial class DiffViewer : Control
                     lineNo = row.NewLineNumber ?? row.OldLineNumber;
                 }
 
-                DrawSyntaxOrPlainText(context, i, side: 2, formatted, x + prefixWidth, y,
+                DrawSyntaxOrPlainText(context, i, side: 2, formatted, drawX + prefixWidth, y,
                     TextBrush(row.Kind, contextText), tokens, lineNo);
             }
 
@@ -2049,6 +2058,7 @@ public sealed partial class DiffViewer : Control
 
         if (point.Properties.IsRightButtonPressed)
         {
+            ClearTextSelection();
             EnsureSelectionAt(pos);
             ShowLineContextMenu();
             e.Handled = true;
@@ -2108,6 +2118,38 @@ public sealed partial class DiffViewer : Control
             return;
         }
 
+        // Shift+click with an active text selection extends the character range.
+        if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)
+            && HasTextSelection
+            && TryHitTestCode(pos, out var shiftAnchor, out var shiftSide)
+            && DiffViewerTextSelection.IsCodeRow(Rows[shiftAnchor.Row].Kind)
+            && (ViewMode != DiffViewMode.SideBySide || shiftSide == _textSelSide))
+        {
+            _textFocus = shiftAnchor;
+            ClearLineSelection();
+            InvalidateVisual();
+            e.Handled = true;
+            return;
+        }
+
+        // Press in the code column: defer line vs text selection until move/release.
+        if (point.Properties.IsLeftButtonPressed
+            && TryHitTestCode(pos, out var codeAnchor, out var codeSide)
+            && DiffViewerTextSelection.IsCodeRow(Rows[codeAnchor.Row].Kind))
+        {
+            _pendingCodePress = true;
+            _draggingText = false;
+            _pressOrigin = pos;
+            _pressAnchor = codeAnchor;
+            _pressSide = codeSide;
+            _pressModifiers = e.KeyModifiers;
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return;
+        }
+
+        // Gutter / non-code click: whole-line selection (staging / comments).
+        ClearTextSelection();
         if (e.KeyModifiers.HasFlag(KeyModifiers.Shift) && _selectionStart >= 0)
             _selectionEnd = index;
         else
@@ -2134,6 +2176,42 @@ public sealed partial class DiffViewer : Control
             ScrollFromHScrollX(e.GetPosition(this).X);
             e.Handled = true;
             return;
+        }
+
+        if (_pendingCodePress || _draggingText)
+        {
+            var dragPos = e.GetPosition(this);
+            var dx = dragPos.X - _pressOrigin.X;
+            var dy = dragPos.Y - _pressOrigin.Y;
+            if (!_draggingText
+                && (dx * dx + dy * dy) >= TextDragThresholdPx * TextDragThresholdPx)
+            {
+                _draggingText = true;
+                _pendingCodePress = false;
+                BeginOrUpdateTextSelection(_pressAnchor, _pressSide);
+            }
+
+            if (_draggingText)
+            {
+                if (TryHitTestCode(dragPos, out var focus, out var dragSide))
+                    BeginOrUpdateTextSelection(focus, dragSide);
+                else
+                {
+                    // Outside code column horizontally but still over a row: update row, clamp col.
+                    var dragIndex = RowIndexAtContentY(dragPos.Y + _scrollY);
+                    if (Rows is not null && dragIndex >= 0 && dragIndex < Rows.Count)
+                    {
+                        var text = GetCodeDisplayTextOrEmpty(dragIndex, _textSelSide);
+                        var col = dragPos.X < _pressOrigin.X ? 0 : text.Length;
+                        BeginOrUpdateTextSelection(
+                            new DiffViewerTextSelection.Anchor(dragIndex, col),
+                            _textSelSide);
+                    }
+                }
+
+                e.Handled = true;
+                return;
+            }
         }
 
         if (!CanAddLineComments || Rows is null)
@@ -2251,7 +2329,45 @@ public sealed partial class DiffViewer : Control
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
-        var wasDragging = _draggingMinimap || _draggingHScroll;
+        var wasDragging = _draggingMinimap || _draggingHScroll || _draggingText;
+        var pendingCode = _pendingCodePress;
+
+        if (_draggingText)
+        {
+            _draggingText = false;
+            _pendingCodePress = false;
+            if (e.Pointer.Captured == this)
+                ReleaseOwnedPointerCapture(e.Pointer);
+            e.Handled = true;
+            return;
+        }
+
+        if (pendingCode)
+        {
+            _pendingCodePress = false;
+            if (e.Pointer.Captured == this)
+                ReleaseOwnedPointerCapture(e.Pointer);
+
+            // Click without drag → whole-line selection (staging / comments).
+            var index = _pressAnchor.Row;
+            if (Rows is not null && index >= 0 && index < Rows.Count)
+            {
+                ClearTextSelection();
+                if (_pressModifiers.HasFlag(KeyModifiers.Shift) && _selectionStart >= 0)
+                    _selectionEnd = index;
+                else
+                    _selectionStart = _selectionEnd = index;
+
+                if (SelectedHunkIndex is { } hunk && GetWorkingCopy() is { } workingCopy)
+                    workingCopy.SelectedHunkIndex = hunk;
+
+                InvalidateVisual();
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         if (e.Pointer.Captured == this || wasDragging)
             ReleaseOwnedPointerCapture(e.Pointer);
         if (wasDragging)
@@ -2262,6 +2378,8 @@ public sealed partial class DiffViewer : Control
     {
         _draggingMinimap = false;
         _draggingHScroll = false;
+        _draggingText = false;
+        _pendingCodePress = false;
         base.OnPointerCaptureLost(e);
     }
 
@@ -2333,7 +2451,7 @@ public sealed partial class DiffViewer : Control
                    || (e.Key == Key.C && e.KeyModifiers.HasFlag(KeyModifiers.Meta));
         if (copy)
         {
-            _ = CopySelectionAsPatchAsync();
+            _ = CopySelectionAsync();
             e.Handled = true;
         }
         else if (e.Key is Key.Left or Key.Right)
@@ -2365,6 +2483,12 @@ public sealed partial class DiffViewer : Control
             _ => idx,
         };
         _selectionStart = _selectionEnd = idx;
+        if (_textSelActive)
+        {
+            _textSelActive = false;
+            _textAnchor = default;
+            _textFocus = default;
+        }
         EnsureVisible(idx);
         InvalidateVisual();
     }
