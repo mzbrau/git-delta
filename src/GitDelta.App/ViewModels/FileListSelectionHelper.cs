@@ -41,9 +41,10 @@ public static class FileListSelectionHelper
         IReadOnlyList<FileItemViewModel> sourceFiles,
         List<FileItemViewModel> into)
     {
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        // Path alone is not enough: a partially staged file has staged + unstaged rows.
+        var seen = new HashSet<(string Path, bool Staged)>();
         foreach (var existing in into)
-            seen.Add(existing.Path.Value);
+            seen.Add((existing.Path.Value, existing.IsStagedList));
 
         foreach (var item in selectedItems)
         {
@@ -54,7 +55,7 @@ public static class FileListSelectionHelper
             {
                 foreach (var under in FilesUnderFolder(sourceFiles, key))
                 {
-                    if (seen.Add(under.Path.Value))
+                    if (seen.Add((under.Path.Value, under.IsStagedList)))
                         into.Add(under);
                 }
                 continue;
@@ -62,12 +63,12 @@ public static class FileListSelectionHelper
 
             if (item is FileListEntry { File: { } fileItem })
             {
-                if (seen.Add(fileItem.Path.Value))
+                if (seen.Add((fileItem.Path.Value, fileItem.IsStagedList)))
                     into.Add(fileItem);
                 continue;
             }
 
-            if (item is FileItemViewModel legacy && seen.Add(legacy.Path.Value))
+            if (item is FileItemViewModel legacy && seen.Add((legacy.Path.Value, legacy.IsStagedList)))
                 into.Add(legacy);
         }
     }

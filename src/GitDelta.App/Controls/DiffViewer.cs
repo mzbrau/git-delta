@@ -198,7 +198,7 @@ public sealed partial class DiffViewer : Control
     private int _paintWarmAboveCursor = -1;
     private long? _pendingScrollGestureTimestamp;
     private long _lastScrollActivityTimestamp;
-    private bool _scrollIdleFollowUpPosted;
+    private DispatcherTimer? _scrollIdleTimer;
     private bool _hScrollBarEnabled;
     private bool _pendingHScrollBarReveal;
     private int _lastScrollReportContentEpoch = -1;
@@ -1034,7 +1034,8 @@ public sealed partial class DiffViewer : Control
         var generation = ++_maxWidthComputeGeneration;
         var contentEpoch = _contentEpoch;
         var mode = ViewMode;
-        var rowsSnapshot = rows;
+        var rowsLive = rows;
+        var rowsSnapshot = rows is DiffRow[] arr ? arr : rows.ToArray();
 
         _ = Task.Run(() =>
         {
@@ -1047,7 +1048,7 @@ public sealed partial class DiffViewer : Control
                 if (generation != _maxWidthComputeGeneration
                     || contentEpoch != _contentEpoch
                     || mode != ViewMode
-                    || !ReferenceEquals(Rows, rowsSnapshot))
+                    || !ReferenceEquals(Rows, rowsLive))
                 {
                     return;
                 }
@@ -1650,30 +1651,36 @@ public sealed partial class DiffViewer : Control
 
     private void ScheduleScrollIdleFollowUp()
     {
-        if (_scrollIdleFollowUpPosted)
+        _scrollIdleTimer ??= new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromMilliseconds(PaintWarmScrollIdleMs),
+        };
+        _scrollIdleTimer.Tick -= OnScrollIdleTimerTick;
+        _scrollIdleTimer.Tick += OnScrollIdleTimerTick;
+        _scrollIdleTimer.Stop();
+        _scrollIdleTimer.Interval = TimeSpan.FromMilliseconds(PaintWarmScrollIdleMs);
+        _scrollIdleTimer.Start();
+    }
+
+    private void OnScrollIdleTimerTick(object? sender, EventArgs e)
+    {
+        _scrollIdleTimer?.Stop();
+        if (IsPaintWarmPausedForScroll())
+        {
+            ScheduleScrollIdleFollowUp();
+            return;
+        }
+
+        if (_pendingHScrollBarReveal)
+            ApplyHScrollBarVisibility();
+
+        var rows = Rows;
+        if (rows is null || rows.Count == 0 || _paintWarmPosted)
             return;
 
-        _scrollIdleFollowUpPosted = true;
-        Dispatcher.UIThread.Post(() =>
-        {
-            _scrollIdleFollowUpPosted = false;
-            if (IsPaintWarmPausedForScroll())
-            {
-                ScheduleScrollIdleFollowUp();
-                return;
-            }
-
-            if (_pendingHScrollBarReveal)
-                ApplyHScrollBarVisibility();
-
-            var rows = Rows;
-            if (rows is null || rows.Count == 0 || _paintWarmPosted)
-                return;
-
-            var first = Math.Max(0, RowIndexAtContentY(_scrollY));
-            var last = Math.Min(rows.Count - 1, RowIndexAtContentY(_scrollY + ViewportHeight) + 1);
-            SchedulePaintWarm(first, last, rows.Count);
-        }, DispatcherPriority.Background);
+        var first = Math.Max(0, RowIndexAtContentY(_scrollY));
+        var last = Math.Min(rows.Count - 1, RowIndexAtContentY(_scrollY + ViewportHeight) + 1);
+        SchedulePaintWarm(first, last, rows.Count);
     }
 
     private void ApplyHScrollBarVisibility()

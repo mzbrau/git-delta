@@ -1138,6 +1138,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 _lastStatus = null;
                 LastStatusRefreshedAt = null;
                 OnPropertyChanged(nameof(StatusRefreshTooltip));
+                _stageQueue.CancelAndClear();
                 _pending.Clear();
                 FileFilter = "";
                 ApplySelectionState([], requestViewSync: true);
@@ -1307,7 +1308,18 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
             if (ct.IsCancellationRequested || _repoPath is null)
                 return;
 
-            await TrySoftRefreshAsync().ConfigureAwait(true);
+            try
+            {
+                await TrySoftRefreshAsync().ConfigureAwait(true);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _notifications.Error($"Status refresh failed: {ex.Message}", null, ex);
+            }
         }
     }
 

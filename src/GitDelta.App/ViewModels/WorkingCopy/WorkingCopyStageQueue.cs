@@ -20,11 +20,25 @@ public partial class WorkingCopyViewModel
         private CancellationTokenSource? _debounceCts;
         private int _flushGate; // 0 = idle, 1 = running
         private bool _flushAgain;
+        private string? _pendingRepoPath;
+
+        /// <summary>Cancel debounce and drop all queued mutations (e.g. repository switch).</summary>
+        public void CancelAndClear()
+        {
+            _debounceCts?.Cancel();
+            _debounceCts?.Dispose();
+            _debounceCts = null;
+            _flushAgain = false;
+            _pendingRepoPath = null;
+            ClearAllPending();
+        }
 
         public void EnqueueToggle(FileItemViewModel file)
         {
             if (_vm._repoPath is null)
                 return;
+
+            _pendingRepoPath = _vm._repoPath;
 
             var pathKey = file.Path.Value;
             var wantUnstage = file.IsStagedList;
@@ -121,9 +135,12 @@ public partial class WorkingCopyViewModel
 
         private async Task FlushOnceAsync()
         {
-            if (_vm._repoPath is null)
+            var repoPath = _pendingRepoPath ?? _vm._repoPath;
+            if (repoPath is null || _vm._repoPath is null
+                || !string.Equals(repoPath, _vm._repoPath, StringComparison.Ordinal))
             {
                 ClearAllPending();
+                _pendingRepoPath = null;
                 return;
             }
 
@@ -143,6 +160,14 @@ public partial class WorkingCopyViewModel
             var mutated = stageBatch.Concat(unstageBatch).Select(p => p.Path).ToList();
             await _vm.YieldUiAfterOptimisticAsync();
 
+            // Repo may have switched while we yielded.
+            if (!string.Equals(repoPath, _vm._repoPath, StringComparison.Ordinal))
+            {
+                foreach (var pending in stageBatch.Concat(unstageBatch))
+                    _vm._pending.Remove(pending);
+                return;
+            }
+
             try
             {
                 if (stageBatch.Count > 0)
@@ -150,14 +175,14 @@ public partial class WorkingCopyViewModel
                     try
                     {
                         await _vm._staging.StageFilesAsync(
-                            _vm._repoPath,
+                            repoPath,
                             stageBatch.Select(p => p.Path).ToList());
                     }
                     catch (Exception ex)
                     {
                         _vm._notifications.Error(
                             $"Stage failed: {ex.Message}",
-                            () => Requeue(stageBatch, unstage: false),
+                            () => Requeue(repoPath, stageBatch, unstage: false),
                             ex);
                     }
                 }
@@ -167,14 +192,14 @@ public partial class WorkingCopyViewModel
                     try
                     {
                         await _vm._staging.UnstageFilesAsync(
-                            _vm._repoPath,
+                            repoPath,
                             unstageBatch.Select(p => p.Path).ToList());
                     }
                     catch (Exception ex)
                     {
                         _vm._notifications.Error(
                             $"Unstage failed: {ex.Message}",
-                            () => Requeue(unstageBatch, unstage: true),
+                            () => Requeue(repoPath, unstageBatch, unstage: true),
                             ex);
                     }
                 }
@@ -184,13 +209,18 @@ public partial class WorkingCopyViewModel
                 foreach (var pending in stageBatch.Concat(unstageBatch))
                     _vm._pending.Remove(pending);
 
-                await _vm.RefreshAndMaybeReloadDiffAsync(mutated);
+                if (string.Equals(repoPath, _vm._repoPath, StringComparison.Ordinal))
+                    await _vm.RefreshAndMaybeReloadDiffAsync(mutated);
                 GitDeltaMeters.WcStageMs.Record(sw.Elapsed.TotalMilliseconds);
             }
         }
 
-        private void Requeue(IReadOnlyList<PendingMutation> batch, bool unstage)
+        private void Requeue(string repoPath, IReadOnlyList<PendingMutation> batch, bool unstage)
         {
+            if (!string.Equals(repoPath, _vm._repoPath, StringComparison.Ordinal))
+                return;
+
+            _pendingRepoPath = repoPath;
             foreach (var pending in batch)
             {
                 var key = pending.Path.Value;

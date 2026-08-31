@@ -455,6 +455,11 @@ public sealed class GitHistoryService(
             var kind = CommitDecorationKind.Branch;
             if (s.StartsWith("HEAD -> ", StringComparison.Ordinal))
                 s = s["HEAD -> ".Length..].Trim();
+            else if (string.Equals(s, "HEAD", StringComparison.Ordinal))
+            {
+                // Detached HEAD emits a bare HEAD decoration; do not treat it as a branch tip.
+                continue;
+            }
             else if (s.StartsWith("tag: ", StringComparison.Ordinal))
             {
                 s = s["tag: ".Length..].Trim();

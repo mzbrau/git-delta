@@ -114,7 +114,8 @@
   <Style Selector="Panel.DiffPathHeader Button.CopyFilename">
     <Setter Property="Opacity" Value="0" />
   </Style>
-  <Style Selector="Panel.DiffPathHeader:pointerover Button.CopyFilename">
+  <Style Selector="Panel.DiffPathHeader:pointerover Button.CopyFilename,
+                   Button.CopyFilename:focus">
     <Setter Property="Opacity" Value="1" />
   </Style>
 
