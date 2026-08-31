@@ -87,6 +87,7 @@ public static class DiffViewerTextSelection
         Func<int, string?> getDisplayText)
     {
         var sb = new StringBuilder();
+        var emitted = false;
         for (var i = start.Row; i <= end.Row; i++)
         {
             var text = getDisplayText(i);
@@ -100,9 +101,10 @@ public static class DiffViewerTextSelection
             if (from > to)
                 (from, to) = (to, from);
 
-            if (sb.Length > 0)
+            if (emitted)
                 sb.Append('\n');
             sb.Append(text, from, to - from);
+            emitted = true;
         }
 
         return sb.ToString();

@@ -59,6 +59,18 @@ public sealed class DiffViewerTextSelectionTests
     }
 
     [Test]
+    public void BuildPlainText_Preserves_Blank_First_Line_Separator()
+    {
+        var lines = new[] { "", "second" };
+        var text = DiffViewerTextSelection.BuildPlainText(
+            new DiffViewerTextSelection.Anchor(0, 0),
+            new DiffViewerTextSelection.Anchor(1, 6),
+            i => lines[i]);
+
+        Assert.That(text, Is.EqualTo("\nsecond"));
+    }
+
+    [Test]
     public void GetCodeMemory_Unified_ExcludesPrefixConceptually()
     {
         var added = new DiffRow(

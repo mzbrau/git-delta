@@ -64,6 +64,27 @@ public sealed class FileListSelectionHelperTests
         Assert.That(into, Has.Count.EqualTo(1));
         Assert.That(into[0].Path.Value, Is.EqualTo("src/a.cs"));
     }
+
+    [Test]
+    public void CollectFromEntries_Keeps_Staged_And_Unstaged_Twins()
+    {
+        var staged = FileItemViewModel.From(
+            new StatusEntry(FilePath.From("a.txt"), null, ChangeKind.Modified, true, false, false),
+            isStagedList: true);
+        var unstaged = FileItemViewModel.From(
+            new StatusEntry(FilePath.From("a.txt"), null, ChangeKind.Modified, false, true, false),
+            isStagedList: false);
+
+        var into = new List<FileItemViewModel> { staged };
+        FileListSelectionHelper.CollectFromEntries(
+            [new FileListEntry(0, "a.txt", unstaged)],
+            [unstaged],
+            into);
+
+        Assert.That(into, Has.Count.EqualTo(2));
+        Assert.That(into.Count(f => f.IsStagedList), Is.EqualTo(1));
+        Assert.That(into.Count(f => !f.IsStagedList), Is.EqualTo(1));
+    }
 }
 
 public sealed class WorkingCopyFolderStagingTests
@@ -277,6 +298,42 @@ public sealed class WorkingCopyFolderStagingTests
         finally
         {
             try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task ToggleFileStaged_Repo_Switch_Drops_Queued_Mutations()
+    {
+        var repoA = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        var repoB = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repoA);
+        Directory.CreateDirectory(repoB);
+        try
+        {
+            _status.GetStatusAsync(repoA, Arg.Any<CancellationToken>())
+                .Returns(Status(unstaged: [Unstaged("a.txt")]));
+            _status.GetStatusAsync(repoB, Arg.Any<CancellationToken>())
+                .Returns(Status(unstaged: [Unstaged("b.txt")]));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repoA);
+
+            var a = vm.UnstagedFiles.First(f => f.Path.Value == "a.txt");
+            await vm.ToggleFileStagedCommand.ExecuteAsync(a);
+
+            // Switch before the debounce flush can run.
+            await vm.OpenAsync(repoB);
+            await Task.Delay(250);
+
+            await _staging.DidNotReceive().StageFilesAsync(
+                Arg.Any<string>(),
+                Arg.Any<IReadOnlyList<FilePath>>(),
+                Arg.Any<CancellationToken>());
+        }
+        finally
+        {
+            try { Directory.Delete(repoA, recursive: true); } catch { /* best effort */ }
+            try { Directory.Delete(repoB, recursive: true); } catch { /* best effort */ }
         }
     }
 }

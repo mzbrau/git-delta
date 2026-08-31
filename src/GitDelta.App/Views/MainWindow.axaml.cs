@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     private DiffViewer? _wcDiffViewer;
     private TextBox? _activeMentionComposer;
     private bool _fileListDragDropHooked;
+    private bool _fileListFolderKeyboardHooked;
     private PointerPressedEventArgs? _fileDragPressArgs;
     private Point _fileDragStartPoint;
     private ListBox? _fileDragSourceList;
@@ -1091,6 +1092,50 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() => _ = Vm.EnsureRepositoryCatalogAsync(), DispatcherPriority.Background);
 
         HookFileListDragDrop();
+        HookFileListFolderKeyboard();
+    }
+
+    private void HookFileListFolderKeyboard()
+    {
+        if (_fileListFolderKeyboardHooked)
+            return;
+        _fileListFolderKeyboardHooked = true;
+
+        foreach (var list in new[] { StagedFileList, UnstagedFileList, ConflictedFileList })
+            list.AddHandler(InputElement.KeyDownEvent, OnFileListFolderKeyDown, RoutingStrategies.Tunnel);
+
+        if (this.FindControl<ListBox>("HistoryFileList") is { } history)
+            history.AddHandler(InputElement.KeyDownEvent, OnFileListFolderKeyDown, RoutingStrategies.Tunnel);
+        if (this.FindControl<ListBox>("PrFileList") is { } pr)
+            pr.AddHandler(InputElement.KeyDownEvent, OnFileListFolderKeyDown, RoutingStrategies.Tunnel);
+    }
+
+    private void OnFileListFolderKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Left or Key.Right or Key.Enter))
+            return;
+        if (sender is not ListBox list)
+            return;
+        if (list.SelectedItem is not FileListEntry { IsExpandable: true, FolderKey: { } key })
+            return;
+
+        e.Handled = true;
+        if (list.Name == "HistoryFileList")
+        {
+            if (Vm.WorkingCopy.ToggleHistoryFolderCommand.CanExecute(key))
+                Vm.WorkingCopy.ToggleHistoryFolderCommand.Execute(key);
+            return;
+        }
+
+        if (list.Name == "PrFileList")
+        {
+            if (Vm.Review.TogglePrFolderCommand.CanExecute(key))
+                Vm.Review.TogglePrFolderCommand.Execute(key);
+            return;
+        }
+
+        if (Vm.WorkingCopy.ToggleFileStatusFolderCommand.CanExecute(key))
+            Vm.WorkingCopy.ToggleFileStatusFolderCommand.Execute(key);
     }
 
     private void HookFileListDragDrop()

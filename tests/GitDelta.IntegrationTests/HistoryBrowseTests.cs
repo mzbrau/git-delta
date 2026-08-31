@@ -198,6 +198,24 @@ public sealed class HistoryBrowseTests
     }
 
     [Test]
+    public void ParseCommitLog_Filters_Bare_Head_Decoration()
+    {
+        const char rs = '\u001e';
+        const char us = '\u001f';
+        var stdout =
+            $"{rs}abc123{us}abc1234{us}parent1{us}Ann{us}ann@ex.com{us}2026-07-31T12:00:00+00:00{us}" +
+            $"Detached{us}{us}HEAD, tag: v1";
+
+        var commits = GitHistoryService.ParseCommitLog(stdout);
+        Assert.That(commits, Has.Count.EqualTo(1));
+        Assert.That(commits[0].Decorations, Has.Count.EqualTo(1));
+        Assert.That(commits[0].Decorations[0].Kind, Is.EqualTo(CommitDecorationKind.Tag));
+        Assert.That(commits[0].Decorations[0].Name, Is.EqualTo("v1"));
+        Assert.That(commits[0].Branches, Is.Empty);
+        Assert.That(commits[0].BranchesDisplay, Is.EqualTo(""));
+    }
+
+    [Test]
     public async Task ListCommits_Includes_Tag_Decoration()
     {
         using var repo = RepositoryBuilder.Create()
