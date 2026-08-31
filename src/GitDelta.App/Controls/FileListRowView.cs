@@ -5,8 +5,10 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Controls.Primitives;
 using Avalonia.Data;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.VisualTree;
 using GitDelta.App.Converters;
 using GitDelta.App.ViewModels;
 using GitDelta.Core;
@@ -66,6 +68,9 @@ public sealed class FileListRowView : UserControl
     public FileListRowView()
     {
         _folderChevron = Icon(MaterialIconKind.ChevronRight, 14, 0.7);
+        _folderChevron.Tag = "FolderChevron";
+        _folderChevron.Cursor = new Cursor(StandardCursorType.Hand);
+        _folderChevron.PointerPressed += OnFolderChevronPointerPressed;
         _folderLabel = new TextBlock
         {
             Classes = { "MonoPath" },
@@ -108,6 +113,9 @@ public sealed class FileListRowView : UserControl
 
         _statusIcon = Icon(MaterialIconKind.Pencil, 14);
         _searchGroupChevron = Icon(MaterialIconKind.ChevronRight, 14, 0.7);
+        _searchGroupChevron.Tag = "FolderChevron";
+        _searchGroupChevron.Cursor = new Cursor(StandardCursorType.Hand);
+        _searchGroupChevron.PointerPressed += OnFolderChevronPointerPressed;
         _searchGroupChevron.IsVisible = false;
         _name = new MiddleEllipsisTextBlock
         {
@@ -522,6 +530,34 @@ public sealed class FileListRowView : UserControl
 
         if (command?.CanExecute(file) == true)
             command.Execute(file);
+    }
+
+    private void OnFolderChevronPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is not FileListEntry { IsExpandable: true, FolderKey: { } key })
+            return;
+
+        e.Handled = true;
+        if (TopLevel.GetTopLevel(this)?.DataContext is not MainWindowViewModel vm)
+            return;
+
+        var list = this.FindAncestorOfType<ListBox>();
+        if (list?.Name == "HistoryFileList")
+        {
+            if (vm.WorkingCopy.ToggleHistoryFolderCommand.CanExecute(key))
+                vm.WorkingCopy.ToggleHistoryFolderCommand.Execute(key);
+            return;
+        }
+
+        if (list?.Name == "PrFileList")
+        {
+            if (vm.Review.TogglePrFolderCommand.CanExecute(key))
+                vm.Review.TogglePrFolderCommand.Execute(key);
+            return;
+        }
+
+        if (vm.WorkingCopy.ToggleFileStatusFolderCommand.CanExecute(key))
+            vm.WorkingCopy.ToggleFileStatusFolderCommand.Execute(key);
     }
 
 

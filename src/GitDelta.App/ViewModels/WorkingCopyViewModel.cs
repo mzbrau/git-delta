@@ -46,6 +46,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly WorkingCopyDiffPresenter _diff;
     private readonly WorkingCopyStatusController _status;
+    private readonly WorkingCopyStageQueue _stageQueue;
 
     private CancellationTokenSource? _diffCts;
     private CancellationTokenSource? _prefetchCts;
@@ -119,6 +120,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     {
         _diff = new WorkingCopyDiffPresenter(this);
         _status = new WorkingCopyStatusController(this);
+        _stageQueue = new WorkingCopyStageQueue(this);
         _statusService = statusService;
         _diffService = diffService;
         _staging = staging;
@@ -3452,6 +3454,12 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private Task UnstageSelectedAsync() =>
         UnstageManyAsync(_selectedFiles.Where(f => f.IsStagedList).ToList());
 
+    /// <summary>Stages the given files (used by drag-drop and folder actions).</summary>
+    public Task StageFilesAsync(IReadOnlyList<FileItemViewModel> files) => StageManyAsync(files);
+
+    /// <summary>Unstages the given files (used by drag-drop and folder actions).</summary>
+    public Task UnstageFilesAsync(IReadOnlyList<FileItemViewModel> files) => UnstageManyAsync(files);
+
     private async Task StageManyAsync(IReadOnlyList<FileItemViewModel> files)
     {
         if (_repoPath is null || files.Count == 0) return;
@@ -3534,7 +3542,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     private Task ToggleFileStagedAsync(FileItemViewModel? file)
     {
         if (file is null) return Task.CompletedTask;
-        return file.IsStagedList ? UnstageFileAsync(file) : StageFileAsync(file);
+        _stageQueue.EnqueueToggle(file);
+        return Task.CompletedTask;
     }
 
     [RelayCommand]
