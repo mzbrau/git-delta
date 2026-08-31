@@ -51,6 +51,31 @@ public static class OpenTelemetryBootstrap
         activity?.SetTag("diff.render_ms", elapsedMs);
     }
 
+    /// <summary>
+    /// Records scroll gesture → first paint latency; emits a span only for severe jank
+    /// (≥ <see cref="SlowPaintMs"/> ms).
+    /// </summary>
+    public static void RecordDiffScroll(
+        double gestureToPaintMs,
+        int cacheMissRows,
+        double maxWidthScanMs,
+        bool paintWarmPending,
+        bool firstAfterBind,
+        int scrollDir)
+    {
+        GitDeltaMeters.DiffScrollGestureToPaintMs.Record(gestureToPaintMs);
+        if (gestureToPaintMs < SlowPaintMs)
+            return;
+
+        using var activity = GitDeltaActivity.Source.StartActivity("diff.scroll.first.slow");
+        activity?.SetTag("diff.cache_miss_rows", cacheMissRows);
+        activity?.SetTag("diff.max_width_scan_ms", maxWidthScanMs);
+        activity?.SetTag("diff.paint_warm_pending", paintWarmPending);
+        activity?.SetTag("diff.first_after_bind", firstAfterBind);
+        activity?.SetTag("diff.scroll_dir", scrollDir);
+        activity?.SetTag("diff.gesture_to_paint_ms", gestureToPaintMs);
+    }
+
     /// <summary>Records file-list column resize layout; emits a span only for severe jank (≥ <see cref="SlowPaintMs"/> ms).</summary>
     public static void RecordFileListResize(double elapsedMs, int visibleApprox)
     {

@@ -4391,15 +4391,17 @@
 
                     <TextBlock Text="{Binding Diagnostics.Summary}" FontSize="11" TextWrapping="Wrap"
                                Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                    <ItemsControl ItemsSource="{Binding Diagnostics.LastTimings}" MaxHeight="220">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                          <TextBlock Text="{Binding}" FontSize="10"
-                                     FontFamily="{DynamicResource ForgeCodeFont}"
-                                     Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                    <ScrollViewer MaxHeight="360" HorizontalScrollBarVisibility="Disabled">
+                      <ItemsControl ItemsSource="{Binding Diagnostics.LastTimings}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <TextBlock Text="{Binding}" FontSize="10"
+                                       FontFamily="{DynamicResource ForgeCodeFont}"
+                                       Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </ScrollViewer>
                   </StackPanel>
                 </ScrollViewer>
               </Panel>

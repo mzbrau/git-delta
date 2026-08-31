@@ -44,6 +44,8 @@ public partial class MainWindow : Window
     private bool _wcInlineCommentLayoutHooked;
     private bool _syncingInlineCommentLayout;
     private bool _syncingWcInlineCommentLayout;
+    private DiffViewer? _prDiffViewer;
+    private DiffViewer? _wcDiffViewer;
     private TextBox? _activeMentionComposer;
 
     public MainWindow()
@@ -151,6 +153,7 @@ public partial class MainWindow : Window
                 aiCard.PropertyChanged += OnInlineCardLayoutChanged;
             if (this.FindControl<DiffViewer>("PrDiffViewer") is { } viewer)
             {
+                _prDiffViewer = viewer;
                 viewer.PropertyChanged += OnPrDiffViewerPropertyChanged;
                 viewer.ViewportChanged += SyncInlineCommentLayout;
             }
@@ -163,6 +166,7 @@ public partial class MainWindow : Window
                 wcCard.PropertyChanged += OnWcInlineCardLayoutChanged;
             if (this.FindControl<DiffViewer>("WcDiffViewer") is { } wcViewer)
             {
+                _wcDiffViewer = wcViewer;
                 wcViewer.PropertyChanged += OnWcDiffViewerPropertyChanged;
                 wcViewer.ViewportChanged += SyncWcInlineCommentLayout;
             }
@@ -237,17 +241,25 @@ public partial class MainWindow : Window
         if (_syncingWcInlineCommentLayout)
             return;
 
-        if (DataContext is not MainWindowViewModel vm ||
-            this.FindControl<DiffViewer>("WcDiffViewer") is not { } viewer)
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+
+        var viewer = _wcDiffViewer ?? this.FindControl<DiffViewer>("WcDiffViewer");
+        if (viewer is null)
+            return;
+        _wcDiffViewer = viewer;
+
+        // Scroll fires ViewportChanged every wheel — skip FindControl/layout when no card.
+        if (!vm.WorkingCopy.PendingReview.HasExpandedLocalComment)
         {
+            viewer.ClearInlineInset();
             return;
         }
 
         _syncingWcInlineCommentLayout = true;
         try
         {
-            if (vm.WorkingCopy.PendingReview.HasExpandedLocalComment &&
-                this.FindControl<Border>("WcInlineLocalCommentCard") is { } card)
+            if (this.FindControl<Border>("WcInlineLocalCommentCard") is { } card)
             {
                 if (vm.WorkingCopy.PendingReview.SelectedLocalCommentAnnotation is { } ann)
                 {
@@ -397,9 +409,20 @@ public partial class MainWindow : Window
         if (_syncingInlineCommentLayout)
             return;
 
-        if (DataContext is not MainWindowViewModel vm ||
-            this.FindControl<DiffViewer>("PrDiffViewer") is not { } viewer)
+        if (DataContext is not MainWindowViewModel vm)
+            return;
+
+        var viewer = _prDiffViewer ?? this.FindControl<DiffViewer>("PrDiffViewer");
+        if (viewer is null)
+            return;
+        _prDiffViewer = viewer;
+
+        var needsCard = vm.Review.HasDraftCommentAnchor
+                        || vm.Review.HasExpandedInlineThread
+                        || vm.Review.HasExpandedAiAnnotation;
+        if (!needsCard)
         {
+            viewer.ClearInlineInset();
             return;
         }
 

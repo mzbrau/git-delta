@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Avalonia;
 using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using GitDelta.Core;
 using GitDelta.Core.Diff;
 using GitDelta.Diff;
@@ -29,6 +30,19 @@ public sealed partial class DiffViewer
         public byte[] CommentMarks { get; } = commentMarks;
     }
 
+    private void InvalidateMinimapCaches()
+    {
+        _minimapSnapshot = null;
+        DisposeMinimapMarksBitmap();
+    }
+
+    private void DisposeMinimapMarksBitmap()
+    {
+        _minimapMarksBitmap?.Dispose();
+        _minimapMarksBitmap = null;
+        _minimapMarksBitmapSource = null;
+    }
+
     private void DrawMinimap(DrawingContext context, IReadOnlyList<DiffRow> rows, Rect bounds)
     {
         var track = Brush("ForgeMinimapTrackBrush", Brushes.Transparent);
@@ -36,47 +50,12 @@ public sealed partial class DiffViewer
 
         var heightPx = Math.Max(1, (int)Math.Ceiling(bounds.Height));
         var snapshot = EnsureMinimapSnapshot(rows, ViewMode, heightPx);
-        var added = Brush("ForgeStatusAddedBrush", Brushes.LimeGreen);
-        var removed = Brush("ForgeStatusDeletedBrush", Brushes.OrangeRed);
-
-        // Paint O(viewport height) marks from the subsampled cache — never O(rows).
-        for (var y = 0; y < snapshot.Marks.Length; y++)
+        var marksBitmap = EnsureMinimapMarksBitmap(snapshot);
+        if (marksBitmap is not null)
         {
-            var mark = snapshot.Marks[y];
-            if (mark == 0) continue;
-            var markRect = new Rect(2, y, MinimapWidth - 4, 1);
-            if (mark == 3)
-            {
-                var half = (MinimapWidth - 4) / 2;
-                context.FillRectangle(removed, new Rect(2, y, half, 1));
-                context.FillRectangle(added, new Rect(2 + half, y, MinimapWidth - 4 - half, 1));
-            }
-            else if (mark == 1)
-                context.FillRectangle(added, markRect);
-            else
-                context.FillRectangle(removed, markRect);
-        }
-
-        const double commentMarkHeight = 3;
-        var primaryComment = Brush("ForgePrimaryBrush", Brushes.SteelBlue);
-        var aiComment = Brush("ForgeAiAccentBrush", Brushes.MediumPurple);
-        var mutedComment = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
-        var commentBorder = new Pen(Brushes.Black, 1);
-        for (var y = 0; y < snapshot.CommentMarks.Length; y++)
-        {
-            var kind = snapshot.CommentMarks[y];
-            if (kind == 0) continue;
-            var brush = kind switch
-            {
-                2 => aiComment,
-                3 => mutedComment,
-                _ => primaryComment,
-            };
-            var markY = Math.Clamp(y - 1, 0, Math.Max(0, snapshot.CommentMarks.Length - commentMarkHeight));
-            context.DrawRectangle(
-                brush,
-                commentBorder,
-                new Rect(1, markY, MinimapWidth - 2, commentMarkHeight));
+            context.DrawImage(
+                marksBitmap,
+                new Rect(0, 0, MinimapWidth, heightPx));
         }
 
         var contentHeight = Math.Max(1, TotalContentHeight(Math.Max(1, rows.Count)));
@@ -93,6 +72,69 @@ public sealed partial class DiffViewer
             new Pen(Brush("ForgeOutlineBrush", Brushes.Gray), 1),
             new Rect(1, viewportY, MinimapWidth - 2, viewportH),
             1, 1);
+    }
+
+    private RenderTargetBitmap? EnsureMinimapMarksBitmap(MinimapSnapshot snapshot)
+    {
+        if (_minimapMarksBitmap is not null
+            && ReferenceEquals(_minimapMarksBitmapSource, snapshot))
+        {
+            return _minimapMarksBitmap;
+        }
+
+        DisposeMinimapMarksBitmap();
+
+        var width = Math.Max(1, (int)Math.Ceiling(MinimapWidth));
+        var height = Math.Max(1, snapshot.HeightPx);
+        var bmp = new RenderTargetBitmap(new PixelSize(width, height), new Vector(96, 96));
+        using (var ctx = bmp.CreateDrawingContext(true))
+        {
+            var added = Brush("ForgeStatusAddedBrush", Brushes.LimeGreen);
+            var removed = Brush("ForgeStatusDeletedBrush", Brushes.OrangeRed);
+
+            for (var y = 0; y < snapshot.Marks.Length; y++)
+            {
+                var mark = snapshot.Marks[y];
+                if (mark == 0) continue;
+                var markRect = new Rect(2, y, MinimapWidth - 4, 1);
+                if (mark == 3)
+                {
+                    var half = (MinimapWidth - 4) / 2;
+                    ctx.FillRectangle(removed, new Rect(2, y, half, 1));
+                    ctx.FillRectangle(added, new Rect(2 + half, y, MinimapWidth - 4 - half, 1));
+                }
+                else if (mark == 1)
+                    ctx.FillRectangle(added, markRect);
+                else
+                    ctx.FillRectangle(removed, markRect);
+            }
+
+            const double commentMarkHeight = 3;
+            var primaryComment = Brush("ForgePrimaryBrush", Brushes.SteelBlue);
+            var aiComment = Brush("ForgeAiAccentBrush", Brushes.MediumPurple);
+            var mutedComment = Brush("ForgeOnSurfaceVariantBrush", Brushes.Gray);
+            var commentBorder = new Pen(Brushes.Black, 1);
+            for (var y = 0; y < snapshot.CommentMarks.Length; y++)
+            {
+                var kind = snapshot.CommentMarks[y];
+                if (kind == 0) continue;
+                var brush = kind switch
+                {
+                    2 => aiComment,
+                    3 => mutedComment,
+                    _ => primaryComment,
+                };
+                var markY = Math.Clamp(y - 1, 0, Math.Max(0, snapshot.CommentMarks.Length - commentMarkHeight));
+                ctx.DrawRectangle(
+                    brush,
+                    commentBorder,
+                    new Rect(1, markY, MinimapWidth - 2, commentMarkHeight));
+            }
+        }
+
+        _minimapMarksBitmap = bmp;
+        _minimapMarksBitmapSource = snapshot;
+        return bmp;
     }
 
     private MinimapSnapshot EnsureMinimapSnapshot(IReadOnlyList<DiffRow> rows, DiffViewMode mode, int heightPx)
@@ -170,6 +212,8 @@ public sealed partial class DiffViewer
             }
         }
 
+        // New snapshot invalidates any bitmap keyed to the previous one.
+        DisposeMinimapMarksBitmap();
         _minimapSnapshot = new MinimapSnapshot(rows, annotationsIdentity, mode, heightPx, marks, commentMarks);
         return _minimapSnapshot;
     }

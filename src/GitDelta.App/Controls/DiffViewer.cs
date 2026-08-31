@@ -178,19 +178,35 @@ public sealed partial class DiffViewer : Control
     private DiffSide? _hoverSide;
     private bool _hoverAddComment;
     private double _scrollY;
+    private double _targetScrollY;
     private double _scrollX;
+    private bool _scrollLerpPosted;
     private bool _draggingMinimap;
     private bool _draggingHScroll;
     private double? _maxCodeContentWidthCache;
     private double? _monoCharWidth;
     private bool _rowsInvalidatePosted;
     private bool _annotationsInvalidatePosted;
+    private bool _syntaxInvalidatePosted;
     private int _paintEpoch;
     private int _contentEpoch;
     private int _scrollDirection = 1;
     private bool _paintWarmPosted;
     private bool _paintWarmUseRenderPriority;
-    private int _paintWarmCursor = -1;
+    private bool _paintWarmBidirectional = true;
+    private int _paintWarmBelowCursor = -1;
+    private int _paintWarmAboveCursor = -1;
+    private long? _pendingScrollGestureTimestamp;
+    private long _lastScrollActivityTimestamp;
+    private bool _scrollIdleFollowUpPosted;
+    private bool _hScrollBarEnabled;
+    private bool _pendingHScrollBarReveal;
+    private int _lastScrollReportContentEpoch = -1;
+    private int _lastScrollReportPaintEpoch = -1;
+    private double _lastMaxWidthScanMs;
+    private int _paintCacheMissesThisFrame;
+    private bool _countPaintMisses;
+    private int _maxWidthComputeGeneration;
     private readonly Dictionary<LinePaintKey, LinePaintCache> _linePaintCache = new();
     private readonly Dictionary<DisplayTextKey, string> _displayTextCache = new();
     private readonly Dictionary<int, FormattedText> _gutterCache = new();
@@ -203,11 +219,15 @@ public sealed partial class DiffViewer : Control
     private readonly List<AnnotationHit> _annotationHits = [];
     private readonly List<AddCommentHit> _addCommentHits = [];
     private MinimapSnapshot? _minimapSnapshot;
+    private RenderTargetBitmap? _minimapMarksBitmap;
+    private MinimapSnapshot? _minimapMarksBitmapSource;
     private readonly Typeface _typeface = new(
         new FontFamily("avares://GitDelta.App/Assets/Fonts/JetBrainsMono-Regular.ttf#JetBrains Mono"));
 
     private const int PaintWarmRowsPerTick = 12;
+    private const int PaintWarmRowsPerTickWhileScrolling = 2;
     private const int PaintWarmViewportMultiplier = 2;
+    private const double PaintWarmScrollIdleMs = 100;
     private const double BrandHeroLogoFraction = 0.8;
     private const double BrandHeroReservedBelow = 88;
     private const double BrandLogoIdleMax = 112;
@@ -372,6 +392,9 @@ public sealed partial class DiffViewer : Control
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         ActualThemeVariantChanged -= OnActualThemeVariantChanged;
+        _draggingMinimap = false;
+        _draggingHScroll = false;
+        DisposeMinimapMarksBitmap();
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -381,6 +404,7 @@ public sealed partial class DiffViewer : Control
         _gutterCache.Clear();
         _prefixCache.Clear();
         _intraHighlightBrushes.Clear();
+        DisposeMinimapMarksBitmap();
         InvalidateVisual();
     }
 
@@ -396,20 +420,24 @@ public sealed partial class DiffViewer : Control
             _hoverSide = null;
             _hoverAddComment = false;
             _scrollY = 0;
+            _targetScrollY = 0;
             _scrollX = 0;
             _scrollDirection = 1;
-            _paintWarmCursor = -1;
-            _minimapSnapshot = null;
+            ResetPaintWarmCursors();
+            InvalidateMinimapCaches();
             ClearContentCaches();
+            _paintWarmUseRenderPriority = true;
+            _paintWarmBidirectional = true;
             UpdateEmptyMessage();
             InvalidateVisual();
             InvalidateMeasure();
+            ScheduleMaxWidthCompute();
         }
         else if (change.Property == AnnotationsProperty)
         {
             DetachAnnotationsNotify();
             AttachAnnotationsNotify(change.NewValue as INotifyCollectionChanged);
-            _minimapSnapshot = null;
+            InvalidateMinimapCaches();
             InvalidateVisual();
         }
         else if (change.Property == EmptyMessageProperty
@@ -423,16 +451,16 @@ public sealed partial class DiffViewer : Control
         else if (change.Property == LeftSyntaxTokensProperty
                  || change.Property == RightSyntaxTokensProperty)
         {
-            // Syntax does not change glyph widths — keep measure/max-width caches.
-            ClearLinePaintCache();
-            ClampScroll();
-            InvalidateVisual();
+            // Coalesce left+right token assigns in the same dispatcher frame into one
+            // paint-cache clear + Render-priority warm burst.
+            ScheduleSyntaxPaintInvalidate();
         }
         else if (change.Property == ShowWhitespaceProperty)
         {
             ClearContentCaches();
             ClampScroll();
             InvalidateVisual();
+            ScheduleMaxWidthCompute();
         }
         else if (change.Property == FontSizeProperty)
         {
@@ -442,6 +470,7 @@ public sealed partial class DiffViewer : Control
             ClampScroll();
             InvalidateMeasure();
             InvalidateVisual();
+            ScheduleMaxWidthCompute();
         }
         else if (change.Property == ViewModeProperty || change.Property == RowHeightProperty
                  || change.Property == CanStageLinesProperty
@@ -452,7 +481,13 @@ public sealed partial class DiffViewer : Control
                  || change.Property == InlineInsetHeightProperty)
         {
             if (change.Property == ViewModeProperty)
+            {
                 ClearContentCaches();
+                _paintWarmUseRenderPriority = true;
+                _paintWarmBidirectional = true;
+                ResetPaintWarmCursors();
+                ScheduleMaxWidthCompute();
+            }
             ClampScroll();
             InvalidateVisual();
         }
@@ -550,36 +585,57 @@ public sealed partial class DiffViewer : Control
 
     private void OnRowsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        // Bulk DiffRows.Reset raises a single Reset; coalesce any residual Add storms
-        // into one invalidate so measure/paint aren't thrashed per row.
-        if (e.Action != NotifyCollectionChangedAction.Reset && _rowsInvalidatePosted)
+        // Coalesce Reset and Add storms into one posted invalidate so SelectionChanged /
+        // ListBox sync can finish before DiffViewer teardown (max-width, warm, measure).
+        if (_rowsInvalidatePosted)
             return;
 
-        if (e.Action != NotifyCollectionChangedAction.Reset)
+        _rowsInvalidatePosted = true;
+        // Loaded is after Input — avoids re-entering heavy DiffViewer work on the selection stack.
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            _rowsInvalidatePosted = true;
-            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
-            {
-                _rowsInvalidatePosted = false;
-                InvalidateRowsState();
-            }, Avalonia.Threading.DispatcherPriority.Render);
-            return;
-        }
-
-        InvalidateRowsState();
+            _rowsInvalidatePosted = false;
+            InvalidateRowsState();
+        }, Avalonia.Threading.DispatcherPriority.Loaded);
     }
 
     private void InvalidateRowsState()
     {
-        _minimapSnapshot = null;
-        _paintWarmCursor = -1;
+        InvalidateMinimapCaches();
+        ResetPaintWarmCursors();
         ClearContentCaches();
-        // Max width is computed lazily on first MaxScrollX / layout need (see GetMaxCodeContentWidth).
         _paintWarmUseRenderPriority = true;
+        _paintWarmBidirectional = true;
         UpdateEmptyMessage();
         ClampScroll();
         InvalidateVisual();
         InvalidateMeasure();
+        ScheduleMaxWidthCompute();
+    }
+
+    private void ScheduleSyntaxPaintInvalidate()
+    {
+        if (_syntaxInvalidatePosted)
+            return;
+
+        // Clear immediately so a same-frame paint never reuses stale plain FormattedText
+        // after tokens are bound; coalesce the warm burst + invalidate for left+right assigns.
+        ClearLinePaintCache();
+        _syntaxInvalidatePosted = true;
+        _paintWarmUseRenderPriority = true;
+        _paintWarmBidirectional = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _syntaxInvalidatePosted = false;
+            ClampScroll();
+            InvalidateVisual();
+        }, DispatcherPriority.Render);
+    }
+
+    private void ResetPaintWarmCursors()
+    {
+        _paintWarmBelowCursor = -1;
+        _paintWarmAboveCursor = -1;
     }
 
     private void AttachAnnotationsNotify(INotifyCollectionChanged? notify)
@@ -609,13 +665,13 @@ public sealed partial class DiffViewer : Control
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
                 _annotationsInvalidatePosted = false;
-                _minimapSnapshot = null;
+                InvalidateMinimapCaches();
                 InvalidateVisual();
             }, Avalonia.Threading.DispatcherPriority.Render);
             return;
         }
 
-        _minimapSnapshot = null;
+        InvalidateMinimapCaches();
         InvalidateVisual();
     }
 
@@ -710,6 +766,8 @@ public sealed partial class DiffViewer : Control
         _hunkButtons.Clear();
         _annotationHits.Clear();
         _addCommentHits.Clear();
+        _paintCacheMissesThisFrame = 0;
+        _countPaintMisses = true;
         var rows = Rows;
         var bounds = Bounds;
         using var clip = context.PushClip(new Rect(bounds.Size));
@@ -717,7 +775,10 @@ public sealed partial class DiffViewer : Control
         context.FillRectangle(bg, new Rect(bounds.Size));
 
         if (rows is null || rows.Count == 0)
+        {
+            _countPaintMisses = false;
             return;
+        }
 
         var contentLeft = MinimapWidth;
         var contentWidth = Math.Max(0, bounds.Width - contentLeft);
@@ -861,8 +922,57 @@ public sealed partial class DiffViewer : Control
         }
 
         DrawHorizontalScrollbar(context, bounds);
+        _countPaintMisses = false;
         OpenTelemetryBootstrap.RecordDiffRender(renderSw.Elapsed.TotalMilliseconds, visibleCount);
+        RecordPendingScrollGesture();
         SchedulePaintWarm(first, last, rows.Count);
+    }
+
+    private void RecordPendingScrollGesture()
+    {
+        if (_pendingScrollGestureTimestamp is not { } started)
+            return;
+
+        var gestureToPaintMs = (Stopwatch.GetTimestamp() - started) * 1000.0 / Stopwatch.Frequency;
+        _pendingScrollGestureTimestamp = null;
+
+        var firstAfterBind = _contentEpoch != _lastScrollReportContentEpoch
+                             || _paintEpoch != _lastScrollReportPaintEpoch;
+        _lastScrollReportContentEpoch = _contentEpoch;
+        _lastScrollReportPaintEpoch = _paintEpoch;
+
+        var warmPending = _paintWarmPosted || IsPaintWarmPending();
+        OpenTelemetryBootstrap.RecordDiffScroll(
+            gestureToPaintMs,
+            _paintCacheMissesThisFrame,
+            _lastMaxWidthScanMs,
+            warmPending,
+            firstAfterBind,
+            _scrollDirection);
+    }
+
+    private bool IsPaintWarmPending()
+    {
+        var rows = Rows;
+        if (rows is null || rows.Count == 0)
+            return false;
+
+        var rowH = RowHeight;
+        if (rowH <= 0)
+            return false;
+
+        var first = Math.Max(0, RowIndexAtContentY(_scrollY));
+        var last = Math.Min(rows.Count - 1, RowIndexAtContentY(_scrollY + ViewportHeight) + 1);
+        var band = Math.Max(PaintWarmRowsPerTick, (int)(ViewportHeight / rowH) * PaintWarmViewportMultiplier);
+        var belowStart = last + 1;
+        var belowEnd = Math.Min(rows.Count - 1, last + band);
+        var aboveEnd = first - 1;
+        var aboveStart = Math.Max(0, first - band);
+        var belowPending = belowStart <= belowEnd
+                           && (_paintWarmBelowCursor < 0 || _paintWarmBelowCursor <= belowEnd);
+        var abovePending = aboveStart <= aboveEnd
+                           && (_paintWarmAboveCursor < 0 || _paintWarmAboveCursor >= aboveStart);
+        return belowPending || abovePending;
     }
 
     private static double UnifiedCodeX(double contentLeft) =>
@@ -893,64 +1003,61 @@ public sealed partial class DiffViewer : Control
         if (_maxCodeContentWidthCache is { } cached)
             return cached;
 
+        // Never scan O(rows) on the UI/input/paint path — ScheduleMaxWidthCompute fills this.
+        return 0;
+    }
+
+    private void ScheduleMaxWidthCompute()
+    {
         var rows = Rows;
         if (rows is null || rows.Count == 0)
         {
             _maxCodeContentWidthCache = 0;
-            return 0;
+            _lastMaxWidthScanMs = 0;
+            _hScrollBarEnabled = false;
+            _pendingHScrollBarReveal = false;
+            return;
         }
 
-        // JetBrains Mono is fixed-width — max advance is char-count × single-glyph width.
-        var advance = MonoCharWidth();
-        var maxChars = 0;
-        if (ViewMode == DiffViewMode.SideBySide)
+        if (_maxCodeContentWidthCache is not null)
+            return;
+
+        var generation = ++_maxWidthComputeGeneration;
+        var contentEpoch = _contentEpoch;
+        var mode = ViewMode;
+        var rowsSnapshot = rows;
+
+        _ = Task.Run(() =>
         {
-            foreach (var row in rows)
+            var sw = Stopwatch.StartNew();
+            var maxChars = DiffViewerLayout.ComputeMaxDisplayChars(rowsSnapshot, mode);
+            var scanMs = sw.Elapsed.TotalMilliseconds;
+
+            Dispatcher.UIThread.Post(() =>
             {
-                if (row.Kind is DiffRowKind.Collapsed or DiffRowKind.Padding)
-                    continue;
-                if (row.Kind == DiffRowKind.HunkHeader)
+                if (generation != _maxWidthComputeGeneration
+                    || contentEpoch != _contentEpoch
+                    || mode != ViewMode
+                    || !ReferenceEquals(Rows, rowsSnapshot))
                 {
-                    maxChars = Math.Max(maxChars, DisplayCharCount(row.LeftText));
-                    continue;
+                    return;
                 }
 
-                if (!row.LeftText.IsEmpty)
-                    maxChars = Math.Max(maxChars, DisplayCharCount(row.LeftText));
-                if (!row.RightText.IsEmpty)
-                    maxChars = Math.Max(maxChars, DisplayCharCount(row.RightText));
-            }
-        }
-        else
-        {
-            foreach (var row in rows)
-            {
-                if (row.Kind is DiffRowKind.Collapsed or DiffRowKind.Padding)
-                    continue;
-                if (row.Kind == DiffRowKind.HunkHeader)
+                _lastMaxWidthScanMs = scanMs;
+                _maxCodeContentWidthCache = maxChars * MonoCharWidth();
+                if (IsPaintWarmPausedForScroll() && NeedsHorizontalScroll)
                 {
-                    maxChars = Math.Max(maxChars, DisplayCharCount(row.LeftText));
-                    continue;
+                    // Defer bar chrome until scroll idle so ViewportHeight does not jump mid-gesture.
+                    _pendingHScrollBarReveal = true;
+                    ClampScroll(notify: false);
+                    InvalidateVisual();
                 }
-
-                var text = row.Kind == DiffRowKind.Removed ? row.LeftText : row.RightText;
-                if (text.IsEmpty) text = row.LeftText.IsEmpty ? row.RightText : row.LeftText;
-                // Unified rows include a one-character +/-/space prefix.
-                maxChars = Math.Max(maxChars, 1 + DisplayCharCount(text));
-            }
-        }
-
-        _maxCodeContentWidthCache = maxChars * advance;
-        return _maxCodeContentWidthCache.Value;
-    }
-
-    private static int DisplayCharCount(ReadOnlyMemory<char> text)
-    {
-        var span = text.Span;
-        var len = span.Length;
-        while (len > 0 && (span[len - 1] == '\n' || span[len - 1] == '\r'))
-            len--;
-        return len;
+                else
+                {
+                    ApplyHScrollBarVisibility();
+                }
+            });
+        });
     }
 
     private double MonoCharWidth()
@@ -963,16 +1070,22 @@ public sealed partial class DiffViewer : Control
         return _monoCharWidth.Value;
     }
 
-    private double MaxScrollX() => Math.Max(0, GetMaxCodeContentWidth() - ViewportCodeWidth());
+    private double MaxScrollX()
+    {
+        if (_maxCodeContentWidthCache is not { } width)
+            return 0;
+        return Math.Max(0, width - ViewportCodeWidth());
+    }
 
-    private bool NeedsHorizontalScroll => MaxScrollX() > 0.5;
+    private bool NeedsHorizontalScroll =>
+        DiffViewerLayout.HasCachedHorizontalScroll(_maxCodeContentWidthCache, ViewportCodeWidth());
 
     /// <summary>
-    /// When max-width is not yet known, reserve nothing so InvalidateRowsState / first paint
-    /// are not forced through an O(rows) scan; DrawHorizontalScrollbar fills the cache later.
+    /// When max-width is not yet known or the bar is deferred during scroll, reserve nothing
+    /// so InvalidateRowsState / first paint / mid-gesture viewport height stay stable.
     /// </summary>
     private double HScrollReserve =>
-        _maxCodeContentWidthCache is not null && NeedsHorizontalScroll ? HScrollBarHeight : 0;
+        _hScrollBarEnabled ? HScrollBarHeight : 0;
 
     private double ViewportHeight => Math.Max(0, LayoutHeight - HScrollReserve);
 
@@ -987,7 +1100,7 @@ public sealed partial class DiffViewer : Control
     }
 
     private bool IsInHorizontalScrollBar(Point pos) =>
-        NeedsHorizontalScroll && HorizontalScrollTrackBounds().Contains(pos);
+        _hScrollBarEnabled && NeedsHorizontalScroll && HorizontalScrollTrackBounds().Contains(pos);
 
     private double CommentLaneX(DiffSide side, double contentLeft, double midX) =>
         ViewMode == DiffViewMode.SideBySide
@@ -1188,6 +1301,9 @@ public sealed partial class DiffViewer : Control
 
     public void ClearInlineInset()
     {
+        if (InlineInsetAfterRowIndex == -1 && InlineInsetHeight == 0)
+            return;
+
         InlineInsetAfterRowIndex = -1;
         InlineInsetHeight = 0;
     }
@@ -1222,6 +1338,10 @@ public sealed partial class DiffViewer : Control
 
     private void DrawHorizontalScrollbar(DrawingContext context, Rect bounds)
     {
+        // Skip until background max-width compute finishes — and until scroll-idle reveal.
+        if (!_hScrollBarEnabled || _maxCodeContentWidthCache is null)
+            return;
+
         var maxX = MaxScrollX();
         if (maxX <= 0.5)
             return;
@@ -1290,8 +1410,12 @@ public sealed partial class DiffViewer : Control
     private void ClearContentCaches()
     {
         _contentEpoch++;
+        _maxWidthComputeGeneration++;
         _displayTextCache.Clear();
         _maxCodeContentWidthCache = null;
+        _lastMaxWidthScanMs = 0;
+        _hScrollBarEnabled = false;
+        _pendingHScrollBarReveal = false;
         ClearPaintCache();
     }
 
@@ -1430,7 +1554,9 @@ public sealed partial class DiffViewer : Control
         var epoch = _paintEpoch;
         var contentEpoch = _contentEpoch;
         var direction = _scrollDirection;
-        var priority = _paintWarmUseRenderPriority
+        var bidirectional = _paintWarmBidirectional;
+        var scrolling = IsPaintWarmPausedForScroll();
+        var priority = !scrolling && _paintWarmUseRenderPriority
             ? DispatcherPriority.Render
             : DispatcherPriority.Background;
         Dispatcher.UIThread.Post(() =>
@@ -1438,12 +1564,19 @@ public sealed partial class DiffViewer : Control
             _paintWarmPosted = false;
             if (epoch != _paintEpoch || contentEpoch != _contentEpoch)
                 return;
-            _paintWarmUseRenderPriority = false;
-            WarmPaintCache(firstVisible, lastVisible, direction);
+
+            var stillScrolling = IsPaintWarmPausedForScroll();
+            if (!stillScrolling)
+                _paintWarmUseRenderPriority = false;
+
+            var budget = stillScrolling
+                ? PaintWarmRowsPerTickWhileScrolling
+                : PaintWarmRowsPerTick;
+            WarmPaintCache(direction, bidirectional, budget);
         }, priority);
     }
 
-    private void WarmPaintCache(int firstVisible, int lastVisible, int direction)
+    private void WarmPaintCache(int direction, bool bidirectional, int budget)
     {
         var rows = Rows;
         if (rows is null || rows.Count == 0)
@@ -1453,55 +1586,145 @@ public sealed partial class DiffViewer : Control
         if (rowH <= 0)
             return;
 
+        // Prefer live viewport — scroll may have moved since this tick was queued.
+        var firstVisible = Math.Max(0, RowIndexAtContentY(_scrollY));
+        var lastVisible = Math.Min(rows.Count - 1, RowIndexAtContentY(_scrollY + ViewportHeight) + 1);
+
         var band = Math.Max(PaintWarmRowsPerTick, (int)(ViewportHeight / rowH) * PaintWarmViewportMultiplier);
-        int start;
-        int end;
-        if (direction >= 0)
+        var belowStart = lastVisible + 1;
+        var belowEnd = Math.Min(rows.Count - 1, lastVisible + band);
+        var aboveEnd = firstVisible - 1;
+        var aboveStart = Math.Max(0, firstVisible - band);
+
+        var muted = Brush("ForgeOnSurfaceBrush", Brushes.White);
+        var preferBelow = direction >= 0;
+
+        if (preferBelow)
         {
-            start = lastVisible + 1;
-            end = Math.Min(rows.Count - 1, lastVisible + band);
+            budget -= WarmRange(rows, ref _paintWarmBelowCursor, belowStart, belowEnd, step: 1, budget, muted);
+            if (bidirectional || direction < 0)
+                budget -= WarmRange(rows, ref _paintWarmAboveCursor, aboveStart, aboveEnd, step: -1, budget, muted);
         }
         else
         {
-            end = firstVisible - 1;
-            start = Math.Max(0, firstVisible - band);
+            budget -= WarmRange(rows, ref _paintWarmAboveCursor, aboveStart, aboveEnd, step: -1, budget, muted);
+            if (bidirectional || direction >= 0)
+                budget -= WarmRange(rows, ref _paintWarmBelowCursor, belowStart, belowEnd, step: 1, budget, muted);
         }
 
-        if (start > end)
+        var belowPending = belowStart <= belowEnd
+                           && (_paintWarmBelowCursor < 0 || _paintWarmBelowCursor <= belowEnd);
+        var abovePending = aboveStart <= aboveEnd
+                           && (_paintWarmAboveCursor < 0 || _paintWarmAboveCursor >= aboveStart);
+
+        if (bidirectional && !belowPending && !abovePending)
+            _paintWarmBidirectional = false;
+
+        if ((preferBelow && belowPending) || (!preferBelow && abovePending)
+            || (bidirectional && (belowPending || abovePending)))
         {
-            // First paint / nowhere to warm ahead — seed a small band below the viewport.
-            start = lastVisible + 1;
-            end = Math.Min(rows.Count - 1, lastVisible + band);
-            if (start > end)
+            SchedulePaintWarm(firstVisible, lastVisible, rows.Count);
+        }
+    }
+
+    private void NoteScrollActivity()
+    {
+        _lastScrollActivityTimestamp = Stopwatch.GetTimestamp();
+        ScheduleScrollIdleFollowUp();
+    }
+
+    private bool IsPaintWarmPausedForScroll() =>
+        DiffViewerLayout.IsScrollWarmPaused(
+            _lastScrollActivityTimestamp,
+            Stopwatch.GetTimestamp(),
+            PaintWarmScrollIdleMs);
+
+    private void ScheduleScrollIdleFollowUp()
+    {
+        if (_scrollIdleFollowUpPosted)
+            return;
+
+        _scrollIdleFollowUpPosted = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _scrollIdleFollowUpPosted = false;
+            if (IsPaintWarmPausedForScroll())
+            {
+                ScheduleScrollIdleFollowUp();
                 return;
-        }
+            }
 
-        if (direction >= 0)
+            if (_pendingHScrollBarReveal)
+                ApplyHScrollBarVisibility();
+
+            var rows = Rows;
+            if (rows is null || rows.Count == 0 || _paintWarmPosted)
+                return;
+
+            var first = Math.Max(0, RowIndexAtContentY(_scrollY));
+            var last = Math.Min(rows.Count - 1, RowIndexAtContentY(_scrollY + ViewportHeight) + 1);
+            SchedulePaintWarm(first, last, rows.Count);
+        }, DispatcherPriority.Background);
+    }
+
+    private void ApplyHScrollBarVisibility()
+    {
+        _pendingHScrollBarReveal = false;
+        var need = NeedsHorizontalScroll;
+        if (need == _hScrollBarEnabled)
+            return;
+
+        _hScrollBarEnabled = need;
+        ClampScroll(notify: false);
+        InvalidateVisual();
+    }
+
+    private bool ReleaseOwnedPointerCapture(IPointer pointer)
+    {
+        var released = pointer.Captured == this;
+        _draggingMinimap = false;
+        _draggingHScroll = false;
+        if (released)
+            pointer.Capture(null);
+        return released;
+    }
+
+    private int WarmRange(
+        IReadOnlyList<DiffRow> rows,
+        ref int cursor,
+        int start,
+        int end,
+        int step,
+        int budget,
+        IBrush fallback)
+    {
+        if (budget <= 0 || start > end)
+            return 0;
+
+        if (step > 0)
         {
-            if (_paintWarmCursor > end)
-                return; // Band already warmed.
-            if (_paintWarmCursor < start)
-                _paintWarmCursor = start;
+            if (cursor > end)
+                return 0;
+            if (cursor < start)
+                cursor = start;
         }
         else
         {
-            if (_paintWarmCursor >= 0 && _paintWarmCursor < start)
-                return;
-            if (_paintWarmCursor < 0 || _paintWarmCursor > end)
-                _paintWarmCursor = end;
+            if (cursor >= 0 && cursor < start)
+                return 0;
+            if (cursor < 0 || cursor > end)
+                cursor = end;
         }
 
         var warmed = 0;
-        var muted = Brush("ForgeOnSurfaceBrush", Brushes.White);
-        while (warmed < PaintWarmRowsPerTick && _paintWarmCursor >= start && _paintWarmCursor <= end)
+        while (warmed < budget && cursor >= start && cursor <= end)
         {
-            WarmRow(rows, _paintWarmCursor, muted);
+            WarmRow(rows, cursor, fallback);
             warmed++;
-            _paintWarmCursor += direction >= 0 ? 1 : -1;
+            cursor += step;
         }
 
-        if (_paintWarmCursor >= start && _paintWarmCursor <= end)
-            SchedulePaintWarm(firstVisible, lastVisible, rows.Count);
+        return warmed;
     }
 
     private void WarmRow(IReadOnlyList<DiffRow> rows, int index, IBrush fallback)
@@ -1582,9 +1805,10 @@ public sealed partial class DiffViewer : Control
         if (rows is null)
         {
             var cleared = false;
-            if (_scrollY != 0)
+            if (_scrollY != 0 || _targetScrollY != 0)
             {
                 _scrollY = 0;
+                _targetScrollY = 0;
                 cleared = true;
             }
             if (_scrollX != 0)
@@ -1599,6 +1823,7 @@ public sealed partial class DiffViewer : Control
 
         var maxY = Math.Max(0, TotalContentHeight(rows.Count) - ViewportHeight);
         var nextY = Math.Clamp(_scrollY, 0, maxY);
+        var nextTargetY = Math.Clamp(_targetScrollY, 0, maxY);
         // Skip MaxScrollX when already at origin so InvalidateRowsState does not force a full width scan.
         var nextX = _scrollX <= 0.01 ? 0 : Math.Clamp(_scrollX, 0, MaxScrollX());
         var changed = false;
@@ -1607,6 +1832,8 @@ public sealed partial class DiffViewer : Control
             _scrollY = nextY;
             changed = true;
         }
+        if (Math.Abs(nextTargetY - _targetScrollY) > 0.01)
+            _targetScrollY = nextTargetY;
         if (Math.Abs(nextX - _scrollX) > 0.01)
         {
             _scrollX = nextX;
@@ -1614,6 +1841,90 @@ public sealed partial class DiffViewer : Control
         }
         if (changed && notify)
             NotifyViewportChanged();
+    }
+
+    /// <summary>Accumulates wheel target and drives Render-priority catch-up toward it.</summary>
+    private void SetTargetScrollY(double targetY, bool noteActivity = true)
+    {
+        var rows = Rows;
+        var max = rows is null
+            ? 0
+            : Math.Max(0, TotalContentHeight(rows.Count) - ViewportHeight);
+        var next = Math.Clamp(targetY, 0, max);
+        if (Math.Abs(next - _targetScrollY) <= 0.01)
+        {
+            if (Math.Abs(next - _scrollY) > DiffViewerLayout.DefaultScrollLerpSnapPx)
+                ScheduleScrollLerp();
+            return;
+        }
+
+        _scrollDirection = next > _scrollY ? 1 : -1;
+        _targetScrollY = next;
+        if (noteActivity)
+        {
+            _pendingScrollGestureTimestamp ??= Stopwatch.GetTimestamp();
+            NoteScrollActivity();
+        }
+
+        ScheduleScrollLerp();
+    }
+
+    /// <summary>Snaps display + target (minimap scrub / programmatic EnsureVisible).</summary>
+    private void SnapScrollY(double y, bool noteActivity = true)
+    {
+        var rows = Rows;
+        var max = rows is null
+            ? 0
+            : Math.Max(0, TotalContentHeight(rows.Count) - ViewportHeight);
+        var next = Math.Clamp(y, 0, max);
+        if (Math.Abs(next - _scrollY) <= 0.01 && Math.Abs(next - _targetScrollY) <= 0.01)
+            return;
+
+        _scrollDirection = next > _scrollY ? 1 : -1;
+        _scrollY = next;
+        _targetScrollY = next;
+        if (noteActivity)
+            NoteScrollActivity();
+        NotifyViewportChanged();
+        InvalidateVisual();
+    }
+
+    private void ScheduleScrollLerp()
+    {
+        if (_scrollLerpPosted)
+            return;
+        if (Math.Abs(_scrollY - _targetScrollY) <= DiffViewerLayout.DefaultScrollLerpSnapPx)
+        {
+            if (Math.Abs(_scrollY - _targetScrollY) > 0.01)
+            {
+                _scrollY = _targetScrollY;
+                NotifyViewportChanged();
+                InvalidateVisual();
+            }
+            return;
+        }
+
+        _scrollLerpPosted = true;
+        Dispatcher.UIThread.Post(() =>
+        {
+            _scrollLerpPosted = false;
+            var next = DiffViewerLayout.StepScrollLerp(_scrollY, _targetScrollY);
+            if (Math.Abs(next - _scrollY) > 0.01)
+            {
+                _scrollY = next;
+                NotifyViewportChanged();
+                InvalidateVisual();
+            }
+
+            if (Math.Abs(_scrollY - _targetScrollY) > DiffViewerLayout.DefaultScrollLerpSnapPx)
+                ScheduleScrollLerp();
+            else if (Math.Abs(_scrollY - _targetScrollY) > 0.01)
+            {
+                _scrollY = _targetScrollY;
+                NotifyViewportChanged();
+                InvalidateVisual();
+            }
+        }, DispatcherPriority.Render);
     }
 
     private void ScrollFromMinimapY(double y)
@@ -1624,13 +1935,7 @@ public sealed partial class DiffViewer : Control
         var viewportHeight = ViewportHeight;
         var ratio = Math.Clamp(y / Math.Max(1, LayoutHeight), 0, 1);
         var next = Math.Clamp(ratio * Math.Max(0, contentHeight - viewportHeight), 0, Math.Max(0, contentHeight - viewportHeight));
-        if (Math.Abs(next - _scrollY) > 0.01)
-        {
-            _scrollDirection = next > _scrollY ? 1 : -1;
-            _scrollY = next;
-            NotifyViewportChanged();
-        }
-        InvalidateVisual();
+        SnapScrollY(next);
     }
 
     private void ScrollFromHScrollX(double x)
@@ -1643,6 +1948,7 @@ public sealed partial class DiffViewer : Control
         if (Math.Abs(next - _scrollX) > 0.01)
         {
             _scrollX = next;
+            NoteScrollActivity();
             NotifyViewportChanged();
         }
         InvalidateVisual();
@@ -1659,8 +1965,18 @@ public sealed partial class DiffViewer : Control
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
+        // Scroll must not keep an old press/minimap capture — that routes the next
+        // MouseDown to DiffViewer and eats the first click on file list / chrome.
+        var releasedCapture = ReleaseOwnedPointerCapture(e.Pointer);
+
         var rows = Rows;
-        if (rows is null) return;
+        if (rows is null)
+        {
+            if (releasedCapture)
+                e.Handled = true;
+            return;
+        }
+
         var changed = false;
         if (Math.Abs(e.Delta.X) > 0.01)
         {
@@ -1683,21 +1999,28 @@ public sealed partial class DiffViewer : Control
         else
         {
             var max = Math.Max(0, TotalContentHeight(rows.Count) - ViewportHeight);
-            var nextY = Math.Clamp(_scrollY - e.Delta.Y * RowHeight * 3, 0, max);
-            if (Math.Abs(nextY - _scrollY) > 0.01)
+            var deltaPx = DiffViewerLayout.VerticalScrollDeltaPixels(e.Delta.Y, RowHeight);
+            var nextTarget = Math.Clamp(_targetScrollY - deltaPx, 0, max);
+            if (Math.Abs(nextTarget - _targetScrollY) > 0.01 || Math.Abs(nextTarget - _scrollY) > 0.01)
             {
-                _scrollDirection = nextY > _scrollY ? 1 : -1;
-                _scrollY = nextY;
+                SetTargetScrollY(nextTarget);
                 changed = true;
             }
         }
         if (changed)
         {
-            NotifyViewportChanged();
-            InvalidateVisual();
+            // Horizontal path still needs activity + invalidate; vertical uses SetTargetScrollY.
+            if (Math.Abs(e.Delta.X) > 0.01 || e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            {
+                _pendingScrollGestureTimestamp ??= Stopwatch.GetTimestamp();
+                NoteScrollActivity();
+                NotifyViewportChanged();
+                InvalidateVisual();
+            }
         }
 
-        e.Handled = true;
+        if (changed || releasedCapture)
+            e.Handled = true;
     }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
@@ -1928,11 +2251,18 @@ public sealed partial class DiffViewer : Control
 
     protected override void OnPointerReleased(PointerReleasedEventArgs e)
     {
-        if (!_draggingMinimap && !_draggingHScroll) return;
+        var wasDragging = _draggingMinimap || _draggingHScroll;
+        if (e.Pointer.Captured == this || wasDragging)
+            ReleaseOwnedPointerCapture(e.Pointer);
+        if (wasDragging)
+            e.Handled = true;
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
         _draggingMinimap = false;
         _draggingHScroll = false;
-        e.Pointer.Capture(null);
-        e.Handled = true;
+        base.OnPointerCaptureLost(e);
     }
 
     private void EnsureSelectionAt(Point pos)
@@ -2052,17 +2382,13 @@ public sealed partial class DiffViewer : Control
     private void EnsureVisible(int index)
     {
         var y = RowContentTop(index);
-        var next = _scrollY;
+        var next = _targetScrollY;
         var viewportHeight = ViewportHeight;
-        if (y < _scrollY) next = y;
-        else if (y + RowHeight > _scrollY + viewportHeight)
+        if (y < _targetScrollY) next = y;
+        else if (y + RowHeight > _targetScrollY + viewportHeight)
             next = y + RowHeight - viewportHeight;
-        if (Math.Abs(next - _scrollY) > 0.01)
-        {
-            _scrollDirection = next > _scrollY ? 1 : -1;
-            _scrollY = next;
-            NotifyViewportChanged();
-        }
+        if (Math.Abs(next - _targetScrollY) > 0.01 || Math.Abs(next - _scrollY) > 0.01)
+            SnapScrollY(next, noteActivity: false);
     }
 
     public async Task CopySelectionAsPatchAsync()
