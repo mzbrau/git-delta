@@ -935,8 +935,10 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     public string? SelectedCommitAuthor => SelectedCommit?.AuthorDisplay;
     public string? SelectedCommitDate =>
         SelectedCommit is null ? null : FormatCommitDate(SelectedCommit.AuthorDate);
-    public string? SelectedCommitDecorations =>
-        SelectedCommit is { Decorations.Count: > 0 } c ? c.DecorationsDisplay : null;
+    public string? SelectedCommitTags =>
+        SelectedCommit is { Tags.Count: > 0 } c ? c.TagsDisplay : null;
+    public string? SelectedCommitBranches =>
+        SelectedCommit is { Branches.Count: > 0 } c ? c.BranchesDisplay : null;
 
     partial void OnCurrentBranchChanged(string? value)
     {
@@ -1186,7 +1188,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         OnPropertyChanged(nameof(SelectedCommitOid));
         OnPropertyChanged(nameof(SelectedCommitAuthor));
         OnPropertyChanged(nameof(SelectedCommitDate));
-        OnPropertyChanged(nameof(SelectedCommitDecorations));
+        OnPropertyChanged(nameof(SelectedCommitTags));
+        OnPropertyChanged(nameof(SelectedCommitBranches));
     }
     private async Task EnableFsmonitorAsync()
     {
@@ -2291,12 +2294,21 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         if (string.IsNullOrEmpty(query))
             return true;
 
-        return commit.Subject.Contains(query, StringComparison.OrdinalIgnoreCase)
-               || commit.AuthorName.Contains(query, StringComparison.OrdinalIgnoreCase)
-               || commit.AuthorEmail.Contains(query, StringComparison.OrdinalIgnoreCase)
-               || commit.ShortOid.Contains(query, StringComparison.OrdinalIgnoreCase)
-               || commit.Oid.Contains(query, StringComparison.OrdinalIgnoreCase)
-               || commit.Body.Contains(query, StringComparison.OrdinalIgnoreCase);
+        if (commit.Subject.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || commit.AuthorName.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || commit.AuthorEmail.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || commit.ShortOid.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || commit.Oid.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || commit.Body.Contains(query, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        foreach (var decoration in commit.Decorations)
+        {
+            if (decoration.Name.Contains(query, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+
+        return false;
     }
 
     private void ClearHistoryState()

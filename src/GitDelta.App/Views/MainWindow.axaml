@@ -3570,11 +3570,13 @@
                             </ItemsPanelTemplate>
                           </ItemsControl.ItemsPanel>
                           <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="x:String">
-                              <Border Background="{DynamicResource ForgePrimaryContainerBrush}"
-                                      CornerRadius="3" Padding="5,1">
-                                <TextBlock Text="{Binding}" FontSize="10" FontWeight="SemiBold"
-                                           Foreground="{DynamicResource ForgeOnSurfaceBrush}" />
+                            <DataTemplate x:DataType="core:CommitDecoration">
+                              <Border Background="{Binding IsTag, Converter={x:Static conv:ForgeConverters.DecorationChipBackground}}"
+                                      CornerRadius="3" Padding="5,1"
+                                      VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Name}" FontSize="10" FontWeight="SemiBold"
+                                           VerticalAlignment="Center"
+                                           Foreground="{Binding IsTag, Converter={x:Static conv:ForgeConverters.DecorationChipForeground}}" />
                               </Border>
                             </DataTemplate>
                           </ItemsControl.ItemTemplate>
@@ -3720,10 +3722,16 @@
                         <TextBlock Text="{Binding WorkingCopy.SelectedCommitDate}" FontSize="11"
                                    TextWrapping="Wrap" />
                       </DockPanel>
-                      <DockPanel IsVisible="{Binding WorkingCopy.SelectedCommitDecorations, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}">
-                        <TextBlock DockPanel.Dock="Left" Text="Labels" Width="56" FontSize="11"
+                      <DockPanel IsVisible="{Binding WorkingCopy.SelectedCommitTags, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}">
+                        <TextBlock DockPanel.Dock="Left" Text="Tags" Width="56" FontSize="11"
                                    Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
-                        <TextBlock Text="{Binding WorkingCopy.SelectedCommitDecorations}" FontSize="11"
+                        <TextBlock Text="{Binding WorkingCopy.SelectedCommitTags}" FontSize="11"
+                                   TextWrapping="Wrap" />
+                      </DockPanel>
+                      <DockPanel IsVisible="{Binding WorkingCopy.SelectedCommitBranches, Converter={x:Static conv:ForgeConverters.IsNotNullOrEmpty}}">
+                        <TextBlock DockPanel.Dock="Left" Text="Branches" Width="56" FontSize="11"
+                                   Foreground="{DynamicResource ForgeOnSurfaceVariantBrush}" />
+                        <TextBlock Text="{Binding WorkingCopy.SelectedCommitBranches}" FontSize="11"
                                    TextWrapping="Wrap" />
                       </DockPanel>
                     </StackPanel>

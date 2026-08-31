@@ -50,6 +50,12 @@ public sealed record StashInfo(
     public string DisplayTitle => string.IsNullOrWhiteSpace(Message) ? Ref : Message;
 }
 
+/// <summary>A branch tip or tag name from <c>git log %D</c>.</summary>
+public sealed record CommitDecoration(CommitDecorationKind Kind, string Name)
+{
+    public bool IsTag => Kind == CommitDecorationKind.Tag;
+}
+
 public sealed record CommitInfo(
     string Oid,
     string ShortOid,
@@ -59,15 +65,52 @@ public sealed record CommitInfo(
     string AuthorEmail,
     DateTimeOffset AuthorDate,
     IReadOnlyList<string> ParentOids,
-    IReadOnlyList<string> Decorations)
+    IReadOnlyList<CommitDecoration> Decorations)
 {
     public bool IsRoot => ParentOids.Count == 0;
 
     public string AuthorDisplay =>
         string.IsNullOrWhiteSpace(AuthorEmail) ? AuthorName : $"{AuthorName} <{AuthorEmail}>";
 
+    public IReadOnlyList<CommitDecoration> Tags =>
+        FilterDecorations(CommitDecorationKind.Tag);
+
+    public IReadOnlyList<CommitDecoration> Branches =>
+        FilterDecorations(CommitDecorationKind.Branch);
+
+    public string TagsDisplay => JoinDecorationNames(CommitDecorationKind.Tag);
+
+    public string BranchesDisplay => JoinDecorationNames(CommitDecorationKind.Branch);
+
     public string DecorationsDisplay =>
-        Decorations.Count == 0 ? "" : string.Join(", ", Decorations);
+        Decorations.Count == 0 ? "" : string.Join(", ", Decorations.Select(d => d.Name));
+
+    private IReadOnlyList<CommitDecoration> FilterDecorations(CommitDecorationKind kind)
+    {
+        List<CommitDecoration>? list = null;
+        foreach (var d in Decorations)
+        {
+            if (d.Kind != kind)
+                continue;
+            list ??= [];
+            list.Add(d);
+        }
+
+        return list is null ? Array.Empty<CommitDecoration>() : list;
+    }
+
+    private string JoinDecorationNames(CommitDecorationKind kind)
+    {
+        string? result = null;
+        foreach (var d in Decorations)
+        {
+            if (d.Kind != kind)
+                continue;
+            result = result is null ? d.Name : $"{result}, {d.Name}";
+        }
+
+        return result ?? "";
+    }
 }
 
 /// <summary>Per-commit diffstat from <c>git show --numstat</c>.</summary>

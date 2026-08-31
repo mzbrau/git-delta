@@ -188,7 +188,35 @@ public sealed class HistoryBrowseTests
         Assert.That(commits[0].Subject, Is.EqualTo("Subject line"));
         Assert.That(commits[0].Body, Does.Contain("Body line 1"));
         Assert.That(commits[0].Body, Does.Contain("Body line 2"));
-        Assert.That(commits[0].Decorations, Does.Contain("main"));
-        Assert.That(commits[0].Decorations, Does.Contain("v1"));
+        Assert.That(commits[0].Decorations, Has.Count.EqualTo(2));
+        Assert.That(commits[0].Decorations[0].Kind, Is.EqualTo(CommitDecorationKind.Branch));
+        Assert.That(commits[0].Decorations[0].Name, Is.EqualTo("main"));
+        Assert.That(commits[0].Decorations[1].Kind, Is.EqualTo(CommitDecorationKind.Tag));
+        Assert.That(commits[0].Decorations[1].Name, Is.EqualTo("v1"));
+        Assert.That(commits[0].TagsDisplay, Is.EqualTo("v1"));
+        Assert.That(commits[0].BranchesDisplay, Is.EqualTo("main"));
+    }
+
+    [Test]
+    public async Task ListCommits_Includes_Tag_Decoration()
+    {
+        using var repo = RepositoryBuilder.Create()
+            .WithFile("a.txt", "one\n")
+            .WithInitialCommit("root commit");
+        var path = repo.Build();
+        repo.RunGit("tag", "v1.2.3");
+
+        await using var sp = BuildServices();
+        await sp.GetRequiredService<IGitEnvironment>().DetectAsync();
+        var history = sp.GetRequiredService<IGitHistoryService>();
+
+        var commits = await history.ListCommitsAsync(path, skip: 0, take: 5);
+        Assert.That(commits, Has.Count.EqualTo(1));
+
+        var tag = commits[0].Decorations.SingleOrDefault(d => d.Kind == CommitDecorationKind.Tag);
+        Assert.That(tag, Is.Not.Null);
+        Assert.That(tag!.Name, Is.EqualTo("v1.2.3"));
+        Assert.That(commits[0].TagsDisplay, Is.EqualTo("v1.2.3"));
+        Assert.That(commits[0].Branches.Any(b => b.Name == "main"), Is.True);
     }
 }

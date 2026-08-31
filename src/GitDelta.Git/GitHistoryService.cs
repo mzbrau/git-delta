@@ -441,24 +441,28 @@ public sealed class GitHistoryService(
         return new CommitStat(oid, fileCount, insertions, deletions);
     }
 
-    private static IReadOnlyList<string> ParseDecorations(string raw)
+    private static IReadOnlyList<CommitDecoration> ParseDecorations(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
-            return Array.Empty<string>();
+            return Array.Empty<CommitDecoration>();
 
         // e.g. "HEAD -> main, origin/main, tag: v1.0"
         var parts = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var list = new List<string>(parts.Length);
+        var list = new List<CommitDecoration>(parts.Length);
         foreach (var part in parts)
         {
             var s = part.Trim();
+            var kind = CommitDecorationKind.Branch;
             if (s.StartsWith("HEAD -> ", StringComparison.Ordinal))
                 s = s["HEAD -> ".Length..].Trim();
             else if (s.StartsWith("tag: ", StringComparison.Ordinal))
+            {
                 s = s["tag: ".Length..].Trim();
+                kind = CommitDecorationKind.Tag;
+            }
 
             if (!string.IsNullOrEmpty(s))
-                list.Add(s);
+                list.Add(new CommitDecoration(kind, s));
         }
 
         return list;

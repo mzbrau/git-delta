@@ -15,7 +15,7 @@ Each row typically shows:
 - Subject
 - Author
 - Date
-- Decorations (branch / tag indicators where available)
+- Decorations (branch tips vs tags — tags use a distinct chip style)
 
 ### Find commits
 
@@ -41,7 +41,7 @@ Selecting a commit shows:
 
 - Subject and body
 - Object id, author, date
-- Labels / decorations
+- Tags and Branches (when present)
 - Files changed in that commit (flat or tree, with filter/search)
 
 Select a file to open its diff in the [diff viewer](./diff-viewer.md) (read-only — no staging).
