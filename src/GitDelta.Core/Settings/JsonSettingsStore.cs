@@ -120,6 +120,7 @@ public sealed class JsonSettingsStore : ISettingsStore
         DiffPrefetchConcurrency = s.DiffPrefetchConcurrency,
         DiffPrefetchDripDelayMs = s.DiffPrefetchDripDelayMs,
         DiffPrefetchIndicatorThrottleMs = s.DiffPrefetchIndicatorThrottleMs,
+        StatusRefreshIntervalSeconds = s.StatusRefreshIntervalSeconds,
         DiffPrefetchPriorityPaths = s.DiffPrefetchPriorityPaths,
         DiffPrefetchNeighborRadius = s.DiffPrefetchNeighborRadius,
         MaxDiffPatchBytes = s.MaxDiffPatchBytes,

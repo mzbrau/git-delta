@@ -67,6 +67,12 @@ public partial class MainWindow : Window
             vm.NotifyWindowActivated();
     }
 
+    private void OnStatusRefreshPointerEntered(object? sender, PointerEventArgs e)
+    {
+        if (DataContext is MainWindowViewModel vm)
+            vm.WorkingCopy.NotifyStatusRefreshTooltipRequested();
+    }
+
     private void OnDataContextChanged(object? sender, EventArgs e)
     {
         if (DataContext is not MainWindowViewModel vm) return;
