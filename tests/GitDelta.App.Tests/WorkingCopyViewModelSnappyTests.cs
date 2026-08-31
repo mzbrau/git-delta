@@ -613,6 +613,46 @@ public sealed class WorkingCopyViewModelSnappyTests
         }
     }
 
+    [Test]
+    public async Task RefreshAsync_Sets_IsStatusRefreshing_While_GetStatus_Pending()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt")], epoch: 1));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+            Assert.That(vm.IsStatusRefreshing, Is.False);
+
+            var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(async _ =>
+                {
+                    started.TrySetResult();
+                    await release.Task;
+                    return Status([Unstaged("a.txt")], epoch: 2);
+                });
+
+            var refresh = vm.RefreshAsync();
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.That(vm.IsStatusRefreshing, Is.True);
+
+            release.SetResult();
+            await refresh;
+            Assert.That(vm.IsStatusRefreshing, Is.False);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 3000)
     {
         var deadline = Environment.TickCount64 + timeoutMs;
