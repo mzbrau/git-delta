@@ -26,6 +26,12 @@ public static class GitDeltaMeters
     public static readonly Histogram<double> DiffRenderMs =
         Meter.CreateHistogram<double>("diff.render.duration_ms", "ms", "DiffViewer paint duration");
 
+    public static readonly Histogram<double> DiffScrollGestureToPaintMs =
+        Meter.CreateHistogram<double>(
+            "diff.scroll.gesture_to_paint_ms",
+            "ms",
+            "Time from DiffViewer scroll gesture to first paint");
+
     public static readonly Histogram<double> StageMs =
         Meter.CreateHistogram<double>("stage.duration_ms", "ms", "Stage operation duration");
 

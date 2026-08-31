@@ -29,7 +29,7 @@ public sealed partial class DiffViewer
     {
         _paintEpoch++;
         _linePaintCache.Clear();
-        _paintWarmCursor = -1;
+        ResetPaintWarmCursors();
     }
 
     private LinePaintCache GetOrCreateLinePaint(
@@ -43,6 +43,9 @@ public sealed partial class DiffViewer
         var key = new LinePaintKey(rowIndex, side, _paintEpoch);
         if (_linePaintCache.TryGetValue(key, out var cached) && cached.Text == text)
             return cached;
+
+        if (_countPaintMisses)
+            _paintCacheMissesThisFrame++;
 
         var segments = new List<(FormattedText Ft, double Width)>();
         if (tokens is null || oneBasedLine is null)

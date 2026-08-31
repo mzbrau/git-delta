@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics.Metrics;
+using System.Globalization;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using GitDelta.Core;
@@ -9,8 +10,16 @@ namespace GitDelta.App.ViewModels;
 
 public partial class DiagnosticsOverlayViewModel : ObservableObject
 {
+    public const string DiffRenderInstrument = "diff.render.duration_ms";
+    public const string DiffScrollGestureInstrument = "diff.scroll.gesture_to_paint_ms";
+    private const int MaxListedTimings = 80;
+
     private readonly MeterListener _listener;
     private readonly object _timingsGate = new();
+    private double? _lastScrollGestureMs;
+    private double? _lastDiffRenderMs;
+    private bool _highFrequencyUiPosted;
+    private bool _pendingScrollListLine;
 
     public DiagnosticsOverlayViewModel()
     {
@@ -64,8 +73,10 @@ public partial class DiagnosticsOverlayViewModel : ObservableObject
         {
             try
             {
-                var line = $"{instrument.Name}: {measurement:F1} ms";
-                PostToUi(() => AppendTiming(line));
+                if (IsHighFrequencyTiming(instrument.Name))
+                    QueueHighFrequencyTiming(instrument.Name, measurement);
+                else
+                    PostToUi(() => RecordTiming(instrument.Name, measurement));
             }
             catch
             {
@@ -85,8 +96,25 @@ public partial class DiagnosticsOverlayViewModel : ObservableObject
 
     public ObservableCollection<string> LastTimings { get; } = [];
 
-    public string Summary =>
-        $"git invocations={GitInvocations}  bytes={BytesRead}  cache {CacheHits}/{CacheHits + CacheMisses}  tokens={LinesTokenised}";
+    /// <summary>Latest DiffViewer scroll gesture → first paint latency, if any sample arrived.</summary>
+    public double? LastScrollGestureMs => _lastScrollGestureMs;
+
+    /// <summary>Latest DiffViewer paint duration (not listed in <see cref="LastTimings"/> to avoid flooding).</summary>
+    public double? LastDiffRenderMs => _lastDiffRenderMs;
+
+    public string Summary
+    {
+        get
+        {
+            var text =
+                $"git invocations={GitInvocations}  bytes={BytesRead}  cache {CacheHits}/{CacheHits + CacheMisses}  tokens={LinesTokenised}";
+            if (_lastScrollGestureMs is { } scrollMs)
+                text += $"  last scroll gesture={scrollMs.ToString("F1", CultureInfo.InvariantCulture)} ms";
+            if (_lastDiffRenderMs is { } renderMs)
+                text += $"  last paint={renderMs.ToString("F1", CultureInfo.InvariantCulture)} ms";
+            return text;
+        }
+    }
 
     public void SetGitInfo(GitExecutableInfo? info)
     {
@@ -94,12 +122,75 @@ public partial class DiagnosticsOverlayViewModel : ObservableObject
         GitVersion = info?.Version.ToString();
     }
 
-    private void AppendTiming(string line)
+    /// <summary>
+    /// Whether a histogram sample should appear in the scrolling timings list.
+    /// High-frequency paint samples are excluded so rarer scroll/git timings stay visible.
+    /// </summary>
+    public static bool ShouldListTiming(string instrumentName) =>
+        !string.Equals(instrumentName, DiffRenderInstrument, StringComparison.Ordinal);
+
+    public static bool IsHighFrequencyTiming(string instrumentName) =>
+        string.Equals(instrumentName, DiffRenderInstrument, StringComparison.Ordinal)
+        || string.Equals(instrumentName, DiffScrollGestureInstrument, StringComparison.Ordinal);
+
+    private void QueueHighFrequencyTiming(string instrumentName, double measurementMs)
+    {
+        var shouldPost = false;
+        lock (_timingsGate)
+        {
+            if (string.Equals(instrumentName, DiffRenderInstrument, StringComparison.Ordinal))
+            {
+                _lastDiffRenderMs = measurementMs;
+            }
+            else if (string.Equals(instrumentName, DiffScrollGestureInstrument, StringComparison.Ordinal))
+            {
+                _lastScrollGestureMs = measurementMs;
+                _pendingScrollListLine = true;
+            }
+
+            if (!_highFrequencyUiPosted)
+            {
+                _highFrequencyUiPosted = true;
+                shouldPost = true;
+            }
+        }
+
+        if (shouldPost)
+            PostToUi(FlushHighFrequencyTimings);
+    }
+
+    private void FlushHighFrequencyTimings()
+    {
+        string? scrollLine = null;
+        lock (_timingsGate)
+        {
+            _highFrequencyUiPosted = false;
+            if (_pendingScrollListLine && _lastScrollGestureMs is { } scrollMs)
+            {
+                _pendingScrollListLine = false;
+                scrollLine =
+                    $"{DiffScrollGestureInstrument}: {scrollMs.ToString("F1", CultureInfo.InvariantCulture)} ms";
+                LastTimings.Insert(0, scrollLine);
+                while (LastTimings.Count > MaxListedTimings)
+                    LastTimings.RemoveAt(LastTimings.Count - 1);
+            }
+
+            OnPropertyChanged(nameof(LastScrollGestureMs));
+            OnPropertyChanged(nameof(LastDiffRenderMs));
+            OnPropertyChanged(nameof(Summary));
+        }
+    }
+
+    private void RecordTiming(string instrumentName, double measurementMs)
     {
         lock (_timingsGate)
         {
+            if (!ShouldListTiming(instrumentName))
+                return;
+
+            var line = $"{instrumentName}: {measurementMs.ToString("F1", CultureInfo.InvariantCulture)} ms";
             LastTimings.Insert(0, line);
-            while (LastTimings.Count > 50)
+            while (LastTimings.Count > MaxListedTimings)
                 LastTimings.RemoveAt(LastTimings.Count - 1);
         }
     }
@@ -110,6 +201,13 @@ public partial class DiagnosticsOverlayViewModel : ObservableObject
         {
             var dispatcher = Dispatcher.UIThread;
             if (dispatcher.CheckAccess())
+            {
+                action();
+                return;
+            }
+
+            // Headless unit tests have no message pump — apply immediately.
+            if (Avalonia.Application.Current is null)
             {
                 action();
                 return;
