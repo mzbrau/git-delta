@@ -7,5 +7,8 @@
     <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
     <MinVerTagPrefix>v</MinVerTagPrefix>
     <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
+    <!-- Verify 32+ auto-discovers solution files only 2 levels up; ours lives in src/. -->
+    <SolutionDir Condition="'$(SolutionDir)' == '' or '$(SolutionDir)' == '*Undefined*'">$(MSBuildThisFileDirectory)src/</SolutionDir>
+    <SolutionName Condition="'$(SolutionName)' == '' or '$(SolutionName)' == '*Undefined*'">GitDelta</SolutionName>
   </PropertyGroup>
 </Project>

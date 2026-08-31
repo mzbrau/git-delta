@@ -205,7 +205,7 @@ public sealed class WorkingCopyViewModelCommitTests
                     n.IsError && n.Message.StartsWith("Failed to refresh after commit:", StringComparison.Ordinal)),
                 Is.True);
             Assert.That(
-                _notifications.Notifications.First(n => n.Message.StartsWith("Failed to refresh after commit:", StringComparison.Ordinal)).Action,
+                (Delegate?)_notifications.Notifications.First(n => n.Message.StartsWith("Failed to refresh after commit:", StringComparison.Ordinal)).Action,
                 Is.Null,
                 "Refresh failure must not offer a Retry that re-commits");
         }
