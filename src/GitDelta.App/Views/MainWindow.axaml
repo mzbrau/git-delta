@@ -1546,9 +1546,17 @@
                                     Foreground="{DynamicResource ForgeStatusAddedBrush}" />
                 <StackPanel Spacing="2">
                   <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="{Binding WorkingCopy.SelectedFile.Path}" FontWeight="SemiBold"
-                               Classes="MonoPath" TextTrimming="CharacterEllipsis"
-                               ToolTip.Tip="{Binding WorkingCopy.SelectedFileAbsolutePath}" />
+                    <StackPanel Orientation="Horizontal" Spacing="4" Classes="DiffPathHeader">
+                      <TextBlock Text="{Binding WorkingCopy.SelectedFile.Path}" FontWeight="SemiBold"
+                                 Classes="MonoPath" TextTrimming="CharacterEllipsis"
+                                 ToolTip.Tip="{Binding WorkingCopy.SelectedFileAbsolutePath}" />
+                      <Button Classes="IconOnly CopyFilename"
+                              Width="22" Height="22" Padding="2"
+                              ToolTip.Tip="Copy filename"
+                              Command="{Binding WorkingCopy.CopySelectedFileNameCommand}">
+                        <icons:MaterialIcon Kind="ContentCopy" Width="14" Height="14" />
+                      </Button>
+                    </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                       <TextBlock Text="{Binding WorkingCopy.SelectedAddedLines, Converter={x:Static conv:ForgeConverters.PlusPrefix}}"
                                  FontSize="10" Foreground="{DynamicResource ForgeStatusAddedBrush}" />
@@ -2459,10 +2467,18 @@
                 <TextBlock Text="Change Briefing" FontWeight="SemiBold" VerticalAlignment="Center"
                            IsVisible="{Binding Review.IsChangeBriefingSelected}" />
                 <Panel IsVisible="{Binding Review.SelectedFile, Converter={x:Static conv:ForgeConverters.IsNotNull}}">
-                  <TextBlock Text="{Binding Review.SelectedFile.Path}" FontWeight="SemiBold"
-                             Classes="MonoPath" TextTrimming="CharacterEllipsis"
-                             VerticalAlignment="Center"
-                             ToolTip.Tip="{Binding Review.SelectedFile.Path}" />
+                  <Grid ColumnDefinitions="*,Auto" Classes="DiffPathHeader" VerticalAlignment="Center">
+                    <TextBlock Grid.Column="0" Text="{Binding Review.SelectedFile.Path}" FontWeight="SemiBold"
+                               Classes="MonoPath" TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center"
+                               ToolTip.Tip="{Binding Review.SelectedFile.Path}" />
+                    <Button Grid.Column="1" Classes="IconOnly CopyFilename"
+                            Width="22" Height="22" Padding="2"
+                            ToolTip.Tip="Copy filename"
+                            Command="{Binding Review.CopySelectedFileNameCommand}">
+                      <icons:MaterialIcon Kind="ContentCopy" Width="14" Height="14" />
+                    </Button>
+                  </Grid>
                 </Panel>
               </Panel>
             </DockPanel>
@@ -3854,9 +3870,17 @@
                                         Foreground="{DynamicResource ForgeStatusAddedBrush}" />
                     <StackPanel Spacing="2">
                       <StackPanel Orientation="Horizontal" Spacing="8">
-                        <TextBlock Text="{Binding WorkingCopy.SelectedFile.Path}" FontWeight="SemiBold"
-                                   Classes="MonoPath" TextTrimming="CharacterEllipsis"
-                                   ToolTip.Tip="{Binding WorkingCopy.SelectedFileAbsolutePath}" />
+                        <StackPanel Orientation="Horizontal" Spacing="4" Classes="DiffPathHeader">
+                          <TextBlock Text="{Binding WorkingCopy.SelectedFile.Path}" FontWeight="SemiBold"
+                                     Classes="MonoPath" TextTrimming="CharacterEllipsis"
+                                     ToolTip.Tip="{Binding WorkingCopy.SelectedFileAbsolutePath}" />
+                          <Button Classes="IconOnly CopyFilename"
+                                  Width="22" Height="22" Padding="2"
+                                  ToolTip.Tip="Copy filename"
+                                  Command="{Binding WorkingCopy.CopySelectedFileNameCommand}">
+                            <icons:MaterialIcon Kind="ContentCopy" Width="14" Height="14" />
+                          </Button>
+                        </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                           <TextBlock Text="{Binding WorkingCopy.SelectedAddedLines, Converter={x:Static conv:ForgeConverters.PlusPrefix}}"
                                      FontSize="10" Foreground="{DynamicResource ForgeStatusAddedBrush}" />

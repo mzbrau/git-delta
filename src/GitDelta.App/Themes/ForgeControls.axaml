@@ -111,6 +111,13 @@
     <Setter Property="Background" Value="{DynamicResource ForgeSurfaceHighBrush}" />
   </Style>
 
+  <Style Selector="Panel.DiffPathHeader Button.CopyFilename">
+    <Setter Property="Opacity" Value="0" />
+  </Style>
+  <Style Selector="Panel.DiffPathHeader:pointerover Button.CopyFilename">
+    <Setter Property="Opacity" Value="1" />
+  </Style>
+
   <Style Selector="Button.ReviewAction">
     <Setter Property="Background" Value="{DynamicResource ForgeSurfaceContainerHighBrush}" />
     <Setter Property="BorderBrush" Value="{DynamicResource ForgeOutlineVariantBrush}" />
