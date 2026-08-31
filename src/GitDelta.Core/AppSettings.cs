@@ -70,6 +70,12 @@ public sealed record AppSettings
     public int DiffPrefetchIndicatorThrottleMs { get; set; } = 400;
 
     /// <summary>
+    /// Minimum seconds between background/watcher/focus working-copy status refreshes
+    /// (clamped 5–300). Default 20. Manual refresh is always immediate.
+    /// </summary>
+    public int StatusRefreshIntervalSeconds { get; set; } = 20;
+
+    /// <summary>
     /// How many files are enqueued immediately (selection + neighbors first) before the paced
     /// drip starts (clamped 1–500). Default 48.
     /// </summary>

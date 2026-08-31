@@ -162,7 +162,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         _historyFileListLayout = NormalizeFileListLayout(settings.Current.HistoryFileListLayout);
         // Watcher callbacks arrive on thread-pool / FileSystemWatcher threads.
         _watcher.RefreshRequested += () =>
-            Dispatcher.UIThread.Post(() => _ = RefreshAsync());
+            Dispatcher.UIThread.Post(() => _ = TrySoftRefreshAsync());
         _watcher.OfferFsmonitor += () =>
             Dispatcher.UIThread.Post(() =>
                 _notifications.Info("Status is slow. Enable Git fsmonitor for this repository?",
@@ -1134,6 +1134,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 // writes from the previous repository or RefreshAsync will discard status.
                 _statusEpoch = 0;
                 _lastStatus = null;
+                LastStatusRefreshedAt = null;
+                OnPropertyChanged(nameof(StatusRefreshTooltip));
                 _pending.Clear();
                 FileFilter = "";
                 ApplySelectionState([], requestViewSync: true);
@@ -1144,6 +1146,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                 RecentViewedFiles.Clear();
             }
             await RefreshAsync();
+            StartSoftRefreshLoop();
             activity?.SetTag("wc.total_count", _allStaged.Count + _allUnstaged.Count + _allConflicted.Count);
             await LoadBranchesAsync();
             await LoadStashesAsync();
@@ -1199,18 +1202,122 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     }
 
     private int _refreshGeneration;
-    private int _refreshInFlight;
+    private int _manualRefreshInFlight;
+    private CancellationTokenSource? _softRefreshLoopCts;
 
-    [RelayCommand]
+    /// <summary>UTC time of the last successfully applied status refresh, if any.</summary>
+    public DateTimeOffset? LastStatusRefreshedAt { get; set; }
+
+    /// <summary>Toolbar tooltip including relative age of the last status refresh.</summary>
+    public string StatusRefreshTooltip
+    {
+        get
+        {
+            if (LastStatusRefreshedAt is null)
+                return "Refresh pending changes";
+            return $"Refresh pending changes\nLast refreshed {FormatStatusRefreshAge(LastStatusRefreshedAt.Value)}";
+        }
+    }
+
+    /// <summary>Recompute tooltip text when the user hovers the refresh button.</summary>
+    public void NotifyStatusRefreshTooltipRequested() =>
+        OnPropertyChanged(nameof(StatusRefreshTooltip));
+
+    /// <summary>
+    /// Forced silent refresh (open / mutations). Does not show the toolbar busy spinner and
+    /// does not honor the background interval gate.
+    /// </summary>
     /// <param name="clearAiReviewAfter">
     /// When true (in-app commit), clear AI triage/summary after sync so the button resets even if
     /// other files remain pending. Ordinary refreshes only clear AI when the working copy is empty.
     /// </param>
-    public async Task RefreshAsync(bool clearAiReviewAfter = false)
+    [RelayCommand]
+    public Task RefreshAsync(bool clearAiReviewAfter = false) =>
+        RefreshCoreAsync(clearAiReviewAfter, showBusy: false);
+
+    /// <summary>User-initiated refresh: always runs and shows the toolbar busy spinner.</summary>
+    [RelayCommand]
+    public Task ManualRefreshAsync() =>
+        RefreshCoreAsync(clearAiReviewAfter: false, showBusy: true);
+
+    /// <summary>
+    /// Background/watcher/focus refresh. Skips when a successful refresh ran within the
+    /// configured <see cref="AppSettings.StatusRefreshIntervalSeconds"/>.
+    /// </summary>
+    public Task TrySoftRefreshAsync()
+    {
+        if (_repoPath is null)
+            return Task.CompletedTask;
+
+        var interval = TimeSpan.FromSeconds(ClampStatusRefreshIntervalSeconds(
+            _settings.Current.StatusRefreshIntervalSeconds));
+        if (LastStatusRefreshedAt is { } at && DateTimeOffset.UtcNow - at < interval)
+            return Task.CompletedTask;
+
+        return RefreshCoreAsync(clearAiReviewAfter: false, showBusy: false);
+    }
+
+    internal static int ClampStatusRefreshIntervalSeconds(int seconds) =>
+        Math.Clamp(seconds, 5, 300);
+
+    private static string FormatStatusRefreshAge(DateTimeOffset refreshedAt)
+    {
+        var ago = DateTimeOffset.UtcNow - refreshedAt;
+        if (ago.TotalSeconds < 5) return "just now";
+        if (ago.TotalMinutes < 1) return $"{(int)ago.TotalSeconds}s ago";
+        if (ago.TotalHours < 1) return $"{(int)ago.TotalMinutes}m ago";
+        if (ago.TotalDays < 1) return $"{(int)ago.TotalHours}h ago";
+        return $"{(int)ago.TotalDays}d ago";
+    }
+
+    private void StartSoftRefreshLoop()
+    {
+        StopSoftRefreshLoop();
+        var cts = new CancellationTokenSource();
+        _softRefreshLoopCts = cts;
+        _ = RunSoftRefreshLoopAsync(cts.Token);
+    }
+
+    private void StopSoftRefreshLoop()
+    {
+        var cts = Interlocked.Exchange(ref _softRefreshLoopCts, null);
+        if (cts is null)
+            return;
+        try { cts.Cancel(); }
+        catch (ObjectDisposedException) { /* ignored */ }
+        cts.Dispose();
+    }
+
+    private async Task RunSoftRefreshLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            var seconds = ClampStatusRefreshIntervalSeconds(_settings.Current.StatusRefreshIntervalSeconds);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(seconds), ct).ConfigureAwait(true);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (ct.IsCancellationRequested || _repoPath is null)
+                return;
+
+            await TrySoftRefreshAsync().ConfigureAwait(true);
+        }
+    }
+
+    private async Task RefreshCoreAsync(bool clearAiReviewAfter, bool showBusy)
     {
         if (_repoPath is null) return;
-        Interlocked.Increment(ref _refreshInFlight);
-        IsStatusRefreshing = true;
+        if (showBusy)
+        {
+            Interlocked.Increment(ref _manualRefreshInFlight);
+            IsStatusRefreshing = true;
+        }
+
         try
         {
             var generation = Interlocked.Increment(ref _refreshGeneration);
@@ -1252,6 +1359,8 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
                     }
 
                     await InvokeOnUiAsync(ApplyStatus, "apply_status");
+                    LastStatusRefreshedAt = DateTimeOffset.UtcNow;
+                    OnPropertyChanged(nameof(StatusRefreshTooltip));
                     SoftInvalidateChangedPaths(previousStatus, status);
                     UpdateFileCacheIndicators();
                     await RevalidateSelectedDiffAfterStatusAsync(previousStatus, status);
@@ -1276,7 +1385,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
         }
         finally
         {
-            if (Interlocked.Decrement(ref _refreshInFlight) == 0)
+            if (showBusy && Interlocked.Decrement(ref _manualRefreshInFlight) == 0)
                 IsStatusRefreshing = false;
         }
     }

@@ -80,6 +80,8 @@ public partial class MainWindowViewModel : ObservableObject
         WorkingCopy.SetDiffPrefetchConcurrency(_diffPrefetchConcurrency);
         _diffPrefetchDripDelayMs = Math.Clamp(_settings.Current.DiffPrefetchDripDelayMs, 0, 5000);
         _diffPrefetchIndicatorThrottleMs = Math.Clamp(_settings.Current.DiffPrefetchIndicatorThrottleMs, 50, 5000);
+        _statusRefreshIntervalSeconds = WorkingCopyViewModel.ClampStatusRefreshIntervalSeconds(
+            _settings.Current.StatusRefreshIntervalSeconds);
         _diffPrefetchPriorityPaths = Math.Clamp(_settings.Current.DiffPrefetchPriorityPaths, 1, 500);
         _diffPrefetchNeighborRadius = Math.Clamp(_settings.Current.DiffPrefetchNeighborRadius, 0, 64);
 
@@ -188,6 +190,7 @@ public partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private int _diffPrefetchConcurrency = DiffWarmStore.DefaultConcurrency;
     [ObservableProperty] private int _diffPrefetchDripDelayMs = 300;
     [ObservableProperty] private int _diffPrefetchIndicatorThrottleMs = 400;
+    [ObservableProperty] private int _statusRefreshIntervalSeconds = 20;
     [ObservableProperty] private int _diffPrefetchPriorityPaths = 48;
     [ObservableProperty] private int _diffPrefetchNeighborRadius = 16;
     [ObservableProperty] private double _navigatorWidth;
@@ -752,7 +755,7 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task RefreshAsync() => await WorkingCopy.RefreshAsync();
+    private Task RefreshAsync() => WorkingCopy.ManualRefreshAsync();
 
     [RelayCommand]
     private void OpenSettings()
@@ -872,6 +875,19 @@ public partial class MainWindowViewModel : ObservableObject
         }
 
         _settings.Update(s => s.DiffPrefetchIndicatorThrottleMs = clamped);
+        _ = _settings.SaveAsync();
+    }
+
+    partial void OnStatusRefreshIntervalSecondsChanged(int value)
+    {
+        var clamped = WorkingCopyViewModel.ClampStatusRefreshIntervalSeconds(value);
+        if (clamped != value)
+        {
+            StatusRefreshIntervalSeconds = clamped;
+            return;
+        }
+
+        _settings.Update(s => s.StatusRefreshIntervalSeconds = clamped);
         _ = _settings.SaveAsync();
     }
 

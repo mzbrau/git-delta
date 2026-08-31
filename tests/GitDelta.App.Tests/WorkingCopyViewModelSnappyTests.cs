@@ -614,7 +614,7 @@ public sealed class WorkingCopyViewModelSnappyTests
     }
 
     [Test]
-    public async Task RefreshAsync_Sets_IsStatusRefreshing_While_GetStatus_Pending()
+    public async Task ManualRefreshAsync_Sets_IsStatusRefreshing_While_GetStatus_Pending()
     {
         var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(repo);
@@ -628,6 +628,112 @@ public sealed class WorkingCopyViewModelSnappyTests
             var vm = CreateVm();
             await vm.OpenAsync(repo);
             Assert.That(vm.IsStatusRefreshing, Is.False);
+            Assert.That(vm.LastStatusRefreshedAt, Is.Not.Null);
+            Assert.That(vm.StatusRefreshTooltip, Does.Contain("Last refreshed"));
+
+            var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(async _ =>
+                {
+                    started.TrySetResult();
+                    await release.Task;
+                    return Status([Unstaged("a.txt")], epoch: 2);
+                });
+
+            var refresh = vm.ManualRefreshAsync();
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.That(vm.IsStatusRefreshing, Is.True);
+
+            release.SetResult();
+            await refresh;
+            Assert.That(vm.IsStatusRefreshing, Is.False);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task TrySoftRefreshAsync_Skips_When_Within_Interval()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            _settings.Current.Returns(new AppSettings { StatusRefreshIntervalSeconds = 20 });
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt")], epoch: 1));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+            _status.ClearReceivedCalls();
+
+            await vm.TrySoftRefreshAsync();
+
+            await _status.DidNotReceive().GetStatusAsync(repo, Arg.Any<CancellationToken>());
+            Assert.That(vm.IsStatusRefreshing, Is.False);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task TrySoftRefreshAsync_Runs_When_Interval_Elapsed()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            _settings.Current.Returns(new AppSettings { StatusRefreshIntervalSeconds = 5 });
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt")], epoch: 1));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
+
+            // Force the throttle window to have elapsed.
+            vm.LastStatusRefreshedAt = DateTimeOffset.UtcNow - TimeSpan.FromSeconds(30);
+
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt")], epoch: 2));
+            _status.ClearReceivedCalls();
+
+            var soft = vm.TrySoftRefreshAsync();
+            Assert.That(vm.IsStatusRefreshing, Is.False);
+            await soft;
+
+            await _status.Received(1).GetStatusAsync(repo, Arg.Any<CancellationToken>());
+            Assert.That(vm.IsStatusRefreshing, Is.False);
+            Assert.That(vm.LastStatusRefreshedAt, Is.Not.Null);
+        }
+        finally
+        {
+            try { Directory.Delete(repo, recursive: true); } catch { /* best effort */ }
+        }
+    }
+
+    [Test]
+    public async Task RefreshAsync_Does_Not_Set_IsStatusRefreshing()
+    {
+        var repo = Path.Combine(Path.GetTempPath(), "gitdelta-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(repo);
+        try
+        {
+            _status.GetStatusAsync(repo, Arg.Any<CancellationToken>())
+                .Returns(Status([Unstaged("a.txt")], epoch: 1));
+            _diff.GetDiffAsync(repo, Arg.Any<FilePath>(), Arg.Any<DiffScope>(), Arg.Any<DiffOptions>(), Arg.Any<CancellationToken>())
+                .Returns(ci => DiffFor(ci.ArgAt<FilePath>(1).Value));
+
+            var vm = CreateVm();
+            await vm.OpenAsync(repo);
 
             var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -641,7 +747,7 @@ public sealed class WorkingCopyViewModelSnappyTests
 
             var refresh = vm.RefreshAsync();
             await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
-            Assert.That(vm.IsStatusRefreshing, Is.True);
+            Assert.That(vm.IsStatusRefreshing, Is.False);
 
             release.SetResult();
             await refresh;
