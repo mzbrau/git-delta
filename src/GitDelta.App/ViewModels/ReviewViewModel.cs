@@ -1,5 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input.Platform;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -831,6 +835,27 @@ public partial class ReviewViewModel : ObservableObject, IFileHistoryBrowseHost
 
     [RelayCommand]
     private void ToggleAiReviewSection() => AiReviewSectionExpanded = !AiReviewSectionExpanded;
+
+    [RelayCommand]
+    private async Task CopySelectedFileNameAsync()
+    {
+        if (SelectedFile is null)
+            return;
+        await CopyTextToClipboardAsync(SelectedFile.Name);
+    }
+
+    private static async Task CopyTextToClipboardAsync(string text)
+    {
+        if (Application.Current?.ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime
+            { MainWindow: { } window })
+            return;
+
+        var clipboard = TopLevel.GetTopLevel(window)?.Clipboard;
+        if (clipboard is null)
+            return;
+
+        await clipboard.SetTextAsync(text);
+    }
 
     [RelayCommand]
     private void ToggleFilePanel() => ShowFilePanel = !ShowFilePanel;

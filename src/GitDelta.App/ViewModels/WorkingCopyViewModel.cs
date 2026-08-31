@@ -4537,6 +4537,14 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     }
 
     [RelayCommand]
+    private async Task CopySelectedFileNameAsync()
+    {
+        if (SelectedFile is null)
+            return;
+        await CopyTextToClipboardAsync(SelectedFile.Name);
+    }
+
+    [RelayCommand]
     private async Task CopyCommitHashAsync(CommitInfo? commit)
     {
         commit ??= SelectedCommit;
