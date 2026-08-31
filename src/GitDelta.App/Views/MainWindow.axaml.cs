@@ -10,6 +10,7 @@ using Avalonia.Controls.Primitives.PopupPositioning;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Media.TextFormatting;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -27,6 +28,11 @@ namespace GitDelta.App.Views;
 
 public partial class MainWindow : Window
 {
+    private static readonly DataFormat<WcFileDragPayload> WcFileDragFormat =
+        DataFormat.CreateInProcessFormat<WcFileDragPayload>("application/x-gitdelta-wc-files");
+
+    private const double FileDragThreshold = 6;
+
     private bool _suppressSelectionSync;
     private bool _multiSelectModifiers;
     private bool _selectionSyncSubscribed;
@@ -47,6 +53,12 @@ public partial class MainWindow : Window
     private DiffViewer? _prDiffViewer;
     private DiffViewer? _wcDiffViewer;
     private TextBox? _activeMentionComposer;
+    private bool _fileListDragDropHooked;
+    private PointerPressedEventArgs? _fileDragPressArgs;
+    private Point _fileDragStartPoint;
+    private ListBox? _fileDragSourceList;
+    private bool _fileDragInProgress;
+    private IBrush? _fileListDropHighlightBrush;
 
     public MainWindow()
     {
@@ -1077,7 +1089,228 @@ public partial class MainWindow : Window
         Dispatcher.UIThread.Post(() => _ = Vm.TryOpenLastRepositoryAsync(), DispatcherPriority.Background);
         Dispatcher.UIThread.Post(() => _ = Vm.Review.RefreshInboxCommand.ExecuteAsync(null), DispatcherPriority.Background);
         Dispatcher.UIThread.Post(() => _ = Vm.EnsureRepositoryCatalogAsync(), DispatcherPriority.Background);
+
+        HookFileListDragDrop();
     }
+
+    private void HookFileListDragDrop()
+    {
+        if (_fileListDragDropHooked)
+            return;
+        _fileListDragDropHooked = true;
+
+        foreach (var list in new[] { StagedFileList, UnstagedFileList })
+        {
+            DragDrop.SetAllowDrop(list, true);
+            list.AddHandler(InputElement.PointerPressedEvent, OnFileListDragPointerPressed, RoutingStrategies.Tunnel);
+            list.AddHandler(InputElement.PointerMovedEvent, OnFileListDragPointerMoved, RoutingStrategies.Tunnel);
+            list.AddHandler(InputElement.PointerReleasedEvent, OnFileListDragPointerReleased, RoutingStrategies.Tunnel);
+            list.AddHandler(InputElement.PointerCaptureLostEvent, OnFileListDragPointerCaptureLost, RoutingStrategies.Direct);
+            list.AddHandler(DragDrop.DragOverEvent, OnFileListDragOver);
+            list.AddHandler(DragDrop.DragEnterEvent, OnFileListDragEnter);
+            list.AddHandler(DragDrop.DragLeaveEvent, OnFileListDragLeave);
+            list.AddHandler(DragDrop.DropEvent, OnFileListDrop);
+        }
+    }
+
+    private void OnFileListDragPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (sender is not ListBox list)
+            return;
+        if (!e.GetCurrentPoint(list).Properties.IsLeftButtonPressed)
+            return;
+        if (e.Source is Control control
+            && (IsStageCheckboxSource(control) || IsFolderChevronSource(control)))
+            return;
+
+        _fileDragPressArgs = e;
+        _fileDragStartPoint = e.GetPosition(list);
+        _fileDragSourceList = list;
+        _fileDragInProgress = false;
+    }
+
+    private async void OnFileListDragPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (_fileDragInProgress || _fileDragPressArgs is null || sender is not ListBox list)
+            return;
+        if (!ReferenceEquals(list, _fileDragSourceList))
+            return;
+        if (!e.GetCurrentPoint(list).Properties.IsLeftButtonPressed)
+            return;
+
+        var delta = e.GetPosition(list) - _fileDragStartPoint;
+        if (Math.Abs(delta.X) < FileDragThreshold && Math.Abs(delta.Y) < FileDragThreshold)
+            return;
+
+        var files = ResolveDragFiles(list);
+        if (files.Count == 0)
+        {
+            ClearFileDragState();
+            return;
+        }
+
+        _fileDragInProgress = true;
+        var fromStaged = ReferenceEquals(list, StagedFileList);
+        var payload = new WcFileDragPayload(fromStaged, files);
+        var data = new DataTransfer();
+        // InProcess formats are skipped by platform backends; macOS requires ≥1 pasteboard
+        // item (else AppKit aborts: 0 pasteboard items vs 1 drag image).
+        var item = new DataTransferItem();
+        item.Set(DataFormat.Text, "gitdelta-wc-files");
+        item.Set(WcFileDragFormat, payload);
+        data.Add(item);
+
+        try
+        {
+            await DragDrop.DoDragDropAsync(_fileDragPressArgs, data, DragDropEffects.Move);
+        }
+        finally
+        {
+            ClearFileDragState();
+            ClearFileListDropHighlight(StagedFileList);
+            ClearFileListDropHighlight(UnstagedFileList);
+        }
+    }
+
+    private void OnFileListDragPointerReleased(object? sender, PointerReleasedEventArgs e) =>
+        ClearFileDragState();
+
+    private void OnFileListDragPointerCaptureLost(object? sender, PointerCaptureLostEventArgs e) =>
+        ClearFileDragState();
+
+    private void ClearFileDragState()
+    {
+        _fileDragPressArgs = null;
+        _fileDragSourceList = null;
+        _fileDragInProgress = false;
+    }
+
+    private static bool IsStageCheckboxSource(Control control)
+    {
+        for (var c = control; c is not null; c = c.GetVisualParent() as Control)
+        {
+            if (c is CheckBox)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsFolderChevronSource(Control control)
+    {
+        for (var c = control; c is not null; c = c.GetVisualParent() as Control)
+        {
+            if (c is Control { Tag: "FolderChevron" })
+                return true;
+            if (c is ListBoxItem)
+                break;
+        }
+
+        return false;
+    }
+
+    private List<FileItemViewModel> ResolveDragFiles(ListBox list)
+    {
+        var files = new List<FileItemViewModel>();
+        CollectSelected(list, files);
+        if (files.Count > 0)
+            return files;
+
+        // Dragging an unselected row: use the item under the press point.
+        if (_fileDragPressArgs is null)
+            return files;
+
+        var source = _fileDragPressArgs.Source as Control;
+        while (source is not null && source is not ListBoxItem)
+            source = source.GetVisualParent() as Control;
+
+        if (source is not ListBoxItem { DataContext: { } data })
+            return files;
+
+        var sourceFiles = GetSourceFilesForList(list);
+        FileListSelectionHelper.CollectFromEntries([data], sourceFiles, files);
+        return files;
+    }
+
+    private void OnFileListDragOver(object? sender, DragEventArgs e)
+    {
+        if (sender is not ListBox target)
+            return;
+
+        if (!TryGetCrossListPayload(target, e, out _))
+        {
+            e.DragEffects = DragDropEffects.None;
+            return;
+        }
+
+        e.DragEffects = DragDropEffects.Move;
+    }
+
+    private void OnFileListDragEnter(object? sender, DragEventArgs e)
+    {
+        if (sender is not ListBox target)
+            return;
+        if (!TryGetCrossListPayload(target, e, out _))
+            return;
+        ApplyFileListDropHighlight(target);
+    }
+
+    private void OnFileListDragLeave(object? sender, DragEventArgs e)
+    {
+        if (sender is ListBox target)
+            ClearFileListDropHighlight(target);
+    }
+
+    private void OnFileListDrop(object? sender, DragEventArgs e)
+    {
+        if (sender is not ListBox target)
+            return;
+
+        ClearFileListDropHighlight(target);
+        if (!TryGetCrossListPayload(target, e, out var payload) || payload is null)
+        {
+            e.DragEffects = DragDropEffects.None;
+            return;
+        }
+
+        e.DragEffects = DragDropEffects.Move;
+        if (payload.FromStaged)
+            _ = Vm.WorkingCopy.UnstageFilesAsync(payload.Files);
+        else
+            _ = Vm.WorkingCopy.StageFilesAsync(payload.Files);
+    }
+
+    private bool TryGetCrossListPayload(ListBox target, DragEventArgs e, out WcFileDragPayload? payload)
+    {
+        payload = e.DataTransfer?.TryGetValue(WcFileDragFormat);
+        if (payload is null || payload.Files.Count == 0)
+            return false;
+
+        var targetIsStaged = ReferenceEquals(target, StagedFileList);
+        // Only accept drops onto the opposite list.
+        return payload.FromStaged != targetIsStaged;
+    }
+
+    private void ApplyFileListDropHighlight(ListBox list)
+    {
+        _fileListDropHighlightBrush ??= CreateFileListDropHighlightBrush();
+        list.Background = _fileListDropHighlightBrush;
+    }
+
+    private IBrush CreateFileListDropHighlightBrush()
+    {
+        // Pale brand lavender at low alpha — PrimaryContainer is opaque/vivid and too loud.
+        if (Application.Current?.TryGetResource("ForgePrimaryColor", ActualThemeVariant, out var res) == true
+            && res is Color color)
+            return new SolidColorBrush(Color.FromArgb(28, color.R, color.G, color.B));
+
+        return new SolidColorBrush(Color.FromArgb(28, 217, 185, 255));
+    }
+
+    private static void ClearFileListDropHighlight(ListBox list) =>
+        list.Background = null;
+
+    private sealed record WcFileDragPayload(bool FromStaged, IReadOnlyList<FileItemViewModel> Files);
 
     private void OnRepoSwitcherFlyoutOpened(object? sender, EventArgs e) =>
         _ = Vm.EnsureRepositoryCatalogAsync();
@@ -1273,10 +1506,22 @@ public partial class MainWindow : Window
         while (source is not null && source is not ListBoxItem)
             source = source.GetVisualParent() as Control;
 
-        if (source is not ListBoxItem { DataContext: FileItemViewModel file })
+        if (source is not ListBoxItem { DataContext: { } data })
             return;
 
-        if (list.SelectedItems?.Contains(file) == true)
+        // Items are FileListEntry rows (folder or file); legacy FileItemViewModel still accepted.
+        object? selectable = data switch
+        {
+            FileListEntry { IsFolder: true } folder => folder,
+            FileListEntry { IsFile: true } fileEntry => fileEntry,
+            FileListEntry { IsSearchGroup: true } group => group,
+            FileItemViewModel legacy => legacy,
+            _ => null,
+        };
+        if (selectable is null)
+            return;
+
+        if (list.SelectedItems?.Contains(selectable) == true)
             return;
 
         _suppressSelectionSync = true;
@@ -1288,7 +1533,7 @@ public partial class MainWindow : Window
                 list.SelectedItems?.Clear();
             }
 
-            list.SelectedItems?.Add(file);
+            list.SelectedItems?.Add(selectable);
         }
         finally
         {
@@ -1445,8 +1690,15 @@ public partial class MainWindow : Window
     {
         foreach (var item in added)
         {
-            if (item is not FileListEntry { IsExpandable: true, FolderKey: { } key })
+            if (item is not FileListEntry { IsExpandable: true, FolderKey: { } key } entry)
                 continue;
+
+            // WC staged/unstaged/conflicted tree folders stay selected; chevron expands.
+            var isWcStatusList = ReferenceEquals(list, StagedFileList)
+                                 || ReferenceEquals(list, UnstagedFileList)
+                                 || ReferenceEquals(list, ConflictedFileList);
+            if (!isHistory && isWcStatusList && entry.IsFolder)
+                return false;
 
             _suppressSelectionSync = true;
             try
@@ -1519,18 +1771,22 @@ public partial class MainWindow : Window
         return FindEntryInList(list, file)?.File;
     }
 
-    private static void CollectSelected(ListBox? list, List<FileItemViewModel> into)
+    private void CollectSelected(ListBox? list, List<FileItemViewModel> into)
     {
         if (list?.SelectedItems is null) return;
-        foreach (var item in list.SelectedItems)
-        {
-            if (item is FileListEntry { IsSearchGroup: true })
-                continue;
-            if (item is FileListEntry { File: { } file })
-                into.Add(file);
-            else if (item is FileItemViewModel legacy)
-                into.Add(legacy);
-        }
+        var sourceFiles = GetSourceFilesForList(list);
+        FileListSelectionHelper.CollectFromEntries(list.SelectedItems.Cast<object?>(), sourceFiles, into);
+    }
+
+    private IReadOnlyList<FileItemViewModel> GetSourceFilesForList(ListBox list)
+    {
+        if (ReferenceEquals(list, StagedFileList))
+            return Vm.WorkingCopy.StagedFiles;
+        if (ReferenceEquals(list, UnstagedFileList))
+            return Vm.WorkingCopy.UnstagedFiles;
+        if (ReferenceEquals(list, ConflictedFileList))
+            return Vm.WorkingCopy.ConflictedFiles;
+        return [];
     }
 
     private void OnColumnSplitterDragCompleted(object? sender, VectorEventArgs e)
