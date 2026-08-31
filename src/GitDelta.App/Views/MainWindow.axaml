@@ -98,6 +98,17 @@
             <TextBlock Text="GIT DELTA" FontWeight="SemiBold" FontSize="13"
                        Foreground="{DynamicResource ForgePrimaryBrush}"
                        VerticalAlignment="Center" Margin="0,0,12,0" />
+            <Button Classes="IconOnly"
+                    Command="{Binding RefreshCommand}"
+                    ToolTip.Tip="Refresh pending changes"
+                    IsEnabled="{Binding WorkingCopy.IsStatusRefreshing, Converter={x:Static conv:ForgeConverters.InvertBool}}">
+              <Panel>
+                <ProgressBar Width="16" Height="16" IsIndeterminate="True"
+                             IsVisible="{Binding WorkingCopy.IsStatusRefreshing}" />
+                <icons:MaterialIcon Kind="Refresh" Width="16" Height="16"
+                                    IsVisible="{Binding WorkingCopy.IsStatusRefreshing, Converter={x:Static conv:ForgeConverters.InvertBool}}" />
+              </Panel>
+            </Button>
             <Button Classes="Ghost" Command="{Binding WorkingCopy.PushCommand}"
                     IsEnabled="{Binding WorkingCopy.IsRemoteBusy, Converter={x:Static conv:ForgeConverters.InvertBool}}">
               <StackPanel Orientation="Horizontal" Spacing="4">

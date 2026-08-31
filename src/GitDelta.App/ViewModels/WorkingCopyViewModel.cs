@@ -250,6 +250,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     [ObservableProperty] private DiffViewMode _viewMode;
     [ObservableProperty] private bool _isLoadingDiff;
     [ObservableProperty] private bool _isDiffRefreshing;
+    [ObservableProperty] private bool _isStatusRefreshing;
     [ObservableProperty] private bool _hasDiffCache;
     [ObservableProperty] private string? _diffCacheAgeText;
     [ObservableProperty] private bool _isCombinedReviewMode;
@@ -1195,6 +1196,7 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     }
 
     private int _refreshGeneration;
+    private int _refreshInFlight;
 
     [RelayCommand]
     /// <param name="clearAiReviewAfter">
@@ -1204,65 +1206,75 @@ public partial class WorkingCopyViewModel : ObservableObject, IPendingChangesRev
     public async Task RefreshAsync(bool clearAiReviewAfter = false)
     {
         if (_repoPath is null) return;
-        var generation = Interlocked.Increment(ref _refreshGeneration);
-        await _refreshGate.WaitAsync().ConfigureAwait(true);
+        Interlocked.Increment(ref _refreshInFlight);
+        IsStatusRefreshing = true;
         try
         {
-            // A newer refresh was scheduled while we waited — let that waiter do the work.
-            if (generation != Volatile.Read(ref _refreshGeneration))
-                return;
-
-            if (_repoPath is null) return;
-            using var activity = GitDeltaActivity.Source.StartActivity("wc.refresh");
-            var sw = Stopwatch.StartNew();
+            var generation = Interlocked.Increment(ref _refreshGeneration);
+            await _refreshGate.WaitAsync().ConfigureAwait(true);
             try
             {
-                var previousStatus = _lastStatus;
-                var status = await _statusService.GetStatusAsync(_repoPath).ConfigureAwait(true);
+                // A newer refresh was scheduled while we waited — let that waiter do the work.
                 if (generation != Volatile.Read(ref _refreshGeneration))
                     return;
-                if (status.Epoch < _statusEpoch) return;
-                _statusEpoch = status.Epoch;
-                _lastStatus = status;
 
-                void ApplyStatus()
+                if (_repoPath is null) return;
+                using var activity = GitDeltaActivity.Source.StartActivity("wc.refresh");
+                var sw = Stopwatch.StartNew();
+                try
                 {
-                    CurrentBranch = status.CurrentBranch;
-                    InProgress = status.InProgress;
-                    InProgressBanner = status.InProgress switch
+                    var previousStatus = _lastStatus;
+                    var status = await _statusService.GetStatusAsync(_repoPath).ConfigureAwait(true);
+                    if (generation != Volatile.Read(ref _refreshGeneration))
+                        return;
+                    if (status.Epoch < _statusEpoch) return;
+                    _statusEpoch = status.Epoch;
+                    _lastStatus = status;
+
+                    void ApplyStatus()
                     {
-                        InProgressOperation.Merge => "Merge in progress. Abort is always available. Continue when the index is clean.",
-                        InProgressOperation.Rebase => "Rebase in progress. Abort is always available. Continue when the index is clean.",
-                        InProgressOperation.CherryPick => "Cherry-pick in progress. Abort is always available.",
-                        InProgressOperation.Revert => "Revert in progress. Abort is always available.",
-                        _ => null,
-                    };
+                        CurrentBranch = status.CurrentBranch;
+                        InProgress = status.InProgress;
+                        InProgressBanner = status.InProgress switch
+                        {
+                            InProgressOperation.Merge => "Merge in progress. Abort is always available. Continue when the index is clean.",
+                            InProgressOperation.Rebase => "Rebase in progress. Abort is always available. Continue when the index is clean.",
+                            InProgressOperation.CherryPick => "Cherry-pick in progress. Abort is always available.",
+                            InProgressOperation.Revert => "Revert in progress. Abort is always available.",
+                            _ => null,
+                        };
 
-                    RebuildFileListsTimed(status, "refresh");
-                    StatusUpdated = true;
+                        RebuildFileListsTimed(status, "refresh");
+                        StatusUpdated = true;
+                    }
+
+                    await InvokeOnUiAsync(ApplyStatus, "apply_status");
+                    SoftInvalidateChangedPaths(previousStatus, status);
+                    UpdateFileCacheIndicators();
+                    await RevalidateSelectedDiffAfterStatusAsync(previousStatus, status);
+                    await PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReviewAfter);
+                    PendingReview.UpdateFileUnresolvedCommentCounts();
+                    ScheduleFileStatusPrefetch();
+
+                    activity?.SetTag("wc.staged_count", _allStaged.Count);
+                    activity?.SetTag("wc.unstaged_count", _allUnstaged.Count);
+                    activity?.SetTag("wc.conflicted_count", _allConflicted.Count);
+                    activity?.SetTag("wc.total_count", _allStaged.Count + _allUnstaged.Count + _allConflicted.Count);
                 }
-
-                await InvokeOnUiAsync(ApplyStatus, "apply_status");
-                SoftInvalidateChangedPaths(previousStatus, status);
-                UpdateFileCacheIndicators();
-                await RevalidateSelectedDiffAfterStatusAsync(previousStatus, status);
-                await PendingReview.SyncReviewStateWithPendingFilesAsync(clearAiReviewAfter);
-                PendingReview.UpdateFileUnresolvedCommentCounts();
-                ScheduleFileStatusPrefetch();
-
-                activity?.SetTag("wc.staged_count", _allStaged.Count);
-                activity?.SetTag("wc.unstaged_count", _allUnstaged.Count);
-                activity?.SetTag("wc.conflicted_count", _allConflicted.Count);
-                activity?.SetTag("wc.total_count", _allStaged.Count + _allUnstaged.Count + _allConflicted.Count);
+                finally
+                {
+                    GitDeltaMeters.WcRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
+                }
             }
             finally
             {
-                GitDeltaMeters.WcRefreshMs.Record(sw.Elapsed.TotalMilliseconds);
+                _refreshGate.Release();
             }
         }
         finally
         {
-            _refreshGate.Release();
+            if (Interlocked.Decrement(ref _refreshInFlight) == 0)
+                IsStatusRefreshing = false;
         }
     }
 
