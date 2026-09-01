@@ -241,7 +241,7 @@ public partial class MainWindowViewModel : ObservableObject
 
     public string RepositoryCatalogEmptyText =>
         string.IsNullOrWhiteSpace(RepositoryFilter)
-            ? "No repositories found under Development Folder"
+            ? "No repositories found. Set Development Folder in Settings or open a repository."
             : "No matching repositories";
 
     public string CurrentRepositoryName =>
@@ -256,16 +256,42 @@ public partial class MainWindowViewModel : ObservableObject
             if (!WorkingCopy.HasRepository || string.IsNullOrWhiteSpace(WorkingCopy.RepositoryPath))
                 return "No repository open";
 
-            var pathLabel = FormatRepositoryPathLabel(WorkingCopy.RepositoryPath);
+            var path = WorkingCopy.RepositoryPath;
+            var pathLabel = FormatRepositoryPathLabel(path);
             var branch = WorkingCopy.CurrentBranch;
+            var entry = ScannedRepositories.FirstOrDefault(e =>
+                string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
+            var linked = entry?.IsLinkedWorktree ?? IsLinkedWorktreePath(path);
+
+            if (linked)
+            {
+                var parent = entry?.ParentRepoName;
+                var linkedLabel = string.IsNullOrWhiteSpace(parent) ? "worktree" : $"{parent} worktree";
+                return string.IsNullOrWhiteSpace(branch)
+                    ? $"{linkedLabel}  ·  {pathLabel}"
+                    : $"{linkedLabel}  ·  {pathLabel}  ·  {branch}";
+            }
+
             return string.IsNullOrWhiteSpace(branch) ? pathLabel : $"{pathLabel}  ·  {branch}";
         }
     }
 
-    public string CurrentRepositoryTooltip =>
-        WorkingCopy.HasRepository && !string.IsNullOrWhiteSpace(WorkingCopy.RepositoryPath)
-            ? WorkingCopy.RepositoryPath
-            : "Select a repository";
+    public string CurrentRepositoryTooltip
+    {
+        get
+        {
+            if (!WorkingCopy.HasRepository || string.IsNullOrWhiteSpace(WorkingCopy.RepositoryPath))
+                return "Select a repository";
+
+            var path = WorkingCopy.RepositoryPath;
+            var entry = ScannedRepositories.FirstOrDefault(e =>
+                string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
+            if (entry?.IsLinkedWorktree == true && !string.IsNullOrWhiteSpace(entry.MainWorktreePath))
+                return $"{path}\nLinked to {entry.MainWorktreePath}";
+
+            return path;
+        }
+    }
     public bool HasGitHubAccounts => GitHubAccounts.Count > 0;
     public bool IsSettingsGeneral => SelectedSettingsCategory == "General";
     public bool IsSettingsAccounts => SelectedSettingsCategory == "Accounts";
@@ -505,10 +531,10 @@ public partial class MainWindowViewModel : ObservableObject
         try
         {
             var batch = new List<RepositoryEntryViewModel>();
-            await foreach (var located in _repositoryLocator.ScanLocalAsync(ct).ConfigureAwait(false))
+            await foreach (var located in _repositoryLocator.ScanCatalogAsync(CollectCatalogSeeds(), ct).ConfigureAwait(false))
             {
                 ct.ThrowIfCancellationRequested();
-                batch.Add(CreateRepositoryEntry(located.LocalPath, located.CurrentBranch));
+                batch.Add(CreateRepositoryEntry(located));
 
                 if (batch.Count < 8)
                     continue;
@@ -562,14 +588,42 @@ public partial class MainWindowViewModel : ObservableObject
         RebuildFilteredRepositories();
     }
 
-    private RepositoryEntryViewModel CreateRepositoryEntry(string path, string? branch)
+    private IEnumerable<string> CollectCatalogSeeds()
     {
+        var seeds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in RecentRepositories)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+                seeds.Add(path);
+        }
+
+        foreach (var path in _settings.Current.PinnedRepositories)
+        {
+            if (!string.IsNullOrWhiteSpace(path))
+                seeds.Add(path);
+        }
+
+        if (!string.IsNullOrWhiteSpace(WorkingCopy.RepositoryPath))
+            seeds.Add(WorkingCopy.RepositoryPath);
+
+        return seeds;
+    }
+
+    private RepositoryEntryViewModel CreateRepositoryEntry(LocatedRepository located)
+    {
+        var path = located.LocalPath;
         var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var name = Path.GetFileName(trimmed);
         if (string.IsNullOrWhiteSpace(name))
             name = trimmed;
 
-        var entry = new RepositoryEntryViewModel(path, name, FormatRepositoryPathLabel(path), branch);
+        var entry = new RepositoryEntryViewModel(
+            path,
+            name,
+            FormatRepositoryPathLabel(path),
+            located.CurrentBranch,
+            located.IsLinkedWorktree,
+            located.MainWorktreePath);
         entry.IsPinned = IsPathPinned(path, _settings.Current.PinnedRepositories);
         return entry;
     }
@@ -606,6 +660,8 @@ public partial class MainWindowViewModel : ObservableObject
                      .Where(e => e.MatchesFilter(filter))
                      .OrderByDescending(e => e.IsExactNameMatch(filter))
                      .ThenBy(e => pinIndex.GetValueOrDefault(NormalizeRepoPath(e.Path), int.MaxValue))
+                     .ThenBy(e => e.SortGroupKey, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(e => e.SortOrderInGroup)
                      .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase))
             FilteredRepositories.Add(entry);
 
@@ -667,6 +723,15 @@ public partial class MainWindowViewModel : ObservableObject
 
     private static string NormalizeRepoPath(string path) =>
         path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private static bool IsLinkedWorktreePath(string repositoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryPath))
+            return false;
+
+        var dotGit = Path.Combine(repositoryPath, ".git");
+        return File.Exists(dotGit);
+    }
 
     private void UpdateScannedCurrentFlags()
     {

@@ -27,6 +27,17 @@ public sealed record BranchInfo(
     string TipOid,
     DateTimeOffset TipCommitterDate);
 
+/// <summary>One row from <c>git worktree list --porcelain</c>.</summary>
+public sealed record WorktreeEntry(
+    string Path,
+    string HeadSha,
+    string? BranchName,
+    bool IsMain,
+    bool IsDetached,
+    bool IsBare,
+    bool IsLocked,
+    bool IsPrunable);
+
 /// <summary>A local Git tag from <c>for-each-ref refs/tags</c>.</summary>
 public sealed record TagInfo(
     string Name,

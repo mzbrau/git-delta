@@ -281,9 +281,14 @@ public sealed class MainWindowViewModelTests
     private void StubScannedRepositories(params string[] paths)
     {
         _appSettings.DevelopmentFolder = "/dev";
-        _repositoryLocator.ScanLocalAsync(Arg.Any<CancellationToken>())
-            .Returns(ToAsync(paths.Select(p =>
-                new LocatedRepository(p, null, null, Path.GetFileName(p), null))));
+        _repositoryLocator.ScanCatalogAsync(Arg.Any<IEnumerable<string>?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var seeds = call.ArgAt<IEnumerable<string>?>(0);
+                _ = seeds;
+                return ToAsync(paths.Select(p =>
+                    new LocatedRepository(p, null, null, Path.GetFileName(p), null)));
+            });
     }
 
     private static async IAsyncEnumerable<LocatedRepository> ToAsync(IEnumerable<LocatedRepository> items)

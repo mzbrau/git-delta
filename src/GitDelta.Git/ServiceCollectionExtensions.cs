@@ -47,6 +47,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IGitRebaseService, GitRebaseService>();
         services.AddSingleton<IGitStashService, GitStashService>();
         services.AddSingleton<IGitHistoryService, GitHistoryService>();
+        services.AddSingleton<IGitWorktreeService, GitWorktreeService>();
         services.AddSingleton<GitRepositoryWatcher>();
         services.AddSingleton<IRepositoryWatcher>(sp => sp.GetRequiredService<GitRepositoryWatcher>());
         services.AddSingleton<IFsmonitorService, FsmonitorService>();
