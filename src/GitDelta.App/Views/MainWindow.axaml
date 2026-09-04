@@ -361,19 +361,26 @@
                                             Padding="8,6"
                                             Tag="{Binding Path}"
                                             Click="OnRepositoryEntryClick"
-                                            ToolTip.Tip="{Binding Path}">
+                                            ToolTip.Tip="{Binding WorktreeTooltip}">
                                       <StackPanel Spacing="2">
-                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis" />
                                         <DockPanel LastChildFill="True">
                                           <TextBlock DockPanel.Dock="Right" Text="{Binding BranchDisplay}"
                                                      IsVisible="{Binding HasBranch}"
                                                      FontSize="11" Opacity="0.75" Margin="8,0,0,0"
                                                      FontFamily="{DynamicResource ForgeCodeFont}" />
-                                          <TextBlock Text="{Binding RelativePath}" FontSize="11" Opacity="0.7"
-                                                     TextTrimming="CharacterEllipsis"
-                                                     FontFamily="{DynamicResource ForgeCodeFont}" />
+                                          <icons:MaterialIcon DockPanel.Dock="Left"
+                                                              Kind="SourceBranch"
+                                                              Width="14" Height="14"
+                                                              Margin="0,0,6,0"
+                                                              VerticalAlignment="Center"
+                                                              Opacity="0.75"
+                                                              IsVisible="{Binding IsLinkedWorktree}" />
+                                          <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"
+                                                     TextTrimming="CharacterEllipsis" />
                                         </DockPanel>
+                                        <TextBlock Text="{Binding RelativePath}" FontSize="11" Opacity="0.7"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   FontFamily="{DynamicResource ForgeCodeFont}" />
                                       </StackPanel>
                                     </Button>
                                   </DockPanel>

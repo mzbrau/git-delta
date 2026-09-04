@@ -228,6 +228,20 @@ public interface IGitStashService
         CancellationToken ct = default);
 }
 
+public interface IGitWorktreeService
+{
+    /// <summary>
+    /// Resolves the shared <c>git-common-dir</c> for <paramref name="repositoryPath"/>, or null when
+    /// the path is not a Git repository.
+    /// </summary>
+    Task<string?> TryGetCommonDirectoryAsync(string repositoryPath, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists every worktree registered for the repository containing <paramref name="repositoryPath"/>.
+    /// </summary>
+    Task<IReadOnlyList<WorktreeEntry>> ListWorktreesAsync(string repositoryPath, CancellationToken ct = default);
+}
+
 public interface IGitHistoryService
 {
     /// <summary>

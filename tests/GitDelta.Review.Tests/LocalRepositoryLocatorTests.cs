@@ -118,5 +118,10 @@ public sealed class LocalRepositoryLocatorTests
 
         public IAsyncEnumerable<LocatedRepository> ScanLocalAsync(CancellationToken ct = default) =>
             ScanAsync(ct);
+
+        public IAsyncEnumerable<LocatedRepository> ScanCatalogAsync(
+            IEnumerable<string>? extraSeeds = null,
+            CancellationToken ct = default) =>
+            ScanAsync(ct);
     }
 }
