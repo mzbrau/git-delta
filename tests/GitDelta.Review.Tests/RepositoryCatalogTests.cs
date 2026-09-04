@@ -57,8 +57,15 @@ public sealed class RepositoryCatalogTests
                 // Best effort before deleting parent.
             }
 
-            if (Directory.Exists(parentDir))
-                Directory.Delete(parentDir, recursive: true);
+            try
+            {
+                if (Directory.Exists(parentDir))
+                    Directory.Delete(parentDir, recursive: true);
+            }
+            catch
+            {
+                // Best effort — Windows may deny delete of read-only .git objects.
+            }
         }
     }
 
@@ -95,8 +102,15 @@ public sealed class RepositoryCatalogTests
         }
         finally
         {
-            if (Directory.Exists(parentDir))
-                Directory.Delete(parentDir, recursive: true);
+            try
+            {
+                if (Directory.Exists(parentDir))
+                    Directory.Delete(parentDir, recursive: true);
+            }
+            catch
+            {
+                // Best effort — Windows may deny delete of read-only .git objects.
+            }
         }
     }
 

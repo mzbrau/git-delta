@@ -8,6 +8,9 @@ public sealed class RepositoryLocator(
     IGitRemoteService gitRemoteService,
     IGitWorktreeService gitWorktreeService) : IRepositoryLocator
 {
+    private static StringComparer CatalogPathComparer { get; } =
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
     public async IAsyncEnumerable<LocatedRepository> ScanAsync(
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -77,9 +80,9 @@ public sealed class RepositoryLocator(
         IEnumerable<string>? extraSeeds = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
-        var catalog = new Dictionary<string, LocatedRepository>(StringComparer.OrdinalIgnoreCase);
-        var seedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var processedCommonDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var catalog = new Dictionary<string, LocatedRepository>(CatalogPathComparer);
+        var seedPaths = new HashSet<string>(CatalogPathComparer);
+        var processedCommonDirs = new HashSet<string>(CatalogPathComparer);
 
         await foreach (var located in ScanLocalAsync(ct).ConfigureAwait(false))
         {
@@ -173,7 +176,7 @@ public sealed class RepositoryLocator(
             }
         }
 
-        foreach (var entry in catalog.Values.OrderBy(e => e.LocalPath, StringComparer.OrdinalIgnoreCase))
+        foreach (var entry in catalog.Values.OrderBy(e => e.LocalPath, CatalogPathComparer))
             yield return entry;
     }
 

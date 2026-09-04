@@ -21,13 +21,14 @@ public sealed class WorktreeListParserTests
 
         var entries = WorktreeListParser.Parse(input);
 
+        var sep = Path.DirectorySeparatorChar;
         Assert.That(entries, Has.Count.EqualTo(2));
-        Assert.That(entries[0].Path, Does.EndWith("/myapp"));
+        Assert.That(entries[0].Path, Does.EndWith($"{sep}myapp"));
         Assert.That(entries[0].IsMain, Is.True);
         Assert.That(entries[0].BranchName, Is.EqualTo("main"));
         Assert.That(entries[1].IsMain, Is.False);
         Assert.That(entries[1].BranchName, Is.EqualTo("feature/auth"));
-        Assert.That(entries[1].Path, Does.EndWith("/myapp-copilot-auth"));
+        Assert.That(entries[1].Path, Does.EndWith($"{sep}myapp-copilot-auth"));
     }
 
     [Test]
@@ -48,8 +49,8 @@ public sealed class WorktreeListParserTests
             worktree /tmp/old
             HEAD ccc3333333333333333333333333333333333333333
             branch refs/heads/old
-            locked
-            prunable
+            locked reason: manual
+            prunable gitdir file points to non-existent location
 
             """;
 

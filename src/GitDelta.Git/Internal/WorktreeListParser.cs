@@ -62,7 +62,7 @@ internal static class WorktreeListParser
                 bare = true;
             else if (trimmed == "locked" || trimmed.StartsWith("locked ", StringComparison.Ordinal))
                 locked = true;
-            else if (trimmed == "prunable")
+            else if (trimmed == "prunable" || trimmed.StartsWith("prunable ", StringComparison.Ordinal))
                 prunable = true;
         }
 

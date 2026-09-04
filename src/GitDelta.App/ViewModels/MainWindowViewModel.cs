@@ -27,6 +27,7 @@ public partial class MainWindowViewModel : ObservableObject
     private CancellationTokenSource? _catalogCts;
     private string? _requestedOpenPath;
     private string? _catalogRoot;
+    private string? _catalogSeedKey;
     private bool _catalogLoaded;
     private double _expandedNavigatorWidth;
 
@@ -261,7 +262,7 @@ public partial class MainWindowViewModel : ObservableObject
             var branch = WorkingCopy.CurrentBranch;
             var entry = ScannedRepositories.FirstOrDefault(e =>
                 string.Equals(e.Path, path, StringComparison.OrdinalIgnoreCase));
-            var linked = entry?.IsLinkedWorktree ?? IsLinkedWorktreePath(path);
+            var linked = entry?.IsLinkedWorktree == true;
 
             if (linked)
             {
@@ -499,15 +500,18 @@ public partial class MainWindowViewModel : ObservableObject
     private async Task RefreshRepositoryCatalogCoreAsync(bool force)
     {
         var root = _settings.Current.DevelopmentFolder?.Trim();
+        var seedKey = BuildCatalogSeedKey(CollectCatalogSeeds());
         if (!force
             && _catalogLoaded
-            && string.Equals(_catalogRoot, root, StringComparison.OrdinalIgnoreCase))
+            && string.Equals(_catalogRoot, root, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_catalogSeedKey, seedKey, StringComparison.Ordinal))
         {
             return;
         }
 
         if (!force && IsScanningRepositories
-            && string.Equals(_catalogRoot, root, StringComparison.OrdinalIgnoreCase))
+            && string.Equals(_catalogRoot, root, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(_catalogSeedKey, seedKey, StringComparison.Ordinal))
         {
             return;
         }
@@ -520,6 +524,7 @@ public partial class MainWindowViewModel : ObservableObject
 
         _catalogLoaded = false;
         _catalogRoot = root;
+        _catalogSeedKey = seedKey;
 
         await InvokeOnUiAsync(() =>
         {
@@ -568,6 +573,7 @@ public partial class MainWindowViewModel : ObservableObject
                 {
                     IsScanningRepositories = false;
                     OnPropertyChanged(nameof(ShowRepositoryCatalogEmpty));
+                    NotifyRepositorySwitcherDisplayChanged();
                 }).ConfigureAwait(false);
             }
         }
@@ -608,6 +614,13 @@ public partial class MainWindowViewModel : ObservableObject
 
         return seeds;
     }
+
+    private static string BuildCatalogSeedKey(IEnumerable<string> seeds) =>
+        string.Join('\n', seeds
+            .Select(NormalizeRepoPath)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase));
 
     private RepositoryEntryViewModel CreateRepositoryEntry(LocatedRepository located)
     {
@@ -723,15 +736,6 @@ public partial class MainWindowViewModel : ObservableObject
 
     private static string NormalizeRepoPath(string path) =>
         path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-    private static bool IsLinkedWorktreePath(string repositoryPath)
-    {
-        if (string.IsNullOrWhiteSpace(repositoryPath))
-            return false;
-
-        var dotGit = Path.Combine(repositoryPath, ".git");
-        return File.Exists(dotGit);
-    }
 
     private void UpdateScannedCurrentFlags()
     {
@@ -989,6 +993,7 @@ public partial class MainWindowViewModel : ObservableObject
         // Invalidate so the next flyout open / EnsureRepositoryCatalogAsync rescans.
         _catalogLoaded = false;
         _catalogRoot = null;
+        _catalogSeedKey = null;
         NotifyRepositorySwitcherDisplayChanged();
     }
 

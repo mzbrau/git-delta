@@ -278,6 +278,44 @@ public sealed class MainWindowViewModelTests
         await _settings.Received().SaveAsync(Arg.Any<CancellationToken>());
     }
 
+    [Test]
+    public async Task EnsureRepositoryCatalogAsync_Rescans_When_Recent_Seed_Changes()
+    {
+        var callCount = 0;
+        _appSettings.DevelopmentFolder = "/dev";
+        _repositoryLocator.ScanCatalogAsync(Arg.Any<IEnumerable<string>?>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                callCount++;
+                var seeds = call.ArgAt<IEnumerable<string>?>(0)?.ToArray() ?? [];
+                var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "/dev/alpha" };
+                foreach (var seed in seeds)
+                {
+                    if (!string.IsNullOrWhiteSpace(seed))
+                        paths.Add(seed);
+                }
+
+                return ToAsync(paths.OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                    .Select(p => new LocatedRepository(p, null, null, Path.GetFileName(p), null)));
+            });
+
+        var vm = CreateVm();
+        await vm.EnsureRepositoryCatalogAsync();
+        Assert.That(callCount, Is.EqualTo(1));
+        Assert.That(vm.ScannedRepositories.Select(e => e.Path).ToArray(), Is.EqualTo(new[] { "/dev/alpha" }));
+
+        const string orphan = "/outside/orphan";
+        vm.RecentRepositories.Insert(0, orphan);
+        _appSettings.RecentRepositories.Insert(0, orphan);
+
+        await vm.EnsureRepositoryCatalogAsync();
+        Assert.That(callCount, Is.EqualTo(2));
+        Assert.That(vm.ScannedRepositories.Any(e => e.Path == orphan), Is.True);
+
+        await vm.EnsureRepositoryCatalogAsync();
+        Assert.That(callCount, Is.EqualTo(2));
+    }
+
     private void StubScannedRepositories(params string[] paths)
     {
         _appSettings.DevelopmentFolder = "/dev";
